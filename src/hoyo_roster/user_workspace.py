@@ -226,6 +226,17 @@ class LocalSnapshotStore:
     def scope_digest(self) -> str:
         return hashlib.sha256(f"{self.game}:{self._uid}".encode()).hexdigest()
 
+    @property
+    def candidate_region(self) -> str | None:
+        """Use the validated current region when present, without inferring one for a baseline."""
+        try:
+            current = self.current()
+        except WorkspaceError:
+            return None
+        if current is None:
+            return None
+        return load_metadata(current / "data" / self.game / "profile.json")["account"]["server"]
+
     def _generation(self, name: object) -> Path:
         if not isinstance(name, str):
             raise WorkspaceError("INVALID_GENERATION")

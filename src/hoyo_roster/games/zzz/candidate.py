@@ -18,6 +18,7 @@ from hoyo_roster.storage.candidate import (
     CandidateEvidence,
     CandidateInspection,
     CandidatePolicy,
+    CandidateScope,
     CandidateWorkspace,
     create_candidate_workspace,
 )
@@ -57,7 +58,7 @@ ZZZ_RELATIVE = Path("data/zenless-zone-zero")
 CANDIDATE_BASE_ROOT = Path("~/.local/share/hoyo-roster/candidates/zzz-character-state-sync")
 CANDIDATE_ROOT_MODE = 0o700
 CANDIDATE_STATE_FILE = "candidate-state.json"
-CANDIDATE_STATE_VERSION = 2
+CANDIDATE_STATE_VERSION = 3
 MUTATION_OWNER = "zzz-character-state-sync"
 CANDIDATE_OWNER = MUTATION_OWNER
 CANDIDATE_SCHEMA_PATHS = (
@@ -75,9 +76,10 @@ CONTRACT_PATHS = (
 )
 
 
-def _policy() -> CandidatePolicy:
+def _policy(scope: CandidateScope | None = None) -> CandidatePolicy:
     return CandidatePolicy(
         owner=CANDIDATE_OWNER,
+        scope=scope,
         candidate_base=CANDIDATE_BASE_ROOT,
         target_relative=ZZZ_RELATIVE,
         contract_paths=CONTRACT_PATHS,
@@ -170,8 +172,13 @@ def _inspection(path: Path) -> CandidateInspection:
 def inspect_candidates(
     *,
     candidate_base: Path | None = None,
+    uid: str | None = None,
+    region: str | None = None,
 ) -> tuple[CandidateInspection, ...]:
-    return _inspect_candidates(_policy(), candidate_base=candidate_base)
+    return _inspect_candidates(
+        _policy(CandidateScope.identity("zenless-zone-zero", uid, region) if uid else None),
+        candidate_base=candidate_base,
+    )
 
 
 def assert_no_stale_candidates(*, candidate_base: Path | None = None) -> None:
@@ -182,13 +189,20 @@ def cleanup_candidate(
     run_id: str,
     *,
     candidate_base: Path | None = None,
+    uid: str | None = None,
+    region: str | None = None,
 ) -> None:
-    _cleanup_candidate(_policy(), run_id, candidate_base=candidate_base)
+    _cleanup_candidate(
+        _policy(CandidateScope.identity("zenless-zone-zero", uid, region) if uid else None),
+        run_id,
+        candidate_base=candidate_base,
+    )
 
 
 @dataclass(slots=True)
 class Candidate:
     root: Path
+    scope: CandidateScope
     base_root: Path | None = None
 
     @property
@@ -202,7 +216,8 @@ class Candidate:
     def cleanup(self) -> None:
         if not os.path.lexists(self.root):
             return
-        cleanup_candidate(
+        _cleanup_candidate(
+            _policy(self.scope),
             self.run_id,
             candidate_base=self.base_root or self.root.parent,
         )
@@ -239,10 +254,14 @@ def create_candidate(
     snapshot: NormalizedSnapshot,
     *,
     candidate_base: Path | None = None,
+    uid: str | None = None,
     fault_injector: Callable[[str], None] | None = None,
 ) -> Candidate:
     """Create and validate the game-scoped ZZZ candidate closure."""
 
+    scope = CandidateScope.profile(snapshot.profile)
+    if uid is not None and not CandidateScope.identity(scope.game, uid).accepts(scope):
+        raise CandidateValidationError("CANDIDATE_SCOPE_MISMATCH")
     root = repo_root.resolve()
     run_repository_validator(root)
     _check_nonshrinking_roster(root, snapshot)
@@ -281,7 +300,7 @@ def create_candidate(
         )
 
     workspace = create_candidate_workspace(
-        _policy(),
+        _policy(scope),
         root,
         populate=populate,
         validate=validate,
@@ -289,4 +308,4 @@ def create_candidate(
         candidate_base=candidate_base,
         fault_injector=fault_injector,
     )
-    return Candidate(workspace.root, workspace.base)
+    return Candidate(workspace.root, workspace.policy.scope, workspace.base)

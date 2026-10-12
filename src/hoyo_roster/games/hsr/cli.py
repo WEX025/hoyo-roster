@@ -588,6 +588,7 @@ async def run_sync(
                         create_candidate,
                         repo_root,
                         snapshot,
+                        uid=args.uid,
                         on_cancel=Candidate.cleanup,
                         **(
                             {"candidate_base": snapshot_store.candidate_base}

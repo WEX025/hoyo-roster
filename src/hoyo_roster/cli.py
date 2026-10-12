@@ -5,6 +5,8 @@ import argparse
 import asyncio
 import importlib
 import math
+import re
+import uuid
 from pathlib import Path
 from .config import Settings
 from .errors import OperationError, LoginTimeout
@@ -19,14 +21,33 @@ from .user_workspace import (
 )
 
 MODULES = {game: f"hoyo_roster.games.{game}.cli" for game in GAMES}
-OPERATIONS = ("init", "sync", "login", "inspect", "recover", "cleanup-candidate", "logout")
+OPERATIONS = (
+    "init",
+    "sync",
+    "login",
+    "inspect",
+    "recover",
+    "cleanup-generation",
+    "cleanup-candidate",
+    "logout",
+)
 CONTRACT_ROOT = Path(__file__).resolve().parent / "contracts"
 
 
 class PrivateArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
+        # argparse's message can contain UID/token values. Only expose a known option name.
+        option = re.match(r"argument (--[a-z-]+):", message)
+        known = {action.option_strings[0] for action in self._actions if action.option_strings}
+        parameter = option.group(1) if option and option.group(1) in known else "UNKNOWN"
+        hint = (
+            "操作可选：" + ", ".join(OPERATIONS)
+            if parameter == "--operation"
+            else "检查 --help 中的参数。"
+        )
         self.exit(
-            2, "LOCAL_WORKSPACE=FAIL\nERROR_CODE=ARGUMENTS_INVALID\n提示=检查 --help 中的参数。\n"
+            2,
+            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE=ARGUMENTS_INVALID\nPARAMETER={parameter}\n提示={hint}\n",
         )
 
 
@@ -45,7 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="reuse an existing exact session; no interactive login",
     )
     parser.add_argument("--run-id", help="owned candidate UUID for explicit cleanup")
-    parser.add_argument("--generation", help="verified generation UUID for pointer recovery")
+    parser.add_argument(
+        "--generation", help="verified generation UUID for recovery or non-current cleanup"
+    )
     parser.add_argument("--version", action="version", version="0.1.0rc1")
     return parser
 
@@ -61,6 +84,23 @@ def select_configuration(args):
         raise WorkspaceError("UNEXPECTED_CANDIDATE_RUN_ID")
     if args.generation is not None and args.operation not in {"recover", "cleanup-generation"}:
         raise WorkspaceError("UNEXPECTED_GENERATION")
+    for operation, name, missing, invalid in (
+        ("cleanup-candidate", "run_id", "CANDIDATE_RUN_ID_REQUIRED", "INVALID_CANDIDATE_RUN_ID"),
+        ("cleanup-generation", "generation", "GENERATION_REQUIRED", "INVALID_GENERATION"),
+        ("recover", "generation", None, "INVALID_GENERATION"),
+    ):
+        if args.operation != operation:
+            continue
+        value = getattr(args, name)
+        if value is None:
+            if missing:
+                raise WorkspaceError(missing)
+            continue
+        try:
+            if str(uuid.UUID(value)) != value:
+                raise ValueError
+        except ValueError:
+            raise WorkspaceError(invalid) from None
     return (
         direct_configuration(args.game, args.uid, storage_root=args.storage_root),
         args.game,
@@ -82,10 +122,18 @@ async def run(args) -> int:
                     f"GENERATION={item['generation']}\nGENERATION_STATUS={item['status']}\nGENERATION_CURRENT={'YES' if item['current'] else 'NO'}"
                 )
             candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
-            for item in candidate.inspect_candidates(candidate_base=store.candidate_base):
+            for item in candidate.inspect_candidates(
+                candidate_base=store.candidate_base,
+                uid=config.uid(game),
+                region=store.candidate_region,
+            ):
                 print(
                     f"CANDIDATE_RUN_ID={item.run_id}\nCANDIDATE_STATUS={item.status}\nCANDIDATE_CLEANUP_ALLOWED={'YES' if item.cleanup_allowed else 'NO'}"
                 )
+                if not item.cleanup_allowed:
+                    print(
+                        "提示=候选归属或内容未通过核验；保留并私下备份，确认来源后人工处置，不按 UUID 删除。"
+                    )
             return 0
         if operation == "recover":
             store.recover(args.generation)
@@ -102,7 +150,20 @@ async def run(args) -> int:
             if args.run_id is None:
                 raise WorkspaceError("CANDIDATE_RUN_ID_REQUIRED")
             candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
-            candidate.cleanup_candidate(args.run_id, candidate_base=store.candidate_base)
+            try:
+                candidate.cleanup_candidate(
+                    args.run_id,
+                    candidate_base=store.candidate_base,
+                    uid=config.uid(game),
+                    region=store.candidate_region,
+                )
+            except candidate.CandidateCleanupError as error:
+                code = str(error)
+                raise WorkspaceError(
+                    code
+                    if code in {"CANDIDATE_SCOPE_MISMATCH", "CANDIDATE_OWNERSHIP_UNPROVEN"}
+                    else "CANDIDATE_CLEANUP_FAILED"
+                ) from None
             print("LOCAL_CANDIDATE=CLEANED")
             return 0
         if operation == "logout":
@@ -156,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run(args))
     except WorkspaceError as error:
         print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示=执行 --operation inspect；需要时按 local-use 文档恢复。"
+            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示=执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
         )
         return 1
     except OperationError as error:
