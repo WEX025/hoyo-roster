@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hoyo-roster"
+version = "0.1.0rc1"
+description = "Private local collection of official Genshin, ZZZ and HSR account state"
+readme = "README.md"
+requires-python = "==3.12.*"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "third_party/*"]
+authors = [{name = "WEX025"}]
+dependencies = ["jsonschema==4.25.0", "playwright==1.54.0", "referencing==0.36.2", "rfc3339-validator==0.1.4", "simplejson==3.20.1"]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.1", "ruff==0.12.7", "build==1.6.1"]
+
+[project.scripts]
+hoyo-roster = "hoyo_roster.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hoyo_roster"]
+
+[tool.hatch.build.targets.sdist]
+include = [".gitattributes", ".gitignore", "src/", "tests/", "tools/", "docs/", "third_party/", ".agents/", "*.md", "LICENSE", "pyproject.toml"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100

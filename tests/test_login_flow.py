@@ -8,17 +8,17 @@ import json
 
 import pytest
 
-from hoyo_browser_session.config import Settings
-from hoyo_browser_session.errors import (
+from hoyo_roster.config import Settings
+from hoyo_roster.errors import (
     AuthenticationRequired,
     LoginBindingFailed,
     LoginTimeout,
     WrongAccount,
 )
-from hoyo_browser_session.login import coordinate_login
-from hoyo_browser_session.models import LoginProbeStatus
-from hoyo_browser_session.repository_mutation.common import tree_digest
-from hoyo_browser_session.user_workspace import GAMES, empty_workspace, write_json
+from hoyo_roster.login import coordinate_login
+from hoyo_roster.models import LoginProbeStatus
+from hoyo_roster.storage.common import tree_digest
+from hoyo_roster.user_workspace import GAMES, empty_workspace, write_json
 
 UID_A = "900000001"
 UID_B = "900000002"
@@ -86,6 +86,20 @@ class Page:
         self.routes = []
         self.interrupt = interrupt
 
+    @property
+    def frames(self):
+        return (self,)
+
+    def get_by_text(self, pattern):
+        return self
+
+    @property
+    def first(self):
+        return self
+
+    async def is_visible(self):
+        return True
+
     async def goto(self, url, **kwargs):
         self.urls.append(url)
         if self.interrupt and url != "about:blank":
@@ -124,6 +138,7 @@ class NetworkGate:
     """No real request/sleep; ephemeral Settings for HSR's genuine identity store."""
 
     def __init__(self, root):
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.settings = Settings(external_root=root, test_mode=True)
         self.count = 0
 
@@ -136,14 +151,12 @@ def provider_for(game, root, payloads, *, uid=UID_A, headed=True, interrupt=Fals
     page = Page(interrupt=interrupt)
     gate = NetworkGate(root.parent / f"{game}-network-state")
     if game == "genshin":
-        from genshin_character_state_sync.browser import OfficialCollector
-        from genshin_character_state_sync.login_provider import (
+        from hoyo_roster.games.genshin.browser import OfficialCollector
+        from hoyo_roster.games.genshin.login_provider import (
             create_routine_login_provider,
         )
 
-        collector = OfficialCollector(
-            context, page, request_interval=2, request_gate=gate
-        )
+        collector = OfficialCollector(context, page, request_interval=2, request_gate=gate)
         provider = create_routine_login_provider(
             context=context,
             page=page,
@@ -154,15 +167,13 @@ def provider_for(game, root, payloads, *, uid=UID_A, headed=True, interrupt=Fals
             request_interval=2,
         )
     elif game == "zzz":
-        from zzz_character_state_sync.endpoints import EndpointClient
-        from zzz_character_state_sync.login_provider import (
+        from hoyo_roster.games.zzz.endpoints import EndpointClient
+        from hoyo_roster.games.zzz.login_provider import (
             create_routine_login_provider,
         )
-        from zzz_character_state_sync.transport import BrowserTransport
+        from hoyo_roster.games.zzz.transport import BrowserTransport
 
-        endpoints = EndpointClient(
-            BrowserTransport(context, request_interval=2, request_gate=gate)
-        )
+        endpoints = EndpointClient(BrowserTransport(context, request_interval=2, request_gate=gate))
         provider = create_routine_login_provider(
             context=context,
             page=page,
@@ -173,16 +184,14 @@ def provider_for(game, root, payloads, *, uid=UID_A, headed=True, interrupt=Fals
             request_interval=2,
         )
     else:
-        from hsr_character_state_sync.browser import BrowserSession, OfficialCollector
-        from hsr_character_state_sync.login_provider import (
+        from hoyo_roster.games.hsr.browser import BrowserSession, OfficialCollector
+        from hoyo_roster.games.hsr.login_provider import (
             create_routine_login_provider,
         )
 
         session = BrowserSession(None, context, page, headed, request_gate=gate)
         collector = OfficialCollector(context, request_interval=2, request_gate=gate)
-        provider = create_routine_login_provider(
-            collector=collector, session=session, uid=uid
-        )
+        provider = create_routine_login_provider(collector=collector, session=session, uid=uid)
     return provider, context, page, gate
 
 
@@ -210,9 +219,7 @@ def test_empty_baseline_explicit_uid_uses_real_binding_and_preserves_profile(
     root = tmp_path / "workspace"
     empty_workspace(source, root)
     before = tree_digest(root / "data")
-    provider, context, page, gate = provider_for(
-        game, root, [binding_payload(game, uid)], uid=uid
-    )
+    provider, context, page, gate = provider_for(game, root, [binding_payload(game, uid)], uid=uid)
     result = asyncio.run(coordinate(root, provider, context, page, gate))
     assert result.complete_coverage_success
     assert context.request.count == 1
@@ -232,9 +239,7 @@ def test_expired_session_waits_once_then_requires_exact_uid(tmp_path, source, ga
     provider, context, page, gate = provider_for(game, root, sequence)
     waiting = []
     result = asyncio.run(
-        coordinate(
-            root, provider, context, page, gate, waiting=lambda: waiting.append(1)
-        )
+        coordinate(root, provider, context, page, gate, waiting=lambda: waiting.append(1))
     )
     assert result.complete_coverage_success and result.interaction_required
     assert waiting == [1] and context.request.count == 3
@@ -256,23 +261,17 @@ def test_headless_wrong_binding_never_passes(tmp_path, source, game, wrong):
         region="unsupported_region" if wrong == "region" else None,
     )
     provider, context, page, gate = provider_for(game, root, [payload], headed=False)
-    expected_error = (
-        LoginBindingFailed if game == "genshin" and wrong == "region" else WrongAccount
-    )
+    expected_error = LoginBindingFailed if game == "genshin" and wrong == "region" else WrongAccount
     with pytest.raises(expected_error):
         asyncio.run(coordinate(root, provider, context, page, gate, headed=False))
     assert context.request.count == 1 and not page.urls
 
 
 @pytest.mark.parametrize("game", GAMES)
-def test_first_headless_login_requires_user_and_timeout_is_explicit(
-    tmp_path, source, game
-):
+def test_first_headless_login_requires_user_and_timeout_is_explicit(tmp_path, source, game):
     root = tmp_path / "workspace"
     empty_workspace(source, root)
-    provider, context, page, gate = provider_for(
-        game, root, [binding_payload(game, retcode=10001)]
-    )
+    provider, context, page, gate = provider_for(game, root, [binding_payload(game, retcode=10001)])
     with pytest.raises(AuthenticationRequired):
         asyncio.run(coordinate(root, provider, context, page, gate, headed=False))
     with pytest.raises(LoginTimeout):
@@ -319,7 +318,7 @@ def test_genshin_bootstrap_accepts_only_official_supported_region_and_pins_it(
 
 
 def test_genshin_existing_identity_conflict_rejected_before_network(tmp_path, source):
-    from genshin_character_state_sync.errors import ConfigurationError
+    from hoyo_roster.games.genshin.errors import ConfigurationError
 
     root = tmp_path / "workspace"
     empty_workspace(source, root)
@@ -336,12 +335,10 @@ def test_genshin_existing_identity_conflict_rejected_before_network(tmp_path, so
     assert context.request.count == 0
 
 
-def test_genshin_no_explicit_identity_fails_clearly_instead_of_assertion(
-    tmp_path, source
-):
-    from genshin_character_state_sync.browser import BrowserSession, OfficialCollector
-    from genshin_character_state_sync.cli import _binding_with_login
-    from genshin_character_state_sync.errors import AuthenticationError
+def test_genshin_no_explicit_identity_fails_clearly_instead_of_assertion(tmp_path, source):
+    from hoyo_roster.games.genshin.browser import BrowserSession, OfficialCollector
+    from hoyo_roster.games.genshin.cli import _binding_with_login
+    from hoyo_roster.games.genshin.errors import AuthenticationError
 
     root = tmp_path / "workspace"
     empty_workspace(source, root)

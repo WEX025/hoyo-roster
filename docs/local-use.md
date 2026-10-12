@@ -1,98 +1,75 @@
-# 每个人维护自己的账号
+# 本机使用
 
-新入口只采集并保存到本机，不联网发布，不执行 Git fetch/commit/push。代码可来自干净源码目录、自己的仓库或私有原仓库；不要求朋友有原作者仓库的权限。无需在线多租户服务。
+## 首次使用
 
-## 安装与首次使用
-
-在拿到经检查的源码目录后，以 Python 3.12 安装现有四个包：
+按 README 安装 Python 3.12、项目和 Playwright Chromium。在源码目录之外保存个人结果；可用 `--storage-root /absolute/private/path` 选择新目录。程序逐层把**本轮新建目录**设为 0700，不修改已存在的共享父目录。已存在的 storage-root 必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`；请选择新的私有子目录。普通结果和程序元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e ./skills/hoyo-browser-session -e ./skills/genshin-character-state-sync -e ./skills/zzz-character-state-sync -e ./skills/hsr-character-state-sync
-.venv/bin/python -m playwright install chromium
+hoyo-roster --game genshin --uid YOUR_UID --operation init
+hoyo-roster --game genshin --uid YOUR_UID --operation login
+hoyo-roster --game genshin --uid YOUR_UID
 ```
 
-正常使用无需配置文件。把 `YOUR_UID` 替换成你自己的该游戏 UID：
+`init` 只建立验证后的空工作区，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
+
+交互终端在会话失效时选择 1 二维码、2 手机号、3 取消。本人在前台官方页面打开登录面板并选择对应入口，扫码/手机号/验证码/确认均由本人完成，终端不接收认证信息。程序只检查入口是否可见，30 秒内未观察到入口报 `LOGIN_METHOD_UNAVAILABLE`；不自动改选另一方式。具体游戏的实际二维码/手机号页面尚待真实浏览器验收。
+
+非交互进程使用 `--non-interactive --login-method qr|phone|cancel`；缺失显式选择且需要登录时停止。`--login-timeout 900` 是默认 Binding 等待上限，范围 0 < 秒数 ≤ 3600；所选入口检测最多 30 秒。`--headless` 复用已验证会话，需交互时停止。Ctrl-C 取消会释放锁并关闭本次浏览器，正在进行的本机写入会先结束再释放锁。
+
+## 升级
+
+关闭本工具，更新或重新安装代码，然后运行原命令。程序从发行包携带的 contracts 生成新代际，复制本身份已保存数据，做完整验证，再替换 current 指针。升级不复制其他身份的 Profile，不从旧私有仓库导入数据。当前版本不提供旧 Broker、Runtime、users.toml 或候选格式迁移。
+
+## 检查与恢复
 
 ```bash
-.venv/bin/python tools/run_local_hoyo.py --game genshin --uid YOUR_UID
-.venv/bin/python tools/run_local_hoyo.py --game zzz --uid YOUR_UID
-.venv/bin/python tools/run_local_hoyo.py --game hsr --uid YOUR_UID
+hoyo-roster --game genshin --uid YOUR_UID --operation inspect
+hoyo-roster --game genshin --uid YOUR_UID --operation recover
 ```
 
-默认 `sync`，有界面；自动选择由游戏与 UID 决定的私有目录，不会读取或写入 `users.toml`。
-第一次使用或会话过期时，由本人在打开的官方页面完成登录；命令等待精确 Binding 后继续。
-不读 stdin，不自动输入密码/验证码。UID 是身份选择而非访问授权。原神需要 `hk4e_cn`
-以及 Binding 确认的 `cn_gf01`/`cn_qd01`；绝区零和星铁使用其国服游戏 Binding 和 `prod_gf_cn`。
-隐私、登录、绑定、验证码和风控限制仍然有效，不借用其他浏览器身份、不绕过权限、不自动重试。
+inspect 在 current 缺失或失效时仍给出 `EMPTY` / `INVALID`、代际 UUID 与 `VERIFIED` / `UNVERIFIED`、是否有恢复日志和候选状态；不输出 UID、路径或 JSON 内容。UUID 是本机恢复标识，也应在公开反馈时脱敏。
 
-只想检查登录或初始化目录时，分别加 `--operation login`、`--operation init`。
-`init` 不启动浏览器。已验证登录可以加 `--headless`，但首次或失效登录必须有界面；
-headless 下身份不匹配或缺少登录会立即失败。登录仍有有效期，Cookie 持久化不保证永久登录。
+保存有三个边界：
 
-### 高级配置方式（兼容旧入口）
+- `NOT_COMMITTED`：新 current 未提交。之前的数据仍有效，已写恢复日志时必须 recover 后再运行。
+- `COMMITTED`：新 current 已替换且父目录 fsync 成功。旧代际或候选清理失败仅是清理待办，已经保存的数据有效；不会把保存说成失败。
+- `DURABILITY_UNKNOWN` / `COMMIT_DURABILITY_UNKNOWN`：替换已发生，父目录持久化失败。新旧代际和恢复日志都保留，不声称完成保存，停止采集并检查恢复。
+
+recover 在锁内核验身份范围、程序所有权、当前引用、文件权限、完整数据和验证器，然后确认指针持久化，清理日志指明的非当前代际。若清理仍失败，继续报告待办，不删除 current。日志或代际来源不明时停止，不能因为目录名是 UUID 就删除。
+
+current 失效时，先 inspect，选取本人确认且显示 VERIFIED 的代际：
 
 ```bash
-mkdir -p ~/.config/hoyo-game-data
-cp examples/users.example.toml ~/.config/hoyo-game-data/users.toml
-chmod 600 ~/.config/hoyo-game-data/users.toml
+hoyo-roster --game genshin --uid YOUR_UID --operation recover --generation VERIFIED_GENERATION_UUID
 ```
 
-只在首次建立高级配置时复制示例；以后不要覆盖自己的配置。填自己的 UID，删除不用的游戏。
-配置为当前用户所有的 `0600` 文件，`storage_root` 是仓库外绝对路径（可用 `~`）。
-高级模式仍使用 `.venv/bin/python tools/run_local_hoyo.py --user me sync genshin`；可加
-`--config /你的外部配置路径/users.toml`。不接受凭据配置键，不允许和 `--game/--uid/--operation`
-直接模式混用。冲突返回 `ARGUMENT_MODE_CONFLICT`，不会猜测哪个身份有效。
+显式恢复会重新完整验证目标并切换指针；`UNVERIFIED`、别的身份或任意 UUID 都被拒绝。未知/损坏残留保留给人工核验，不提供强制忽略验证的删除开关。
 
-原神输出仍为 `partial`；绝区零输出仍为 `complete`；星铁为 `partial`，来源无法证明完整角色池时允许仅个人档案。每次同步仍运行两次业务采集、一致性与生命周期检查、候选验证、完整安装验证。失败不替换旧角色池；无变化保留原 `synced_at`。
+清理中断而只剩部分旧代际时，recover 依据提交前已完整验证并持久化的文件清单，核对现存路径/哈希/所有权；出现新文件或改动就拒绝。恢复日志缺失时，先保留 current，用 inspect 选择完整 VERIFIED 的非当前代际，执行 `--operation cleanup-generation --generation VERIFIED_GENERATION_UUID`；当前代际和无法证明归属的残留不能删。
 
-## 输出与隔离
-
-直接模式默认存储目录为 `~/.local/share/hoyo-roster/`；可用 `--storage-root` 指定另一个外部绝对目录。高级模式保留配置中的存储根。目录布局：
-
-```text
-users/<作用域别名>/workspace.lock     # 同一作用域串行运行
-users/<作用域别名>/<game>/<身份摘要>/
-  browser-profile/                   # 该游戏/UID 的私有登录状态
-  current.json                       # 当前 generation 名称；不含 UID
-  <generation>/data/<完整游戏名称>/  # profile、roster、builds；ZZZ 另有 bangboos
-  candidates/                        # 临时候选；正常完成后删除
-```
-
-用 `current.json` 的 `generation` 字段定位当前数据。读取指针一次，再读取该目录中的数据；升级或同步会原子切换指针，旧临时代际随后清理，不保留历史角色池。需要稳定读取时应取得同一个 `workspace.lock`，不要在同步期间持续使用旧目录路径。直接模式的作用域别名由游戏和 UID 的摘要生成，不包含明文 UID。不同游戏/UID 的数据和浏览器 Profile 均独立；重复执行使用原目录。高级模式别名仍保留，数据路径不变，但 Profile 也改为每个游戏/UID 独立。旧的同别名共享 Profile 留在原处，不自动复制、删除或复用，首次升级后可能需要本人重新登录。
-
-目录为 `0700`，个人数据文件为 `0600`。消费者不要再默认读取代码 checkout 的 `data/`；本地入口的个人数据权威是当前外部 workspace 中的 `data/`。该 workspace 仅有当前游戏的个人资料，另外两游戏为生成的空基线。浏览器状态不属于正式数据或备份输出，不应上传、打包或提交。
-
-`CONFIG_MISSING`、`USER_NOT_CONFIGURED`、`GAME_NOT_CONFIGURED` 指示缺少配置；`INVALID_CONFIG` 或 `UNSAFE_CONFIG` 指示格式/权限错误。`USER_WORKSPACE_BUSY` 表示同一人另一个命令持锁。异常只输出固定代码，不输出账号、响应或凭据。进程中断如留下代际或候选残留，会失败关闭；保留残留和当前指针，先检查，不要手动猜测删除或启动重试：
+候选残留与代际恢复分别处理。只有程序能证明归属的候选才允许清理：
 
 ```bash
-.venv/bin/python tools/run_local_hoyo.py --game genshin --uid YOUR_UID --operation inspect
-.venv/bin/python tools/run_local_hoyo.py --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id UUID_FROM_INSPECT
+hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id OWNED_CANDIDATE_UUID
 ```
 
-清理命令只接受游戏 Candidate Authority 验证的本地用户候选，不清理旧入口的共享目录。代际残留只报告数量，没有自动删除接口；需要人工核实当前指针和残留验证结果后再恢复，不能仅凭目录名称猜测安全性。
+## 常见停止和建议
 
-## 升级和迁移
+| 状态 | 下一步 |
+|---|---|
+| `AUTHENTICATION_REQUIRED` / `LOGIN_TIMEOUT` | 本人检查官方登录状态，明确选择方式后重新运行 |
+| `LOGIN_CANCELLED` / `INTERRUPTED` | 本人准备好后重新运行 |
+| `LOGIN_METHOD_UNAVAILABLE` | 检查官方是否提供该入口，取消或显式选择另一方式 |
+| `WRONG_ACCOUNT` / Binding 错误 | 确认本人游戏、UID、区服；不要借其他会话绕过 |
+| `RATE_LIMITED` / `RISK_CONTROL` | 停止本轮，按官方提示处理；不自动重试或代解验证 |
+| 双次漂移 / schema / lifecycle 错误 | 旧 current 保留，等待来源稳定或提交脱敏问题反馈 |
+| `USER_WORKSPACE_BUSY` | 等另一同身份进程退出，不删锁文件来绕过 |
+| Profile 在用或 Singleton 残留 | 关闭确切本工具浏览器并检查；不删除正在使用的 Profile |
+| `RECOVERY_REQUIRED` / 持久化未知 / residue | inspect 后按上节恢复；不随意删 UUID 目录 |
+| Chromium 缺失 | 在相同虚拟环境运行 `python -m playwright install chromium` |
 
-更新源码或拉取自己的代码仓库后，用同一安装命令重新安装四包；不要重新复制示例覆盖自己的配置，也不要移动存储目录。新入口会在临时代际中更新公开 Schema/Validator，复制仅当前身份的现有数据，完整验证后切换，保留配置、角色池和登录 Profile。新 Schema 不兼容时保留旧当前代际并报错，不自动重置数据。直接模式也使用稳定游戏/UID 作用域，升级不更改这个路径。
+## 退出登录与卸载
 
-旧 `tools/run_hoyo_sync.py` 和 Broker `publish-main` 是保留的固定仓库/Runtime 兼容代码，
-不适用于这里的新用户。使用 `run_local_hoyo.py`；它不会向 GitHub 写入个人资料。
+浏览器关闭后执行 `--operation logout`：只删除该身份 Profile 和已验证身份指纹；角色数据保留。发现 Singleton 标识时停止，要求先检查是否仍有浏览器进程。退出登录不会退出其他应用的米游社会话。
 
-如你本人已有同格式的旧数据并希望迁移，可在直接模式加 `--operation migrate`，或在高级模式运行 `--user me migrate genshin`。命令仅读取当前
-checkout 中选定游戏，核对配置 UID，要求外部目标为 `not_synced`，完整验证后安装本地副本。
-不会删除源文件，不迁移登录状态，不覆盖已有本地采集结果；身份不匹配拒绝。新使用者从
-本仓库的空基线开始，不应导入他人的数据。
-
-原神首次期望身份由显式 UID 在内存建立，随后必须通过官方 Binding 核对 UID、游戏和支持区服。
-不会填入未经验证的 Profile。离线回归已覆盖真实 Provider/协调流程与合成双次采集；仍未完成真人登录实测。
-
-直接模式的 `GAME_REQUIRED`、`UID_REQUIRED`、`INVALID_UID` 表示参数缺失或格式错误。
-`ARGUMENTS_INVALID` 表示解析错误；`ARGUMENT_MODE_CONFLICT` 表示直接和配置模式混用。
-错误输出不回显 UID 或其他参数值。UID 必须是非零开头、最多 32 位的 ASCII 数字字符串。
-
-## 开发存储边界
-
-`hoyo_browser_session.user_workspace.SnapshotStore` 只要求 `candidate_base` 和 `commit(game_dir)`。三游戏 `run_sync(..., snapshot_store=store)` 继续拥有来源、双次一致性、生命周期和候选验证；存储负责锁、身份隔离和完整安装。提供的 `LocalSnapshotStore` 使用当前代际指针，禁止和 Apply/Browser Owner 发布权限组合。替换存储实现须保留同样的隔离、完整验证和原子安装约束。此次没有引入新依赖。
-
-通用角色/武器 ID、Schema 和代码可分享；“我拥有哪些角色、等级、装备、面板、UID、昵称”是私人角色池。当前仓库没有独立的公开角色百科，公共机制/倍率/环境资料仍应按原架构实时获取，不从私人 roster 推导公共角色表。
+卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。

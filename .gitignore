@@ -7,7 +7,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
-/.zzz-sync-transactions/
 storage_state*.json
 auth_state*.json
 Cookies
@@ -45,3 +44,5 @@ users/
 workspace.lock
 state.sqlite3*
 current.json
+
+/dist/

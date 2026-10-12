@@ -1,69 +1,15 @@
-# hoyo-roster agent instructions
+# hoyo-roster
 
-## Supported entrypoint
+Python 3.12 单包；唯一用户入口 `hoyo-roster` / `python -m hoyo_roster`。
+先读 README.md、docs/local-use.md；数据格式见 docs/data-format.md，隐私见 docs/privacy.md。
 
-Read `README.md` and `docs/local-use.md`. Use `tools/run_local_hoyo.py` with this checkout's
-Python 3.12 environment for independent local collection. The supported flow does not use
-`tools/run_hoyo_sync.py`, Broker publication, or `publish-main`; those are legacy compatibility
-paths and are not generalized publishers for a new repository.
+- 游戏实现位于 src/hoyo_roster/games/{genshin,zzz,hsr}；contracts 的 schema、空基线、验证器是格式权威。共享层只负责登录协调、锁、节流、候选和存储。
+- 明确的本人游戏/UID 请求只授权该身份本机采集。使用用户提供的 UID，不推断他人身份；必须精确验证官方 game/UID/region Binding。不同身份的 Profile、锁和节流保持独立。
+- 官方页面登录由本人选择二维码/手机号/取消并操作。会话有效时复用；凭据、手机号、验证码、Cookie/token、设备头、raw response、HAR/trace/截图不得收集、打印或提交。
+- 遇身份冲突、认证失效、风险控制、限流、schema/来源漂移应停止；不绕过验证、不自动第三次采集。保持两次业务及来源覆盖比较、Decimal、lifecycle、名单/Build bijection 和完整安装验证。
+- 原神 partial；绝区零仅满足闭合证据后 complete；星铁 partial，owned roster 不可证实时可能只更新 Profile并保留旧角色值。不得为了成功放宽来源/完整度。
+- 个人数据保持在源码之外，正常同步不提交/上传。存储提交前失败保留旧 current；replace 后持久化未知保留所有可能引用代际；已提交的清理失败报告待办。恢复核验所有权、身份、当前引用和验证，不能按 UUID 盲删。
+- 开发使用合成身份，只替浏览器/网络。运行 `python -m pytest -q`、`python -m ruff check src tests tools --select F`、`python -m ruff format --check src tests tools`、`python tools/validate_repository.py --require-empty-baseline` 与 `--self-test`。打包修改另跑 `python -m build` 和干净安装资源检查。
+- 报告固定 SHA、实际命令及 PASS/FAIL/NOT_RUN；离线成功不等于真实账号验收。公开 PR/Issue 不含个人路径或数据。未经授权不改可见性、部署、合并、CI/Actions或私有数据仓库。
 
-A user request to collect their own game state authorizes only the named game and identity.
-Use the UID supplied by that user; never infer it from someone else's data. Direct mode
-automatically selects an isolated scope; in advanced mode only update an explicitly selected
-external alias without overwriting other identities. Preserve existing user configuration and data when installing or upgrading code.
-If game/identity/alias selection is ambiguous, ask for the missing information.
-
-First login requires the user's manual interaction with a headed official browser. Do not automate
-credentials, account selection or verification codes. Do not accept, print, copy, export or commit
-Cookie, token, passwords, device headers, browser state, HAR, traces, screenshots or raw responses.
-Honor exact Binding, configured UID, region, authentication, privacy, rate-limit and risk failures.
-Do not retry or bypass risk control or borrow another browser's login state.
-
-## Direct user request routing
-
-For a request naming a game and the user's own UID, run the documented direct command:
-`.venv/bin/python tools/run_local_hoyo.py --game <genshin|zzz|hsr> --uid <user-supplied UID>`.
-No users.toml is required. Do not print the UID. Install the four local packages if needed, preserve
-external data on upgrades, and let the user complete the official headed login when required.
-Use `--operation login` only for a requested login check; default direct operation is sync.
-`--config/--user` plus the old positional syntax is advanced mode and conflicts with direct flags.
-
-Genshin empty-baseline identity is established only as an in-memory selector from the explicit UID;
-exact official Binding still proves game, UID and supported region before PASS. Never seed unverified
-Profile fields. Keep existing formal identity mismatch rejection. Offline first-use tests do not
-constitute real-account live acceptance; report that limitation accurately.
-
-## Data and storage rules
-
-- Local configuration, browser state, candidates and the current personal workspace stay outside
-  the source checkout. User/game/UID output is isolated. The scope lock serializes browser use. Browser Profiles are also isolated per game/UID.
-- In each scoped workspace only the selected game has personal data; other games have empty baselines.
-- Reuse the existing game two-pass comparison, lifecycle, candidate validation and complete installation
-  validation. An error must retain the previous current data. Never weaken identity or Schema checks.
-- Every roster identity is a map key; every Build is `builds/<positive-character-id>.json`. Preserve
-  exact roster/Build bijection and stable string IDs, decimal percentages and canonical JSON.
-- `sync.state` controls completeness. Genshin is partial, ZZZ is complete, HSR is partial and may
-  preserve existing character data when the source cannot prove roster coverage. Do not invent fields.
-- Store current equipped weapons/equipment only; no inventory, resources, currencies, recommendations,
-  target builds, analysis, public-mechanics datasets or field-level coverage metadata.
-- Install atomically after full validation. Do not delete ambiguous interrupted residue.
-
-## Git and sharing boundary
-
-The committed `data/` is an intentionally empty baseline. Normal local collection never changes
-this checkout, commits or pushes. Saving a user's personal formal results to their own Git repository
-is a separate explicitly authorized action: verify destination owner, visibility, selected game and
-expected base; include only the selected formal JSON paths, never config/login/private artifacts.
-This release has no automatic personal-data GitHub publication command. Do not assume a local refresh
-request authorizes upload to a public repository.
-
-Never include another person's role pool or prior Git history when sharing source. Keep user data
-private unless that owner explicitly authorizes its destination and visibility. Do not choose a
-license, change visibility, add collaborators, merge or deploy unless explicitly requested.
-
-## Offline verification
-
-Run `python tools/validate_repository.py --root . --require-empty-baseline` for this untouched
-source baseline, and normal full Validator for a populated personal workspace. Use synthetic
-identities/responses for development. Do not perform real login or collection just to test a release.
-See `dependency-authority.toml` for pinned Python, runtime and development dependency contracts.
+本文件为项目代理规则权威。按 [OpenAI AGENTS 指南](https://developers.openai.com/codex/guides/agents-md/)保留短且可执行的项目规则；可选技能仅在 .agents/skills 中提供入口，遵循 [skills 建议](https://developers.openai.com/codex/skills/)并避免复制规则。Dot/App 专属工具的存在不保证普通 CLI 环境具有这些能力。
