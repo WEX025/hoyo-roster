@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hoyo-browser-session"
+version = "0.14.0"
+description = "Shared local browser session broker for Genshin, ZZZ, and HSR routine refreshes."
+requires-python = "==3.12.*"
+dependencies = [
+  "playwright==1.54.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==1.17.1",
+  "pytest==8.4.1",
+  "pytest-asyncio==1.1.0",
+  "ruff==0.12.7",
+]
+
+[project.scripts]
+hoyo-browser-session = "hoyo_browser_session.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hoyo_browser_session"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+incremental = false
+cache_dir = ".venv/.mypy_cache"

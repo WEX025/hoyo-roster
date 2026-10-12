@@ -1,0 +1,47 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+/.zzz-sync-transactions/
+storage_state*.json
+auth_state*.json
+Cookies
+Login Data
+Local Storage/
+Session Storage/
+Network Persistent State
+cookies*.json
+cookie*.json
+credentials*.json
+secrets*.json
+*.har
+*.webm
+trace.zip
+browser-profile/
+browser_profile/
+profile-data/
+profile_data/
+screenshots/
+screen-recordings/
+recordings/
+videos/
+traces/
+
+# Per-user configuration/output belongs outside the source checkout.
+.env
+.env.*
+users.toml
+users.local.toml
+*.local.toml
+local-data/
+personal-data/
+user-data/
+users/
+workspace.lock
+state.sqlite3*
+current.json

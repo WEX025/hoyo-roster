@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:zenless-zone-zero:roster:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game",
+    "characters"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "zenless-zone-zero-roster/v1"
+    },
+    "game": {
+      "const": "zenless-zone-zero"
+    },
+    "characters": {
+      "type": "object",
+      "default": {},
+      "propertyNames": {
+        "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "level",
+          "promotion",
+          "mindscape"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+          },
+          "level": {
+            "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+          },
+          "promotion": {
+            "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+          },
+          "mindscape": {
+            "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+          }
+        }
+      }
+    }
+  }
+}

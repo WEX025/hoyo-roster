@@ -1,0 +1,63 @@
+schema-version = 1
+
+[python]
+requires = "==3.12.*"
+
+[build]
+backend = "hatchling.build"
+
+[build.dependencies]
+hatchling = "1.27.0"
+
+[runtime.dependencies]
+jsonschema = "4.25.0"
+playwright = "1.54.0"
+referencing = "0.36.2"
+rfc3339-validator = "0.1.4"
+simplejson = "3.20.1"
+
+[dev.tools]
+mypy = "1.17.1"
+pytest = "8.4.1"
+pytest-asyncio = "1.1.0"
+ruff = "0.12.7"
+
+[packages.hoyo-browser-session]
+path = "skills/hoyo-browser-session"
+module = "hoyo_browser_session"
+runtime-dependencies = ["playwright"]
+internal-dependencies = []
+
+[packages.genshin-character-state-sync]
+path = "skills/genshin-character-state-sync"
+module = "genshin_character_state_sync"
+runtime-dependencies = [
+  "jsonschema",
+  "playwright",
+  "referencing",
+  "rfc3339-validator",
+]
+internal-dependencies = ["hoyo-browser-session"]
+
+[packages.zzz-character-state-sync]
+path = "skills/zzz-character-state-sync"
+module = "zzz_character_state_sync"
+runtime-dependencies = [
+  "jsonschema",
+  "playwright",
+  "referencing",
+  "rfc3339-validator",
+]
+internal-dependencies = ["hoyo-browser-session"]
+
+[packages.hsr-character-state-sync]
+path = "skills/hsr-character-state-sync"
+module = "hsr_character_state_sync"
+runtime-dependencies = [
+  "jsonschema",
+  "playwright",
+  "referencing",
+  "rfc3339-validator",
+  "simplejson",
+]
+internal-dependencies = ["hoyo-browser-session"]

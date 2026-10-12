@@ -1,0 +1,649 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:genshin-impact:build:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game"
+  ],
+  "dependentRequired": {
+    "panel_context": [
+      "panel"
+    ],
+    "panel": [
+      "panel_context"
+    ]
+  },
+  "properties": {
+    "schema_version": {
+      "const": "genshin-impact-build/v1"
+    },
+    "game": {
+      "const": "genshin-impact"
+    },
+    "panel_context": {
+      "const": "out_of_combat"
+    },
+    "progression": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "normal_attack_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "elemental_skill_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "elemental_burst_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        }
+      }
+    },
+    "weapon": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/weapon"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "flower": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/flower"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plume": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/plume"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sands": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sands"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "goblet": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/goblet"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "circlet": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/circlet"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "panel": {
+      "$ref": "#/$defs/panel"
+    }
+  },
+  "$defs": {
+    "weapon": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "weapon_id": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+        },
+        "name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "rarity": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "ascension": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "refinement": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "set_id": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+        },
+        "set_name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "rarity": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "main_stat": {
+          "$ref": "#/$defs/main_stat"
+        },
+        "substats": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/substat"
+          }
+        }
+      }
+    },
+    "flower": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "hp"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "plume": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "attack"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sands": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "elemental_mastery",
+                    "energy_recharge"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "goblet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "elemental_mastery",
+                    "physical_damage_bonus",
+                    "pyro_damage_bonus",
+                    "hydro_damage_bonus",
+                    "electro_damage_bonus",
+                    "cryo_damage_bonus",
+                    "anemo_damage_bonus",
+                    "geo_damage_bonus",
+                    "dendro_damage_bonus"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "circlet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "elemental_mastery",
+                    "crit_rate",
+                    "crit_damage",
+                    "healing_bonus"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "main_stat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "hp",
+            "hp_percent",
+            "attack",
+            "attack_percent",
+            "defense_percent",
+            "elemental_mastery",
+            "crit_rate",
+            "crit_damage",
+            "energy_recharge",
+            "healing_bonus",
+            "physical_damage_bonus",
+            "pyro_damage_bonus",
+            "hydro_damage_bonus",
+            "electro_damage_bonus",
+            "cryo_damage_bonus",
+            "anemo_damage_bonus",
+            "geo_damage_bonus",
+            "dendro_damage_bonus"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "substat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "hp",
+            "hp_percent",
+            "attack",
+            "attack_percent",
+            "defense",
+            "defense_percent",
+            "elemental_mastery",
+            "crit_rate",
+            "crit_damage",
+            "energy_recharge"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "hp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attack": {
+          "type": "number",
+          "minimum": 0
+        },
+        "defense": {
+          "type": "number",
+          "minimum": 0
+        },
+        "elemental_mastery": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crit_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crit_damage": {
+          "type": "number",
+          "minimum": 0
+        },
+        "energy_recharge": {
+          "type": "number",
+          "minimum": 0
+        },
+        "healing_bonus": {
+          "type": "number",
+          "minimum": 0
+        },
+        "physical_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "pyro_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "hydro_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "electro_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "cryo_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "anemo_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "geo_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "dendro_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        }
+      }
+    },
+    "complete_progression": {
+      "allOf": [
+        {
+          "$ref": "#/properties/progression"
+        },
+        {
+          "required": [
+            "normal_attack_level",
+            "elemental_skill_level",
+            "elemental_burst_level"
+          ]
+        }
+      ]
+    },
+    "complete_weapon": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/weapon"
+        },
+        {
+          "required": [
+            "weapon_id",
+            "name",
+            "rarity",
+            "level",
+            "ascension",
+            "refinement"
+          ]
+        }
+      ]
+    },
+    "complete_artifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "required": [
+            "set_id",
+            "set_name",
+            "rarity",
+            "level",
+            "main_stat",
+            "substats"
+          ]
+        }
+      ]
+    },
+    "complete_flower": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/flower"
+        },
+        {
+          "$ref": "#/$defs/complete_artifact"
+        }
+      ]
+    },
+    "complete_plume": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/plume"
+        },
+        {
+          "$ref": "#/$defs/complete_artifact"
+        }
+      ]
+    },
+    "complete_sands": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/sands"
+        },
+        {
+          "$ref": "#/$defs/complete_artifact"
+        }
+      ]
+    },
+    "complete_goblet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/goblet"
+        },
+        {
+          "$ref": "#/$defs/complete_artifact"
+        }
+      ]
+    },
+    "complete_circlet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/circlet"
+        },
+        {
+          "$ref": "#/$defs/complete_artifact"
+        }
+      ]
+    },
+    "complete_artifacts": {
+      "allOf": [
+        {
+          "$ref": "#/properties/artifacts"
+        },
+        {
+          "required": [
+            "flower",
+            "plume",
+            "sands",
+            "goblet",
+            "circlet"
+          ],
+          "properties": {
+            "flower": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_flower"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "plume": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_plume"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sands": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_sands"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "goblet": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_goblet"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "circlet": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_circlet"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "complete_panel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/panel"
+        },
+        {
+          "required": [
+            "hp",
+            "attack",
+            "defense",
+            "elemental_mastery",
+            "crit_rate",
+            "crit_damage",
+            "energy_recharge",
+            "healing_bonus",
+            "physical_damage_bonus",
+            "pyro_damage_bonus",
+            "hydro_damage_bonus",
+            "electro_damage_bonus",
+            "cryo_damage_bonus",
+            "anemo_damage_bonus",
+            "geo_damage_bonus",
+            "dendro_damage_bonus"
+          ]
+        }
+      ]
+    },
+    "complete_build": {
+      "allOf": [
+        {
+          "$ref": "#"
+        },
+        {
+          "required": [
+            "schema_version",
+            "game",
+            "panel_context",
+            "progression",
+            "weapon",
+            "artifacts",
+            "panel"
+          ],
+          "properties": {
+            "progression": {
+              "$ref": "#/$defs/complete_progression"
+            },
+            "weapon": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_weapon"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "artifacts": {
+              "$ref": "#/$defs/complete_artifacts"
+            },
+            "panel": {
+              "$ref": "#/$defs/complete_panel"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
