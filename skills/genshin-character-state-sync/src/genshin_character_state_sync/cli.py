@@ -212,7 +212,7 @@ async def _binding_with_login(
 
     waiting_callback: Callable[[], None] = print_waiting if job_id is None else record_waiting
     settings = production_settings()
-    await coordinate_login(
+    login_result = await coordinate_login(
         repo_root=repo_root,
         context=session.context,
         page=session.page,
@@ -223,7 +223,8 @@ async def _binding_with_login(
         timeout=settings.login_timeout_seconds,
         waiting_callback=waiting_callback,
     )
-    assert provider.binding_data is not None
+    if not login_result.available_coverage_success or provider.binding_data is None:
+        raise AuthenticationError("official Binding did not confirm the expected account")
     return provider.binding_data
 
 

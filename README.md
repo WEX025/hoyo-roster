@@ -13,37 +13,43 @@ Use Python 3.12:
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/pip install ./skills/hoyo-browser-session ./skills/genshin-character-state-sync ./skills/zzz-character-state-sync ./skills/hsr-character-state-sync
+.venv/bin/pip install -e ./skills/hoyo-browser-session -e ./skills/genshin-character-state-sync -e ./skills/zzz-character-state-sync -e ./skills/hsr-character-state-sync
 .venv/bin/python -m playwright install chromium
-mkdir -p ~/.config/hoyo-game-data
-cp examples/users.example.toml ~/.config/hoyo-game-data/users.toml
-chmod 600 ~/.config/hoyo-game-data/users.toml
 ```
 
-Edit the external configuration with your own UID, remove games you do not use, then run:
+No configuration file is needed for normal use. Replace `YOUR_UID` with your own game UID:
 
 ```bash
-.venv/bin/python tools/run_local_hoyo.py --user me init zzz
-.venv/bin/python tools/run_local_hoyo.py --user me login zzz
-.venv/bin/python tools/run_local_hoyo.py --user me sync zzz
+.venv/bin/python tools/run_local_hoyo.py --game genshin --uid YOUR_UID
+.venv/bin/python tools/run_local_hoyo.py --game zzz --uid YOUR_UID
+.venv/bin/python tools/run_local_hoyo.py --game hsr --uid YOUR_UID
 ```
 
-Replace `zzz` with `hsr` where needed. UID selects an identity; the collectors still require
-your own exact official account Binding and login. First login requires a headed local browser
-and your manual completion of the official login page. Never provide cookies, tokens or passwords
-to the assistant. Only the currently supported mainland China sources are implemented.
+Default operation is `sync` with a headed official browser. The program automatically creates
+private external data and browser directories isolated by game and UID. On first use or expired
+login, complete the official login yourself; the command resumes only after exact Binding passes.
+UID selects an identity and does not bypass login, privacy or permissions. Supported sources are
+mainland China only (Genshin `hk4e_cn`, supported regions `cn_gf01`/`cn_qd01`; ZZZ `nap_cn` and
+HSR `hkrpg_cn` use `prod_gf_cn`). Never give cookies, tokens or passwords to the assistant.
+
+Use `--operation login` for a login-only check, `--operation init` to create an empty workspace
+without launching a browser, or `--operation inspect` for residue inspection. Already verified
+sessions may use `--headless`; missing or mismatched authentication then fails immediately.
+The advanced [configuration mode](docs/local-use.md) remains available. Do not combine direct
+`--game/--uid` arguments with `--config/--user` or the old positional command syntax.
 
 ## Current limits
 
-- Genshin's fresh empty-baseline login has a known bootstrap issue: the login Provider currently
-  expects an existing formal identity instead of enrolling the configured UID. A new-user Genshin
-  `login`/`sync` can fail before Binding; it is not claimed to be ready for first use. See
-  `skills/genshin-character-state-sync/src/genshin_character_state_sync/login_provider.py`.
-- Normal local sync writes outside the checkout and does not commit or push results to GitHub.
-  The legacy `tools/run_hoyo_sync.py` and `publish-main` commands are compatibility code with a
-  fixed repository/Runtime identity, not the supported entrypoint for this repository.
-- Offline validation verifies schemas, isolation and synthetic behavior; it is not evidence of
-  successful real login or live account collection.
+- Local sync writes outside the checkout and does not commit or push results to GitHub. The
+  legacy `tools/run_hoyo_sync.py` and `publish-main` commands are compatibility code with a fixed
+  repository/Runtime identity, not the supported entrypoint for this repository.
+- Genshin first-use identity selection now uses the explicit UID in memory and verifies the
+  actual game, UID and supported region through official Binding before collection. It does not
+  seed fake Profile fields. Offline tests preserve the real Provider/coordinator and two-pass
+  collector, with simulated network/browser responses; they are not live login acceptance.
+- Changing source code preserves external personal data and configuration. Browser Profiles are
+  now isolated per game/UID in both modes. Legacy advanced-mode shared Profile files are retained
+  but not automatically copied or reused; the first run after that isolation upgrade may need login.
 
 [Data handling and sharing](docs/sharing-safety.md) describes the private/public boundary.
 No workflow or deployment is included. No LICENSE has been selected; public visibility alone

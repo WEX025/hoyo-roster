@@ -8,9 +8,9 @@ Python 3.12 environment for independent local collection. The supported flow doe
 paths and are not generalized publishers for a new repository.
 
 A user request to collect their own game state authorizes only the named game and identity.
-Use the UID supplied by that user; never infer it from someone else's data. Create or update
-an explicitly selected local alias in the external configuration without overwriting other
-identities. Preserve existing user configuration and data when installing or upgrading code.
+Use the UID supplied by that user; never infer it from someone else's data. Direct mode
+automatically selects an isolated scope; in advanced mode only update an explicitly selected
+external alias without overwriting other identities. Preserve existing user configuration and data when installing or upgrading code.
 If game/identity/alias selection is ambiguous, ask for the missing information.
 
 First login requires the user's manual interaction with a headed official browser. Do not automate
@@ -19,18 +19,24 @@ Cookie, token, passwords, device headers, browser state, HAR, traces, screenshot
 Honor exact Binding, configured UID, region, authentication, privacy, rate-limit and risk failures.
 Do not retry or bypass risk control or borrow another browser's login state.
 
-## Known Genshin bootstrap issue
+## Direct user request routing
 
-A fresh Genshin empty baseline currently does not establish expected identity from the supplied
-UID in `GenshinLoginProvider.expected_identity`. Report the known limitation; do not claim a
-successful first-use login, fabricate an identity or seed unverified account data to bypass it.
-Fixes require a separate authorized code task. ZZZ/HSR and existing-state flows also have not been
-claimed as real-account live acceptance-tested merely because offline tests pass.
+For a request naming a game and the user's own UID, run the documented direct command:
+`.venv/bin/python tools/run_local_hoyo.py --game <genshin|zzz|hsr> --uid <user-supplied UID>`.
+No users.toml is required. Do not print the UID. Install the four local packages if needed, preserve
+external data on upgrades, and let the user complete the official headed login when required.
+Use `--operation login` only for a requested login check; default direct operation is sync.
+`--config/--user` plus the old positional syntax is advanced mode and conflicts with direct flags.
+
+Genshin empty-baseline identity is established only as an in-memory selector from the explicit UID;
+exact official Binding still proves game, UID and supported region before PASS. Never seed unverified
+Profile fields. Keep existing formal identity mismatch rejection. Offline first-use tests do not
+constitute real-account live acceptance; report that limitation accurately.
 
 ## Data and storage rules
 
 - Local configuration, browser state, candidates and the current personal workspace stay outside
-  the source checkout. User/game/UID output is isolated. The per-user lock serializes browser use.
+  the source checkout. User/game/UID output is isolated. The scope lock serializes browser use. Browser Profiles are also isolated per game/UID.
 - In each scoped workspace only the selected game has personal data; other games have empty baselines.
 - Reuse the existing game two-pass comparison, lifecycle, candidate validation and complete installation
   validation. An error must retain the previous current data. Never weaken identity or Schema checks.

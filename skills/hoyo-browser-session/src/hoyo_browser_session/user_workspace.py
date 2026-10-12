@@ -34,6 +34,7 @@ GAMES = {
     "zzz": "zenless-zone-zero",
 }
 DEFAULT_CONFIG = Path("~/.config/hoyo-game-data/users.toml")
+DEFAULT_DIRECT_ROOT = Path("~/.local/share/hoyo-roster")
 _ALIAS = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
 _UID = re.compile(r"[1-9][0-9]{0,31}\Z")
 
@@ -74,6 +75,24 @@ class UserConfiguration:
         if game not in self.uids:
             raise WorkspaceError("GAME_NOT_CONFIGURED")
         return self.uids[game]
+
+
+def direct_configuration(
+    game: str,
+    uid: str,
+    *,
+    storage_root: Path = DEFAULT_DIRECT_ROOT,
+) -> UserConfiguration:
+    """Resolve an explicit selector without reading or writing any config file."""
+    if game not in GAMES:
+        raise WorkspaceError("INVALID_GAME")
+    if not isinstance(uid, str) or not _UID.fullmatch(uid):
+        raise WorkspaceError("INVALID_UID")
+    if not storage_root.expanduser().is_absolute():
+        raise WorkspaceError("INVALID_STORAGE_ROOT")
+    digest = hashlib.sha256(f"direct:v1:{game}:{uid}".encode()).hexdigest()
+    alias = f"direct-{game}-{digest[:48]}"
+    return UserConfiguration(alias, storage_root, {game: uid})
 
 
 def load_configuration(path: Path, user: str, source: Path) -> UserConfiguration:
@@ -218,7 +237,9 @@ class LocalSnapshotStore:
         key = hashlib.sha256(f"{game}:{self._uid}".encode()).hexdigest()
         self.root = private_directory(self.user_root / game / key)
         self.candidate_base = self.root / "candidates"
-        self.browser_profile = self.user_root / "browser-profile"
+        # Browser state follows the same exact game/UID boundary as personal data.
+        # Existing advanced-mode shared Profiles are preserved, never copied or deleted.
+        self.browser_profile = self.root / "browser-profile"
         self.current_file = self.root / "current.json"
         self._locked = False
 
@@ -282,7 +303,7 @@ class LocalSnapshotStore:
         if not self._locked:
             raise WorkspaceError("WORKSPACE_LOCK_REQUIRED")
         old = self.current()
-        allowed = {"current.json", "candidates"}
+        allowed = {"current.json", "candidates", "browser-profile"}
         if old is not None:
             allowed.add(old.name)
         if any(p.name not in allowed for p in self.root.iterdir()):

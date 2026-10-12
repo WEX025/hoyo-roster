@@ -9,13 +9,14 @@ Read `../../README.md`, `../../AGENTS.md` and `../../docs/local-use.md` before c
 Use this checkout's installed Python 3.12 environment:
 
 ```bash
-.venv/bin/python tools/run_local_hoyo.py --user me init zzz
-.venv/bin/python tools/run_local_hoyo.py --user me login zzz
-.venv/bin/python tools/run_local_hoyo.py --user me sync zzz
+.venv/bin/python tools/run_local_hoyo.py --game zzz --uid YOUR_UID --operation init
+.venv/bin/python tools/run_local_hoyo.py --game zzz --uid YOUR_UID --operation login
+.venv/bin/python tools/run_local_hoyo.py --game zzz --uid YOUR_UID
 ```
 
-The external `users.toml` contains this user's selected UID. It must be current-user-owned `0600`.
-Use a per-user external browser Profile; first login is headed and manually completed by the user.
+Direct mode requires only `--game` and the user's own `--uid`; it does not read users.toml.
+Advanced external configuration remains optional and must be current-user-owned `0600`.
+Use a per-game/UID external browser Profile; first login is headed and manually completed by the user.
 UID does not authorize access by itself: require exact official Binding, game and supported region.
 Do not accept or export Cookie/token/password/header values, raw responses or login artifacts.
 Stop on identity mismatch, missing permissions, captcha, rate limit, risk control or response drift.
