@@ -181,7 +181,7 @@ class OfficialPage(Page):
         else:
             from hoyo_roster.games.hsr.browser import CULTIVATION_URL
 
-            if url == CULTIVATION_URL and self.context.routes:
+            if url == CULTIVATION_URL and self.context.routes and not self.routes:
                 from hoyo_roster.games.hsr.endpoint_specs import (
                     DEVICE_FINGERPRINT,
                     AVATAR_LIST_BOOTSTRAP,
@@ -285,7 +285,17 @@ def test_actual_game_chain_twice_and_noop(
 
     monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
     root = tmp_path / "private"
-    argv = ["--game", game, "--uid", UID_A, "--storage-root", str(root), "--login-method", "phone"]
+    argv = [
+        "--game",
+        game,
+        "--uid",
+        UID_A,
+        "--storage-root",
+        str(root),
+        "--allow-login",
+        "--login-method",
+        "phone",
+    ]
     assert asyncio.run(run(build_parser().parse_args(argv))) == 0
     output = capsys.readouterr().out
     assert (

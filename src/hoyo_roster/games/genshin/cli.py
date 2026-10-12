@@ -202,8 +202,7 @@ async def run_sync(
                 select_binding(binding_data, args.uid)
                 print("GAME=genshin")
                 print("OPERATION=login-check")
-                print("STATUS=PASS")
-                print("STABLE_CODE=PASS")
+                print("BINDING_STATUS=PASS")
                 return 0
             emit("COLLECTING_1")
             first, first_requests_after_binding = await _pass(

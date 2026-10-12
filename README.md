@@ -20,7 +20,7 @@ hoyo-roster --game genshin --uid YOUR_UID
 
 把 `YOUR_UID` 换成自己的游戏 UID；它只用于选择身份，官方 Binding 必须同时证实游戏、UID 和区服。`--game` 可为 `genshin`、`zzz`、`hsr`。`python -m hoyo_roster` 与 `hoyo-roster` 使用同一个入口，无需 users.toml、私有数据仓库、后台服务或 GitHub 登录。Chromium 由 Playwright 另行安装，本项目发行包不捆绑浏览器。
 
-需登录时终端询问 **二维码 / 手机号 / 取消**。自动化调用请显式提供 `--non-interactive --login-method qr`（或 `phone` / `cancel`）；这只是选择方式，仍需本人操作官方页面。会话有效时直接复用，`--headless` 只适用于已登录的精确身份。官方页面若未显示所选入口，程序明确停止，不声称该方式已可用。
+需登录时终端询问 **二维码 / 手机号 / 取消**。自动化调用请显式提供 `--non-interactive --allow-login --login-method qr`（或 `phone` / `cancel`）；`--allow-login` 表示已阅读登录前说明并允许本机手动登录与会话复用，仍需本人在官方页面阅读协议、扫码或输入手机号/验证码并确认；未知新协议和额外权限须另行确认。会话有效时直接复用，`--headless` 只适用于已登录的精确身份。程序等待所选入口加载，超时报 `LOGIN_TIMEOUT`，操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`；没有观察到入口不等于官方不支持该方式。
 
 ```bash
 hoyo-roster --game zzz --uid YOUR_UID --login-method phone

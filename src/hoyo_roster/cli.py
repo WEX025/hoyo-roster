@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--storage-root", type=Path, default=DEFAULT_DIRECT_ROOT)
     parser.add_argument("--login-method", choices=("qr", "phone", "cancel"))
     parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument(
+        "--allow-login",
+        action="store_true",
+        help="authorize manual official login and local session reuse; new terms still need user review",
+    )
     parser.add_argument("--login-timeout", type=float, default=900)
     parser.add_argument(
         "--headless",
@@ -201,12 +206,17 @@ async def run(args) -> int:
             login_wait_seconds=args.login_timeout,
         )
         token = OPTIONS.set(
-            LoginOptions(args.login_method, args.non_interactive, args.login_timeout)
+            LoginOptions(
+                args.login_method, args.non_interactive, args.login_timeout, args.allow_login
+            )
         )
         try:
             result = await module.run_sync(
                 domain_args, snapshot_store=store, request_gate_override=gate
             )
+            if operation == "login" and result == 0:
+                # Domain browser context has now closed and flushed its local session.
+                print("STATUS=PASS\nSTABLE_CODE=PASS")
             if store.cleanup_pending:
                 emit("CLEANUP_PENDING")
             print(f"COMMIT_STATE={store.commit_state}")
@@ -235,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(error, LoginTimeout):
             emit("TIMEOUT")
         print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示=检查官方登录页面；需要登录时明确使用 --login-method qr 或 phone。"
+            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示=检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
         )
         return 1
     except (KeyboardInterrupt, asyncio.CancelledError):

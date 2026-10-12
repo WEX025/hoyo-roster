@@ -6,13 +6,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hoyo_roster.browser import BrowserContextAccess
+from hoyo_roster.browser import initialize_session_page, BrowserContextAccess
 from hoyo_roster.login import ExpectedIdentity, identity_digest
 from hoyo_roster.models import LoginProbeResult, LoginProbeStatus
 from hoyo_roster.request_gate import RequestGate
 from playwright.async_api import Page
 
-from .browser import prepare_login_or_session
+from .browser import MIYOUSHE_ZZZ_URL, prepare_login_or_session
 from .endpoints import EndpointClient, select_role
 from .errors import (
     ApiResponseError,
@@ -103,6 +103,11 @@ class ZzzLoginProvider:
                 region=region,
             ),
         )
+
+    async def initialize_session(self) -> None:
+        if self.request_gate is not None:
+            await self.request_gate.reserve(requested_min_interval=self.request_interval)
+        await initialize_session_page(self.context, MIYOUSHE_ZZZ_URL)
 
     async def probe(self, context: BrowserContextAccess) -> LoginProbeResult:
         if context is not self.context:

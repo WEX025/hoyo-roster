@@ -12,9 +12,17 @@ hoyo-roster --game genshin --uid YOUR_UID
 
 `init` 只建立验证后的空工作区，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
 
-交互终端在会话失效时选择 1 二维码、2 手机号、3 取消。本人在前台官方页面打开登录面板并选择对应入口，扫码/手机号/验证码/确认均由本人完成，终端不接收认证信息。程序只检查入口是否可见，30 秒内未观察到入口报 `LOGIN_METHOD_UNAVAILABLE`；不自动改选另一方式。具体游戏的实际二维码/手机号页面尚待真实浏览器验收。
+启动浏览器后，程序先在同一持久 Context 中打开受限的临时官方页面，等待页面资源与已有会话校验完成，再发送初始 Binding；初始化页允许官方资源和已注册的会话校验，不允许短信、二维码创建或游戏业务请求。临时页关闭后才继续核验；初始化超时/网络/操控错误单独停止，不当成认证过期。初始化或会话指纹本身都不证明身份；每次登录/同步仍须通过精确官方 game/UID/region Binding。初始化阶段遇风险、限流或无效校验响应同样停止。程序不导出 Cookie/token，也不延长官方有效期。关闭持久 Context 完成后才停止 Playwright；关闭失败仍尝试停止运行时，不报告登录成功。
 
-非交互进程使用 `--non-interactive --login-method qr|phone|cancel`；缺失显式选择且需要登录时停止。`--login-timeout 900` 是默认 Binding 等待上限，范围 0 < 秒数 ≤ 3600；所选入口检测最多 30 秒。`--headless` 复用已验证会话，需交互时停止。Ctrl-C 取消会释放锁并关闭本次浏览器，正在进行的本机写入会先结束再释放锁。
+交互终端在确定需要新登录时，先一次说明二维码和手机号两种方式、本人配合步骤、与官方通信、本机 Profile 保存及复用范围、协议和权限边界；再通过一次“允许并选择二维码 / 手机号 / 取消”询问取得授权。显式 `--login-method` 仅选择方式，交互终端仍询问允许；`--allow-login` 可以预先允许说明中的操作。手机号、验证码、扫码、必要协议的阅读与勾选和最终确认都由本人在官方页面完成。程序不自动勾选、不发送短信、不扩大权限。未知新协议、额外权限或风险提示不属于这次允许，须暂停并由本人另行确认。有效会话直接复用，不再次要求登录授权；错误账号/游戏/区服立即停止，不自动切换账号。
+
+非交互进程需登录时使用 `--non-interactive --login-method qr|phone --allow-login`；缺失方式报 `AUTHENTICATION_REQUIRED`，缺失允许报 `LOGIN_CONSENT_REQUIRED`，都在打开可执行认证的登录页面前停止。`--login-method cancel` 取消新登录。自动化调用者应先向本人展示本段说明并取得允许，再传入该标志；它不替代官方页面协议确认。
+
+```bash
+hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --login-method phone --allow-login
+```
+
+`--login-timeout 900` 是默认各登录等待阶段的上限，范围 0 < 秒数 ≤ 3600；入口加载使用该上限，不再固定 30 秒。等待显示 `WAITING_FOR_ENTRY`；浏览器操控暂时超时显示 `CONTROL_RETRY`，在上限内等待恢复。一直未看到入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`，可以检查浏览器后重新运行。不把这些状态报告为不支持登录。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消等待，释放锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
 
 ## 升级
 
@@ -73,7 +81,9 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 |---|---|
 | `AUTHENTICATION_REQUIRED` / `LOGIN_TIMEOUT` | 本人检查官方登录状态，明确选择方式后重新运行 |
 | `LOGIN_CANCELLED` / `INTERRUPTED` | 本人准备好后重新运行 |
-| `LOGIN_METHOD_UNAVAILABLE` | 检查官方是否提供该入口，取消或显式选择另一方式 |
+| `LOGIN_CONSENT_REQUIRED` | 阅读登录前说明并取得本人允许，再显式传入 `--allow-login` |
+| `LOGIN_CONTROL_UNAVAILABLE` | 检查浏览器/操控连接后重新运行；不表示官方不支持该登录方式 |
+| `LOGIN_NETWORK_ERROR` / `LOGIN_SESSION_INITIALIZATION_FAILED` | 检查官方页面加载/会话校验；保留 Profile，不导出凭据 |
 | `WRONG_ACCOUNT` / Binding 错误 | 确认本人游戏、UID、区服；不要借其他会话绕过 |
 | `RATE_LIMITED` / `RISK_CONTROL` | 停止本轮，按官方提示处理；不自动重试或代解验证 |
 | 双次漂移 / schema / lifecycle 错误 | 旧 current 保留，等待来源稳定或提交脱敏问题反馈 |

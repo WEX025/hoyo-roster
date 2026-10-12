@@ -7,13 +7,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hoyo_roster.browser import BrowserContextAccess
+from hoyo_roster.browser import initialize_session_page, BrowserContextAccess
 from hoyo_roster.login import ExpectedIdentity, identity_digest
 from hoyo_roster.models import LoginProbeResult, LoginProbeStatus
 from hoyo_roster.request_gate import RequestGate
 from playwright.async_api import Page
 
-from .browser import OfficialCollector, prepare_login_or_session
+from .browser import CALCULATOR_URL, OfficialCollector, prepare_login_or_session
 from .errors import (
     ApiResponseError,
     AuthenticationError,
@@ -104,6 +104,10 @@ class GenshinLoginProvider:
                 region=region,
             ),
         )
+
+    async def initialize_session(self) -> None:
+        await self.collector.reserve_navigation()
+        await initialize_session_page(self.context, CALCULATOR_URL)
 
     async def probe(self, context: BrowserContextAccess) -> LoginProbeResult:
         if context is not self.context:

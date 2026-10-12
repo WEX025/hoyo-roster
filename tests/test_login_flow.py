@@ -85,6 +85,13 @@ class Page:
         self.closed = False
         self.routes = []
         self.interrupt = interrupt
+        self.callbacks = {}
+
+    def on(self, event, handler):
+        self.callbacks.setdefault(event, []).append(handler)
+
+    def remove_listener(self, event, handler):
+        self.callbacks[event].remove(handler)
 
     @property
     def frames(self):
@@ -233,7 +240,6 @@ def test_expired_session_waits_once_then_requires_exact_uid(tmp_path, source, ga
     empty_workspace(source, root)
     sequence = [
         binding_payload(game, retcode=10001),
-        binding_payload(game, UID_B),
         binding_payload(game),
     ]
     provider, context, page, gate = provider_for(game, root, sequence)
@@ -242,8 +248,8 @@ def test_expired_session_waits_once_then_requires_exact_uid(tmp_path, source, ga
         coordinate(root, provider, context, page, gate, waiting=lambda: waiting.append(1))
     )
     assert result.complete_coverage_success and result.interaction_required
-    assert waiting == [1] and context.request.count == 3
-    login_page = context.pages[0] if game == "hsr" else page
+    assert waiting == [1] and context.request.count == 2
+    login_page = context.pages[-1] if game == "hsr" else page
     assert login_page.foregrounds == 1
     if game == "hsr":
         assert login_page.closed and not login_page.routes
@@ -293,7 +299,7 @@ def test_first_login_interrupt_never_marks_success(tmp_path, source, game):
         asyncio.run(coordinate(root, provider, context, page, gate))
     assert tree_digest(root / "data") == before
     if game == "hsr":
-        assert context.pages[0].closed and not context.pages[0].routes
+        assert all(p.closed for p in context.pages)
 
 
 @pytest.mark.parametrize("region", ("cn_gf01", "cn_qd01"))

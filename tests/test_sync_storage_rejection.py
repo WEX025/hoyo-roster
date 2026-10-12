@@ -93,6 +93,7 @@ def test_sync_rejects_storage_failure_without_deleting_candidate(
                     UID_A,
                     "--storage-root",
                     str(root),
+                    "--allow-login",
                     "--login-method",
                     "phone",
                 ]

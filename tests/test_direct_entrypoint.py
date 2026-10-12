@@ -207,7 +207,17 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
     monkeypatch.setattr(OfficialCollector, "_throttle", simulated_network_pacing)
     root = tmp_path / "private"
-    args = ["--game", "genshin", "--uid", uid, "--storage-root", str(root), "--login-method", "qr"]
+    args = [
+        "--game",
+        "genshin",
+        "--uid",
+        uid,
+        "--storage-root",
+        str(root),
+        "--allow-login",
+        "--login-method",
+        "qr",
+    ]
     assert local_tool.main(args) == 0
     output = capsys.readouterr().out
     assert "WAITING_FOR_USER_LOGIN=YES" in output
@@ -286,6 +296,7 @@ def test_direct_login_entrypoint_runs_real_game_binding_control_flow(
                 str(tmp_path / "private"),
                 "--operation",
                 "login",
+                "--allow-login",
                 "--login-method",
                 "qr",
             ]

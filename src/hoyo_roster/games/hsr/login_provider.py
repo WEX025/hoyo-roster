@@ -9,12 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hoyo_roster.browser import BrowserContextAccess, navigate_login_page
+from hoyo_roster.browser import initialize_session_page, BrowserContextAccess, navigate_login_page
 from hoyo_roster.errors import (
     AuthenticationRequired as SharedAuthenticationRequired,
 )
 from hoyo_roster.errors import (
     ExpectedIdentityConflict,
+    LoginControlUnavailable,
 )
 from hoyo_roster.login import ExpectedIdentity, identity_digest
 from hoyo_roster.login_identity import LoginIdentityStore
@@ -183,6 +184,10 @@ class HsrLoginProvider:
             digest=self._expected_raw_digest,
         )
 
+    async def initialize_session(self) -> None:
+        await self.collector.reserve_navigation()
+        await initialize_session_page(self.context, CULTIVATION_URL)
+
     async def probe(self, context: BrowserContextAccess) -> LoginProbeResult:
         if context is not self.context:
             raise ConfigurationError("HSR login probe context changed")
@@ -329,7 +334,7 @@ class HsrLoginProvider:
             self._route_handler = None
             if self.session is not None:
                 self.session.end_login()
-            raise SharedAuthenticationRequired("HSR login page could not be prepared") from None
+            raise LoginControlUnavailable("HSR login page could not be prepared") from None
 
     async def finish_login_or_session(
         self,
@@ -349,7 +354,7 @@ class HsrLoginProvider:
             if self.session is not None and self.session.login_page_open_count:
                 self.session.login_page_sealed = True
         except PlaywrightError:
-            raise SharedAuthenticationRequired("HSR login page could not be sealed") from None
+            raise LoginControlUnavailable("HSR login page could not be sealed") from None
         finally:
             self._login_page = None
             self._route_handler = None

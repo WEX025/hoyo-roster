@@ -105,6 +105,8 @@ class LoginProvider(Protocol):
 
     async def expected_identity(self, repo_root: Path) -> ExpectedIdentity: ...
 
+    async def initialize_session(self) -> None: ...
+
     async def probe(self, context: BrowserContextAccess) -> LoginProbeResult: ...
 
     async def prepare_login_or_session(
@@ -141,6 +143,9 @@ class CallbackLoginProvider:
     async def expected_identity(self, repo_root: Path) -> ExpectedIdentity:
         del repo_root
         return self.identity
+
+    async def initialize_session(self) -> None:
+        return
 
     async def probe(self, context: BrowserContextAccess) -> LoginProbeResult:
         del context
@@ -302,11 +307,17 @@ async def coordinate_login(
         emit("VERIFYING_IDENTITY")
 
     try:
+        for provider, identity in zip(providers, identities, strict=True):
+            if identity.available:
+                emit("INITIALIZING_SESSION")
+                await provider.initialize_session()
         coverage = await _probe_coverage(
             context=context,
             providers=providers,
             identities=identities,
         )
+        for item in coverage:
+            print(f"SESSION_BINDING={item.status.value}", flush=True)
         if initial_coverage_callback is not None:
             initial_coverage_callback(coverage)
         initial = LoginCoordinatorResult(coverage, interaction_required, waiting_signal_count)
@@ -315,9 +326,9 @@ async def coordinate_login(
         ):
             result = initial
         else:
+            if any(item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage):
+                raise WrongAccount("login coverage did not match the expected account")
             if not headed:
-                if any(item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage):
-                    raise WrongAccount("login coverage did not match the expected account")
                 raise AuthenticationRequired("headed login is required")
 
             for provider, item in zip(providers, coverage, strict=True):
@@ -331,25 +342,19 @@ async def coordinate_login(
 
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
-            wrong_account_seen = any(
-                item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage
-            )
             while True:
                 coverage = await _probe_coverage(
                     context=context,
                     providers=providers,
                     identities=identities,
                 )
-                wrong_account_seen = wrong_account_seen or any(
-                    item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage
-                )
+                if any(item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage):
+                    raise WrongAccount("login coverage did not match the expected account")
                 observed = LoginCoordinatorResult(coverage, True, waiting_signal_count)
                 if observed.available_coverage_success:
                     result = observed
                     break
                 if loop.time() >= deadline:
-                    if wrong_account_seen:
-                        raise WrongAccount("login coverage did not find the expected account")
                     raise LoginTimeout("login coverage probe timed out")
                 await asyncio.sleep(min(poll_interval, max(0.0, deadline - loop.time())))
     except BaseException as error:

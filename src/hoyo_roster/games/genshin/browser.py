@@ -124,9 +124,11 @@ async def persistent_browser(
         page = context.pages[0] if context.pages else await context.new_page()
         yield BrowserSession(playwright, context, page, headed)
     finally:
-        if context is not None:
-            await context.close()
-        await playwright.stop()
+        try:
+            if context is not None:
+                await context.close()
+        finally:
+            await playwright.stop()
 
 
 async def open_login_page(

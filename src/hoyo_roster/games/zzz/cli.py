@@ -218,8 +218,7 @@ async def run_sync(
             if args.login_check_only:
                 print("GAME=zzz")
                 print("OPERATION=login-check")
-                print("STATUS=PASS")
-                print("STABLE_CODE=PASS")
+                print("BINDING_STATUS=PASS")
                 return 0
             await prime_rpc_headers(
                 browser_session,

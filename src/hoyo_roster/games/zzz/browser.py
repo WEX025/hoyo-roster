@@ -141,9 +141,11 @@ async def persistent_browser(
         page.on("request", lambda request: _capture_rpc_headers(session, request))
         yield session
     finally:
-        if context is not None:
-            await context.close()
-        await playwright.stop()
+        try:
+            if context is not None:
+                await context.close()
+        finally:
+            await playwright.stop()
 
 
 async def open_login_page(

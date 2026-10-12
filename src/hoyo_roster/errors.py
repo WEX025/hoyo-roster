@@ -61,5 +61,17 @@ class LoginCancelled(OperationError):
     code = "LOGIN_CANCELLED"
 
 
+class LoginSessionInitializationFailed(OperationError):
+    code = "LOGIN_SESSION_INITIALIZATION_FAILED"
+
+
+class LoginConsentRequired(OperationError):
+    code = "LOGIN_CONSENT_REQUIRED"
+
+
+class LoginControlUnavailable(OperationError):
+    code = "LOGIN_CONTROL_UNAVAILABLE"
+
+
 class LoginMethodUnavailable(OperationError):
     code = "LOGIN_METHOD_UNAVAILABLE"

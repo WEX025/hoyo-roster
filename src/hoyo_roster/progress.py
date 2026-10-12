@@ -4,7 +4,10 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 LABELS = {
+    "INITIALIZING_SESSION": "初始化官方页面会话；随后核验 Binding",
     "CHECKING_SESSION": "检查会话",
+    "WAITING_FOR_ENTRY": "等待官方登录入口加载；可在官方页面继续操作，Ctrl-C 取消",
+    "CONTROL_RETRY": "浏览器操控暂时超时；等待恢复，Ctrl-C 取消",
     "WAITING_FOR_USER": "等待用户在官方页面登录",
     "VERIFYING_IDENTITY": "核验游戏、UID和区服身份",
     "COLLECTING_1": "采集第1次",
@@ -29,6 +32,8 @@ class LoginOptions:
     method: str | None = None
     non_interactive: bool = False
     timeout: float = 900
+    allow_login: bool = False
+    consent_given: bool = False
 
 
 OPTIONS: ContextVar[LoginOptions | None] = ContextVar("hoyo_login_options", default=None)

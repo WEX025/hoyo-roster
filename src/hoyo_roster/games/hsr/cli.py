@@ -498,8 +498,7 @@ async def run_sync(
                 _assert_formal_unchanged(repo_root, before)
                 print("GAME=hsr")
                 print("OPERATION=login-check")
-                print("STATUS=PASS")
-                print("STABLE_CODE=PASS")
+                print("BINDING_STATUS=PASS")
                 return 0
             bootstrap_evidence = await _initialize_session(
                 collector,

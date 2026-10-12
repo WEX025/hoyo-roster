@@ -2,7 +2,7 @@
 
 import asyncio
 import pytest
-from hoyo_roster.errors import AuthenticationRequired, LoginCancelled, LoginMethodUnavailable
+from hoyo_roster.errors import AuthenticationRequired, LoginCancelled, LoginTimeout
 from hoyo_roster.login_ui import choose_method, confirm_method_entry
 from hoyo_roster.progress import OPTIONS, LoginOptions
 from tests.test_login_flow import coordinate, provider_for, binding_payload, UID_A, Page
@@ -12,7 +12,7 @@ from hoyo_roster.user_workspace import empty_workspace
 @pytest.mark.parametrize("method", ("qr", "phone"))
 def test_noninteractive_explicit_choice_needs_no_input(monkeypatch, method):
     monkeypatch.setattr("builtins.input", lambda *args: pytest.fail("No terminal credential input"))
-    token = OPTIONS.set(LoginOptions(method, True))
+    token = OPTIONS.set(LoginOptions(method, True, allow_login=True))
     try:
         assert asyncio.run(choose_method()) == method
     finally:
@@ -50,7 +50,8 @@ def test_cancel_does_not_open_official_login(tmp_path, source, game, capsys):
             asyncio.run(coordinate(root, provider, context, page, gate))
     finally:
         OPTIONS.reset(token)
-    assert not page.urls and not context.pages and context.request.count == 1
+    assert not page.urls and all(p.closed and not p.foregrounds for p in context.pages)
+    assert context.request.count == 1
     assert UID_A not in capsys.readouterr().out
 
 
@@ -65,7 +66,7 @@ def test_exact_session_reused_even_with_cancel_choice(tmp_path, source, game):
     finally:
         OPTIONS.reset(token)
     assert result.complete_coverage_success and not result.interaction_required
-    assert not page.urls and not context.pages
+    assert not page.urls and all(p.closed and not p.foregrounds for p in context.pages)
 
 
 @pytest.mark.parametrize("method", ("qr", "phone"))
@@ -76,9 +77,10 @@ def test_absent_method_entry_is_explicit_not_fake_success(method, capsys):
 
     token = OPTIONS.set(LoginOptions(method, True, timeout=0.001))
     try:
-        with pytest.raises(LoginMethodUnavailable):
+        with pytest.raises(LoginTimeout):
             asyncio.run(confirm_method_entry(AbsentPage(), method))
     finally:
         OPTIONS.reset(token)
     output = capsys.readouterr().out
-    assert "METHOD_UNAVAILABLE" in output and "LOGIN_ENTRY=OBSERVED" not in output
+    assert "WAITING_FOR_ENTRY" in output and "LOGIN_ENTRY=OBSERVED" not in output
+    assert "METHOD_UNAVAILABLE" not in output
