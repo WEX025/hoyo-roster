@@ -122,10 +122,17 @@ async def run(args) -> int:
                     f"GENERATION={item['generation']}\nGENERATION_STATUS={item['status']}\nGENERATION_CURRENT={'YES' if item['current'] else 'NO'}"
                 )
             candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
+            try:
+                region = store.candidate_region
+                candidate_uid = config.uid(game)
+            except WorkspaceError:
+                region = None
+                candidate_uid = None
+                print("IDENTITY_BOUNDARY=UNPROVEN")
             for item in candidate.inspect_candidates(
                 candidate_base=store.candidate_base,
-                uid=config.uid(game),
-                region=store.candidate_region,
+                uid=candidate_uid,
+                region=region,
             ):
                 print(
                     f"CANDIDATE_RUN_ID={item.run_id}\nCANDIDATE_STATUS={item.status}\nCANDIDATE_CLEANUP_ALLOWED={'YES' if item.cleanup_allowed else 'NO'}"
@@ -136,7 +143,11 @@ async def run(args) -> int:
                     )
             return 0
         if operation == "recover":
-            store.recover(args.generation)
+            try:
+                store.recover(args.generation)
+            except Exception:
+                print(f"COMMIT_STATE={store.commit_state}")
+                raise
             emit("CLEANUP_PENDING" if store.cleanup_pending else "SAVED")
             print(f"COMMIT_STATE={store.commit_state}")
             return 0

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from .storage.candidate import CandidateScope, REGIONS
 from .storage.common import (
     AtomicWriteError,
     MetadataError,
@@ -200,6 +202,7 @@ class LocalSnapshotStore:
         self.commit_state = "NOT_COMMITTED"
         self.cleanup_pending = False
         self.transaction_file = self.root / "transaction.json"
+        self.identity_file = self.root / "workspace-identity.json"
 
     @contextmanager
     def locked(self) -> Iterator[LocalSnapshotStore]:
@@ -228,14 +231,62 @@ class LocalSnapshotStore:
 
     @property
     def candidate_region(self) -> str | None:
-        """Use the validated current region when present, without inferring one for a baseline."""
+        """Use durable identity authority, including when the current pointer is corrupt."""
+        region = self._identity_region()
+        # An unbound baseline is not authority to ignore contradictory saved data.
+        # Incomplete cleanup must be recovered before separate candidate cleanup.
+        found = False
+        for item in self.root.iterdir():
+            try:
+                self._generation(item.name)
+            except WorkspaceError:
+                continue
+            self._verify_generation(item)
+            found = True
+        if not found:
+            raise WorkspaceError("IDENTITY_BOUNDARY_UNPROVEN")
+        return region
+
+    def _identity_document(self, region: str | None) -> dict[str, object]:
+        return {
+            "authority": "hoyo-roster/workspace-identity-v1",
+            "scope": self.scope_digest,
+            "game": self.game,
+            "uid_digest": CandidateScope.identity(self.game, self._uid).uid_digest,
+            "region": region,
+        }
+
+    def _identity_region(self) -> str | None:
         try:
-            current = self.current()
-        except WorkspaceError:
-            return None
-        if current is None:
-            return None
-        return load_metadata(current / "data" / self.game / "profile.json")["account"]["server"]
+            self._verify_private_metadata(self.identity_file)
+            value = load_metadata(self.identity_file)
+            region = value["region"]
+            if value != self._identity_document(region) or (
+                region is not None and region not in REGIONS[self.game]
+            ):
+                raise ValueError
+            return region
+        except (MetadataError, OSError, ValueError, KeyError, TypeError):
+            raise WorkspaceError("IDENTITY_BOUNDARY_UNPROVEN") from None
+
+    def _profile_region(self, profile: object, region: str | None) -> str | None:
+        try:
+            if profile["game"] != self.game:
+                raise ValueError
+            account = profile["account"]
+            actual = account["server"]
+            if profile["sync"]["state"] == "not_synced":
+                if account["uid"] is not None or actual is not None:
+                    raise ValueError
+            elif (
+                account["uid"] != self._uid
+                or actual not in REGIONS[self.game]
+                or (region is not None and actual != region)
+            ):
+                raise ValueError
+            return actual
+        except (ValueError, KeyError, TypeError):
+            raise WorkspaceError("IDENTITY_MISMATCH") from None
 
     def _generation(self, name: object) -> Path:
         if not isinstance(name, str):
@@ -247,7 +298,8 @@ class LocalSnapshotStore:
             raise WorkspaceError("INVALID_GENERATION") from None
         return self.root / name
 
-    def _verify_generation(self, path: Path) -> None:
+    def _verify_generation(self, path: Path, *, region: str | None = None) -> None:
+        boundary = self._identity_region() if region is None else region
         tree_digest(path)
         if not path.is_dir():
             raise WorkspaceError("INVALID_CURRENT_POINTER")
@@ -258,9 +310,12 @@ class LocalSnapshotStore:
             ):
                 raise WorkspaceError("UNSAFE_GENERATION")
         marker = load_metadata(path / "generation.json")
+        profile = load_metadata(path / "data" / self.game / "profile.json")
+        actual = self._profile_region(profile, boundary)
         expected = {
-            "authority": "hoyo-roster/generation-v1",
+            "authority": "hoyo-roster/generation-v2",
             "scope": self.scope_digest,
+            "identity": self._identity_document(actual),
             "generation": path.name,
             "data_digest": tree_digest(path / "data"),
             "contracts_digest": hashlib.sha256(
@@ -269,8 +324,7 @@ class LocalSnapshotStore:
         }
         if marker != expected:
             raise WorkspaceError("GENERATION_OWNERSHIP_UNPROVEN")
-        profile = load_metadata(path / "data" / self.game / "profile.json")
-        if profile["account"]["uid"] not in (None, self._uid):
+        if actual is not None and boundary is None:
             raise WorkspaceError("IDENTITY_MISMATCH")
         for game in GAMES.values():
             if game != self.game:
@@ -324,6 +378,24 @@ class LocalSnapshotStore:
         return self._install(None)
 
     def commit(self, game_dir: Path) -> None:
+        self._require_lock()
+        self.commit_state = "NOT_COMMITTED"
+        self.cleanup_pending = False
+        region = self.candidate_region
+        root = game_dir.parent.parent
+        if root.parent != self.candidate_base or game_dir != root / "data" / self.game:
+            raise WorkspaceError("CANDIDATE_OWNERSHIP_UNPROVEN")
+        self._generation(root.name)
+        key = next(key for key, game in GAMES.items() if game == self.game)
+        module = importlib.import_module(f"hoyo_roster.games.{key}.candidate")
+        evidence = module.inspect_candidates(
+            candidate_base=self.candidate_base, uid=self._uid, region=region
+        )
+        if not any(
+            item.run_id == root.name and item.status == "VALIDATED" and item.cleanup_allowed
+            for item in evidence
+        ):
+            raise WorkspaceError("CANDIDATE_OWNERSHIP_UNPROVEN")
         self._install(game_dir)
 
     def logout(self) -> None:
@@ -379,24 +451,34 @@ class LocalSnapshotStore:
             for item in sorted(path.rglob("*"))
         }
 
-    def _verify_cleanup_inventory(self, path: Path, inventory: object) -> None:
-        # A partially deleted old generation cannot pass a full Validator again.
-        # The durable journal records its previously validated exact file hashes.
+    def _inventory_digest(self, inventory: object) -> str:
+        return hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
+
+    def _verify_inventory_document(self, inventory: object) -> None:
         if not isinstance(inventory, dict) or not inventory:
             raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
         for name, digest in inventory.items():
+            if not isinstance(name, str):
+                raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
             relative = Path(name)
-            if (
-                not isinstance(name, str)
-                or relative.is_absolute()
-                or ".." in relative.parts
-                or not relative.parts
-            ):
+            if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name:
                 raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
             if not isinstance(digest, str) or (
                 digest != "directory" and re.fullmatch("[0-9a-f]{64}", digest) is None
             ):
                 raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
+            for parent in relative.parents:
+                if parent != Path(".") and inventory.get(parent.as_posix()) != "directory":
+                    raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
+        required_files = ["generation.json", "data/manifest.json", "tools/validate_repository.py"]
+        for game in GAMES.values():
+            required_files.extend((f"data/{game}/profile.json", f"data/{game}/roster.json"))
+        if any(inventory.get(name) in (None, "directory") for name in required_files):
+            raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
+
+    def _verify_cleanup_inventory(self, path: Path, inventory: object, identity: object) -> None:
+        # A partially deleted generation uses the durable, previously validated inventory.
+        self._verify_inventory_document(inventory)
         if not set(self._inventory(path).items()).issubset(set(inventory.items())):
             raise WorkspaceError("CLEANUP_RESIDUE_CHANGED")
         for item in (path, *path.rglob("*")):
@@ -405,6 +487,20 @@ class LocalSnapshotStore:
                 0o700 if item.is_dir() else 0o600
             ):
                 raise WorkspaceError("UNSAFE_CLEANUP_RESIDUE")
+        marker = path / "generation.json"
+        if os.path.lexists(marker):
+            value = load_metadata(marker)
+            if (
+                not isinstance(value, dict)
+                or value.get("authority") != "hoyo-roster/generation-v2"
+                or value.get("scope") != self.scope_digest
+                or value.get("generation") != path.name
+                or value.get("identity") != identity
+            ):
+                raise WorkspaceError("GENERATION_OWNERSHIP_UNPROVEN")
+        profile = path / "data" / self.game / "profile.json"
+        if os.path.lexists(profile):
+            self._profile_region(load_metadata(profile), self._identity_region())
 
     def cleanup_generation(self, generation: str) -> None:
         self._require_lock()
@@ -421,71 +517,125 @@ class LocalSnapshotStore:
         self._sync_pointer_directory()
 
     def recover(self, generation: str | None = None) -> Path:
-        """Reconcile only scope-owned, fully validated generations under the lock."""
+        """Preflight the entire operation, then persist the pointer, then clean up."""
         self._require_lock()
+        self.commit_state = "NOT_COMMITTED"
+        self.cleanup_pending = False
+        target, cleanup, has_journal = self._recovery_plan(generation)
+        # No validation below this point: rejection cannot switch current or delete data.
+        try:
+            if generation is not None:
+                atomic_write_metadata(self.current_file, {"generation": target.name})
+            else:
+                self._sync_pointer_directory()
+        except AtomicWriteError:
+            self.commit_state = "DURABILITY_UNKNOWN"
+            raise WorkspaceError("COMMIT_DURABILITY_UNKNOWN") from None
+        except OSError:
+            if generation is None:
+                self.commit_state = "DURABILITY_UNKNOWN"
+                raise WorkspaceError("COMMIT_DURABILITY_UNKNOWN") from None
+            raise WorkspaceError("RECOVERY_COMMIT_FAILED") from None
+        self.commit_state = "COMMITTED"
+        return self._finish_recovery(target, cleanup, has_journal)
+
+    def _recovery_plan(self, generation: str | None) -> tuple[Path, list[Path], bool]:
+        self._identity_region()
         try:
             current = self.current()
         except WorkspaceError:
             current = None
             if generation is None:
                 raise WorkspaceError("RECOVERY_GENERATION_REQUIRED") from None
-        if generation is not None and os.path.lexists(self.transaction_file):
+        target = self._generation(generation) if generation is not None else current
+        if target is None:
+            raise WorkspaceError("WORKSPACE_NOT_INITIALIZED")
+        self._verify_generation(target)
+        cleanup = []
+        has_journal = os.path.lexists(self.transaction_file)
+        if has_journal:
             self._verify_private_metadata(self.transaction_file)
             journal = load_metadata(self.transaction_file)
             if (
                 not isinstance(journal, dict)
-                or set(journal) != {"authority", "scope", "old", "new", "inventories"}
-                or journal.get("authority") != "hoyo-roster/transaction-v1"
+                or set(journal)
+                != {"authority", "scope", "identity", "old", "new", "inventories", "evidence"}
+                or journal.get("authority") != "hoyo-roster/transaction-v2"
                 or journal.get("scope") != self.scope_digest
-                or generation not in (journal.get("old"), journal.get("new"))
+                or journal.get("identity") != self._identity_document(self._identity_region())
             ):
-                raise WorkspaceError("RECOVERY_REFERENCE_CONFLICT")
-        if generation is not None:
-            target = self._generation(generation)
-            self._verify_generation(target)
-            atomic_write_metadata(self.current_file, {"generation": target.name})
-            current = target
-        if current is None:
-            raise WorkspaceError("WORKSPACE_NOT_INITIALIZED")
-        # Confirm persistence before deleting any possibly referenced data.
-        self._sync_pointer_directory()
-        self.commit_state = "COMMITTED"
-        if os.path.lexists(self.transaction_file):
-            self._verify_private_metadata(self.transaction_file)
-            value = load_metadata(self.transaction_file)
+                raise WorkspaceError("UNOWNED_TRANSACTION")
+            new = self._generation(journal["new"])
+            old = self._generation(journal["old"]) if journal["old"] is not None else None
+            targets = [path for path in (old, new) if path is not None]
             if (
-                not isinstance(value, dict)
-                or set(value) != {"authority", "scope", "old", "new", "inventories"}
-                or value["authority"] != "hoyo-roster/transaction-v1"
-                or value["scope"] != self.scope_digest
+                old == new
+                or target not in targets
+                or (current is not None and current not in targets)
             ):
-                raise WorkspaceError("UNOWNED_TRANSACTION")
-            targets = [self._generation(n) for n in (value["old"], value["new"]) if n is not None]
-            if current not in targets:
                 raise WorkspaceError("RECOVERY_REFERENCE_CONFLICT")
-            inventories = value["inventories"]
-            if not isinstance(inventories, dict) or set(inventories) != {
-                target.name for target in targets
-            }:
+            # Even a corrupt generation can leave a readable reference. Do not erase
+            # an unrelated pointer just because its referenced data failed validation.
+            if os.path.lexists(self.current_file):
+                try:
+                    pointer = load_metadata(self.current_file)
+                except MetadataError:
+                    pointer = None
+                if isinstance(pointer, dict) and "generation" in pointer:
+                    reference = self._generation(pointer["generation"])
+                    if reference not in targets:
+                        raise WorkspaceError("RECOVERY_REFERENCE_CONFLICT")
+            inventories = journal["inventories"]
+            if not isinstance(inventories, dict) or set(inventories) != {p.name for p in targets}:
                 raise WorkspaceError("UNOWNED_TRANSACTION")
-            for target in targets:
-                if target != current and os.path.lexists(target):
-                    self._verify_cleanup_inventory(target, inventories[target.name])
-                    try:
-                        remove_owned_tree(target)
-                    except (OSError, MetadataError):
-                        self.cleanup_pending = True
-                        return current
-            self.transaction_file.unlink()
-            self._sync_pointer_directory()
+            evidence = journal["evidence"]
+            if not isinstance(evidence, dict) or set(evidence) != set(inventories):
+                raise WorkspaceError("UNOWNED_TRANSACTION")
+            for path in targets:
+                inventory = inventories[path.name]
+                self._verify_inventory_document(inventory)
+                proof = evidence[path.name]
+                if not isinstance(proof, dict) or set(proof) != {"identity", "inventory_digest"}:
+                    raise WorkspaceError("UNOWNED_TRANSACTION")
+                identity = proof["identity"]
+                if identity not in (
+                    self._identity_document(None),
+                    self._identity_document(self._identity_region()),
+                ) or proof["inventory_digest"] != self._inventory_digest(inventory):
+                    raise WorkspaceError("RECOVERY_INVENTORY_MISMATCH")
+                if path == target:
+                    if (
+                        inventory != self._inventory(path)
+                        or load_metadata(path / "generation.json")["identity"] != identity
+                    ):
+                        raise WorkspaceError("RECOVERY_INVENTORY_MISMATCH")
+                elif os.path.lexists(path):
+                    self._verify_cleanup_inventory(path, inventory, identity)
+                    cleanup.append(path)
+        return target, cleanup, has_journal
+
+    def _finish_recovery(self, target: Path, cleanup: list[Path], has_journal: bool) -> Path:
         self.cleanup_pending = False
-        return current
+        try:
+            for path in cleanup:
+                remove_owned_tree(path)
+            if has_journal:
+                self.transaction_file.unlink()
+                self._sync_pointer_directory()
+        except (OSError, MetadataError):
+            self.cleanup_pending = True
+        return target
 
     def _install(self, game_dir: Path | None) -> Path:
         self._require_lock()
         if os.path.lexists(self.transaction_file):
             raise WorkspaceError("RECOVERY_REQUIRED")
         self.commit_state = "NOT_COMMITTED"
+        if not os.path.lexists(self.identity_file):
+            if any(self.root.iterdir()):
+                raise WorkspaceError("IDENTITY_BOUNDARY_UNPROVEN")
+            atomic_write_metadata(self.identity_file, self._identity_document(None))
+        region = self._identity_region()
         old = self.current()
         allowed = {
             "current.json",
@@ -494,6 +644,7 @@ class LocalSnapshotStore:
             "request-state.json",
             "identity.key",
             "verified-identity.json",
+            "workspace-identity.json",
         }
         if old:
             allowed.add(old.name)
@@ -510,8 +661,9 @@ class LocalSnapshotStore:
             if existing is not None:
                 tree_digest(existing)
                 account = load_metadata(existing / "profile.json")
-                if account["account"]["uid"] not in (None, self._uid):
-                    raise WorkspaceError("IDENTITY_MISMATCH")
+                actual = self._profile_region(account, region)
+                if actual is not None:
+                    region = actual
                 target = new / "data" / self.game
                 remove_owned_tree(target)
                 shutil.copytree(existing, target)
@@ -519,8 +671,13 @@ class LocalSnapshotStore:
             write_json(
                 new / "generation.json",
                 {
-                    "authority": "hoyo-roster/generation-v1",
+                    "authority": "hoyo-roster/generation-v2",
                     "scope": self.scope_digest,
+                    "identity": self._identity_document(
+                        self._profile_region(
+                            load_metadata(new / "data" / self.game / "profile.json"), region
+                        )
+                    ),
                     "generation": new.name,
                     "data_digest": tree_digest(new / "data"),
                     "contracts_digest": hashlib.sha256(
@@ -539,7 +696,9 @@ class LocalSnapshotStore:
                     os.fsync(descriptor)
                 finally:
                     os.close(descriptor)
-            self._verify_generation(new)
+            self._verify_generation(new, region=region)
+            if region != self._identity_region():
+                atomic_write_metadata(self.identity_file, self._identity_document(region))
             inventories = {
                 path.name: self._inventory(path) for path in (old, new) if path is not None
             }
@@ -547,24 +706,30 @@ class LocalSnapshotStore:
             atomic_write_metadata(
                 self.transaction_file,
                 {
-                    "authority": "hoyo-roster/transaction-v1",
+                    "authority": "hoyo-roster/transaction-v2",
                     "scope": self.scope_digest,
+                    "identity": self._identity_document(region),
                     "old": old.name if old else None,
                     "new": new.name,
                     "inventories": inventories,
+                    "evidence": {
+                        path.name: {
+                            "identity": load_metadata(path / "generation.json")["identity"],
+                            "inventory_digest": self._inventory_digest(inventories[path.name]),
+                        }
+                        for path in (old, new)
+                        if path is not None
+                    },
                 },
             )
+            _, cleanup, _ = self._recovery_plan(new.name)
             try:
                 atomic_write_metadata(self.current_file, {"generation": new.name})
             except AtomicWriteError:
                 self.commit_state = "DURABILITY_UNKNOWN"
                 raise WorkspaceError("COMMIT_DURABILITY_UNKNOWN") from None
             self.commit_state = "COMMITTED"
-            try:
-                self.recover()
-            except (OSError, MetadataError):
-                self.cleanup_pending = True
-            return new
+            return self._finish_recovery(new, cleanup, True)
         except Exception:
             if self.commit_state == "PRE_COMMIT":
                 self.commit_state = "NOT_COMMITTED"

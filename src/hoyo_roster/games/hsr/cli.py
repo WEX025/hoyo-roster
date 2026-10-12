@@ -605,7 +605,9 @@ async def run_sync(
                 else:
                     sync_evidence.candidate_validator = "SKIPPED_NO_OP"
             finally:
-                if candidate is not None:
+                if candidate is not None and (
+                    snapshot_store is None or snapshot_store.commit_state == "COMMITTED"
+                ):
                     try:
                         await run_blocking(candidate.cleanup)
                     except Exception:
@@ -616,7 +618,7 @@ async def run_sync(
                             raise
                         snapshot_store.cleanup_pending = True
                         print("CANDIDATE_CLEANUP=PENDING", flush=True)
-                sync_evidence.candidate_removed = True
+                sync_evidence.candidate_removed = candidate is None or not candidate.root.exists()
             if dry_run:
                 _assert_formal_unchanged(repo_root, before)
                 sync_evidence.formal_data_unchanged = True

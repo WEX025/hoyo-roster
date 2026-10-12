@@ -284,7 +284,9 @@ async def run_sync(
                         await run_blocking(snapshot_store.commit, candidate.zzz_dir)
 
             finally:
-                if candidate is not None:
+                if candidate is not None and (
+                    snapshot_store is None or snapshot_store.commit_state == "COMMITTED"
+                ):
                     try:
                         await run_blocking(candidate.cleanup)
                     except Exception:
