@@ -1,16 +1,16 @@
 # hoyo-roster
 
 Python 3.12 单包；唯一用户入口 `hoyo-roster` / `python -m hoyo_roster`。
-先读 README.md、docs/local-use.md；数据格式见 docs/data-format.md，隐私见 docs/privacy.md。
+先读 [README.md](README.md)、[本机使用](docs/local-use.md) 的安装与环境说明；数据格式见 [docs/data-format.md](docs/data-format.md)，隐私见 [docs/privacy.md](docs/privacy.md)。核对 Python 3.12、项目依赖与 Playwright Chromium；安装/依赖/环境失败须明确报告阻塞，不冒充可用。CLI 参数以 [src/hoyo_roster/cli.py](src/hoyo_roster/cli.py) 和实际 `hoyo-roster --help` 为准。
 
 - 游戏实现位于 src/hoyo_roster/games/{genshin,zzz,hsr}；contracts 的 schema、空基线、验证器是格式权威。共享层只负责登录协调、锁、节流、候选和存储。
-- 明确的本人游戏/UID 请求只授权该身份本机采集。使用用户提供的 UID，不推断他人身份；必须精确验证官方 game/UID/region Binding。不同身份的 Profile、锁和节流保持独立。
-- 官方页面登录由本人选择二维码/手机号/取消并操作。会话有效时复用；凭据、手机号、验证码、Cookie/token、设备头、raw response、HAR/trace/截图不得收集、打印或提交。
+- 明确的本人游戏/UID 请求只授权该身份本机采集。仅使用用户本人的账号及明确提供的游戏/UID，不推断他人身份；必须精确验证官方 game/UID/region Binding。不同身份的 Profile、锁和节流保持独立。
+- 需新登录时，在打开可执行认证的登录页面前，先说明本人操作、官方通信、Profile 保存/复用及协议/权限边界，再取得允许并选择二维码/手机号/取消；`--login-method` 仅选择方式，非交互调用须按 CLI 要求明确方式、`--non-interactive` 和 `--allow-login`。协议阅读、勾选和最终确认由本人在官方页面完成，AI 不自动接受；未知新协议/额外权限须暂停并另行询问。会话有效时复用。凭据、手机号、验证码（OTP）、Cookie/token、设备头、raw response、HAR/trace/截图不得收集、打印、写入日志或提交。
 - 图片 CAPTCHA 必须明确提示本人在本工具打开的官方浏览器登录窗口点击；AI 不选择图片、不解图或绕过。暂停自动交互/Binding 探测并保留同一会话，面板消失后继续本人发码/登录及精确身份核验；不自动重发短信，不把页面倒计时当成实际送达。Ctrl-C 取消、超时或窗口关闭停止；重复检测不刷屏。其他风险控制仍停止。
 - 遇身份冲突、认证失效、风险控制、限流、schema/来源漂移应停止；不绕过验证、不自动第三次采集。保持两次业务及来源覆盖比较、Decimal、lifecycle、名单/Build bijection 和完整安装验证。
-- 崩坏：星穹铁道暂时无法获取，请不要使用；保留 hsr 实现/格式/接口只供开发和既有数据解释，不推荐用户登录或采集，不推断上游原因。原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，名单仍须闭合。绝区零已支持能力保留，仅满足闭合证据后 complete。不得为了成功放宽来源/完整度。
-- 默认结果集中在可核验的本项目源码仓库 data/（含 clone 后普通 pip install .）；不依赖 cwd。无源码安装回退用户目录，不写 site-packages。--storage-root 仅覆盖结果；Profile/key/认证指纹/节流和认证锁由 --auth-root 选择仓库外私有范围，不自动搬动/删除旧结果与 Profile。data/ 仅跟踪 .gitkeep，禁止提交个人结果；普通 gitignore 不保护已跟踪/强制 add/目录打包，提交前运行 python tools/check_private_data.py（只查索引路径）。正常同步不提交/上传。存储提交前失败保留旧 current；replace 后持久化未知保留所有可能引用代际；已提交的清理失败报告待办。恢复核验所有权、身份、当前引用和验证，不能按 UUID 盲删。
+- 崩坏：星穹铁道暂时无法获取，请不要使用；保留 hsr 实现/格式/接口只供开发和既有数据解释，不推荐用户登录或采集，不推断上游原因。原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，名单仍须闭合。绝区零保留代理人养成、音擎、驱动盘、面板和邦布的既有支持范围，仅满足闭合证据后 complete。不得为了成功放宽来源/完整度。
+- 默认结果集中在可核验的本项目源码仓库 data/（含 clone 后普通 pip install .），按游戏/UID 派生哈希隔离；不依赖 cwd。无源码安装回退用户目录，不写 site-packages。--storage-root 仅覆盖结果；Profile/key/认证指纹/节流和认证锁由 --auth-root 选择仓库外私有范围，不自动搬动/删除旧结果与 Profile。data/ 仅跟踪 .gitkeep，禁止提交个人结果；普通 gitignore 不保护已跟踪/强制 add/目录打包，提交前运行 python tools/check_private_data.py（只查索引路径）。正常同步不提交/上传。存储提交前失败保留旧 current；replace 后持久化未知保留所有可能引用代际；已提交的清理失败报告待办。恢复核验所有权、身份、当前引用和验证，不能按 UUID 盲删。
 - 开发使用临时目录、合成身份和临时认证根，只替浏览器/网络。按变更范围运行定向 pytest 与受影响回归；影响扩大才有根据扩展。运行 `python -m ruff check src tests tools --select F`、`python -m ruff format --check src tests tools`、`python tools/validate_repository.py --require-empty-baseline` 与 `--self-test`。打包修改另跑 `python -m build` 和干净安装资源检查。
-- 报告固定 SHA、实际命令及 PASS/FAIL/NOT_RUN；离线成功不等于真实账号验收。公开 PR/Issue 不含个人路径或数据。未经授权不改可见性、部署、合并、CI/Actions或私有数据仓库。
+- 向本人报告实际结果路径（RESULT_SCOPE、CURRENT_POINTER、有效时的 CURRENT_RESULT）及支持字段缺口；报告固定 SHA、实际命令及 PASS/FAIL/NOT_RUN，失败或未执行不得冒充成功，离线成功不等于真实账号验收。公开 PR/Issue 不含个人路径或数据。未经授权不改可见性、部署、合并、CI/Actions或私有数据仓库。
 
-本文件为项目代理规则权威。按 [OpenAI AGENTS 指南](https://developers.openai.com/codex/guides/agents-md/)保留短且可执行的项目规则；可选技能仅在 .agents/skills 中提供入口，遵循 [skills 建议](https://developers.openai.com/codex/skills/)并避免复制规则。Dot/App 专属工具的存在不保证普通 CLI 环境具有这些能力。
+本文件为项目代理规则权威；CLAUDE.md 仅指向本文件，README 面向用户保持简短，不在其他入口复制项目代理规则。按 [OpenAI AGENTS 指南](https://developers.openai.com/codex/guides/agents-md/)保留短且可执行的项目规则；可选技能仅在 .agents/skills 中提供入口，遵循 [skills 建议](https://developers.openai.com/codex/skills/)并避免复制规则。Dot/App 专属工具的存在不保证普通 CLI 环境具有这些能力。
