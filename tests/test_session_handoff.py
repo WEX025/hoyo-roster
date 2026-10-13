@@ -519,7 +519,10 @@ def test_login_then_new_process_sync_reuses_same_synthetic_profile(tmp_path, hea
 
 @pytest.mark.parametrize("game", ("genshin", "zzz"))
 @pytest.mark.parametrize("close_failure", (False, True))
-def test_persistent_close_finishes_before_runtime_stop(tmp_path, monkeypatch, game, close_failure):
+@pytest.mark.parametrize("headed", (False, True))
+def test_persistent_close_finishes_before_runtime_stop(
+    tmp_path, monkeypatch, game, close_failure, headed
+):
     import importlib
 
     browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
@@ -540,6 +543,8 @@ def test_persistent_close_finishes_before_runtime_stop(tmp_path, monkeypatch, ga
 
         async def launch_persistent_context(self, **kwargs):
             assert kwargs["user_data_dir"] == str(tmp_path / "profile")
+            assert kwargs["channel"] == "chromium"
+            assert kwargs["headless"] is (not headed)
             return context
 
     class Runtime:
@@ -563,7 +568,7 @@ def test_persistent_close_finishes_before_runtime_stop(tmp_path, monkeypatch, ga
 
     async def use():
         async with browser.persistent_browser(
-            repo_root=tmp_path / "repo", browser_profile=tmp_path / "profile", headed=False
+            repo_root=tmp_path / "repo", browser_profile=tmp_path / "profile", headed=headed
         ):
             events.append("use")
 

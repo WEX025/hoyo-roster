@@ -123,6 +123,8 @@ async def persistent_browser(
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=str(profile),
                 headless=not headed,
+                # One executable owns this Profile in both modes; never switch to headless shell.
+                channel="chromium",
                 accept_downloads=False,
             )
         except PlaywrightError as exc:

@@ -121,3 +121,5 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 浏览器关闭后执行 `--operation logout`：只删除该身份 Profile 和已验证身份指纹；角色数据保留。发现 Singleton 标识时停止，要求先检查是否仍有浏览器进程。退出登录不会退出其他应用的米游社会话。
 
 卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。
+
+可见登录与 `--headless` 会话复用使用同一个完整 Chromium channel，避免两个浏览器可执行文件混用同一 Profile。本轮 Mac 原生合成交接证据见 [Profile 验证记录](browser-profile-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。

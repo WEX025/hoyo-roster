@@ -35,3 +35,5 @@ python tools/verify_distribution.py
 本项目采用 MIT；新增依赖先核实实际版本许可证并更新 THIRD_PARTY_NOTICES，不引入未授权游戏素材。不添加 CI/Actions、部署、合并或后台服务作为常规修改的一部分。
 
 本轮架构整理、引用清理和定向自测证据见 [架构验证记录](docs/architecture-validation.md)；Windows 实机边界仍见平台支持文档。
+
+涉及浏览器可见/无头切换或 Profile 复用时，安装 Chromium 后运行 `python tools/browser_profile_smoke.py`。它仅创建新临时合成 Profile，不登录、不访问官方服务，不读取真实认证。
