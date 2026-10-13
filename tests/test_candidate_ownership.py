@@ -321,4 +321,9 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     assert not candidate.exists() and foreign.exists()
     assert store.current() == current and tree_digest(current) == digest
     output = capsys.readouterr().out
-    assert UID_A not in output and UID_B not in output and str(root) not in output
+    diagnostics = "\n".join(
+        line
+        for line in output.splitlines()
+        if not line.startswith(("RESULT_SCOPE=", "CURRENT_POINTER=", "CURRENT_RESULT="))
+    )
+    assert UID_A not in output and UID_B not in output and str(root) not in diagnostics

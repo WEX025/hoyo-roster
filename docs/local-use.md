@@ -4,7 +4,13 @@
 
 ## 首次使用
 
-按 README 安装 Python 3.12、项目和 Playwright Chromium。在源码目录之外保存个人结果；可用 `--storage-root /absolute/private/path` 选择新目录。程序逐层把**本轮新建目录**设为 0700，不修改已存在的共享父目录。已存在的 storage-root 必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`；请选择新的私有子目录。普通结果和程序元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
+按 README 安装 Python 3.12、项目和 Playwright Chromium。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 `~/.local/share/hoyo-roster/results`，不会静默写入 `site-packages`。
+
+`--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认 `~/.local/share/hoyo-roster`；必须在所有 Git 仓库和包源码之外，属于当前用户且为 0700。Profile、认证 key/指纹、节流与认证锁按原身份布局留在那里；不同结果根共用同一认证范围时仍由认证锁互斥。
+
+结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证范围为 `<认证根>/users/<scope>/<game>/<hash>/`。scope/hash 由游戏和 UID 确定，不含明文 UID。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
+
+程序逐层把**新建应用目录**设为 0700，不修改已有共享父目录。clone 创建且包含 `.gitkeep` 的顶层 `data/` 可保持属于本人、不可被组/其他人写入的 0755 权限；其下身份目录仍须 0700。其他已存在的结果根、认证根及身份目录必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`。普通结果和元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
 
 ```bash
 hoyo-roster --game genshin --uid YOUR_UID --operation init
@@ -32,7 +38,9 @@ hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --
 
 ## 升级
 
-关闭本工具，更新或重新安装代码，然后运行原命令。程序从发行包携带的 contracts 生成新代际，复制本身份已保存数据，做完整验证，再替换 current 指针。升级不复制其他身份的 Profile，不从旧私有仓库导入数据。当前版本不提供旧 Broker、Runtime、users.toml 或候选格式迁移，也不迁移缺少独立身份边界的旧本机工作区及旧恢复日志。旧格式保留并拒绝操作；不能删除身份标记来重建或解除区服约束。
+关闭本工具，更新或重新安装代码，然后运行原命令。此次默认结果位置调整不自动迁移、删除或读取旧结果，不搬动 Profile；仓库 `data/` 会作为新的结果根，而旧默认认证身份范围继续复用。要检查旧默认结果，显式指定 `--storage-root ~/.local/share/hoyo-roster --operation inspect`；要继续在那里保存，保留这个覆盖。原先使用自选旧根的用户，可同时传 `--storage-root /absolute/old/private --auth-root /absolute/old/private` 在仓库外继续使用原结果和 Profile。两根共用仅允许在仓库外，不要把含 Profile/key 的旧根整体搬入 `data/`。
+
+如需人工迁移，先关闭所有相关进程并私下备份，按游戏/UID 核对完整结果身份范围（指针、代际、候选、工作区身份与恢复日志），只将结果部分复制到新的同身份范围；认证 Profile、identity.key、verified-identity.json、request-state.json 和认证锁留在旧私有位置。先用明确结果根 inspect/recover 验证，旧副本保留到本人确认成功；程序不提供自动迁移。程序从发行包携带的 contracts 生成新代际，复制本身份已保存数据，做完整验证，再替换 current 指针。升级不复制其他身份的 Profile，不从旧私有仓库导入数据。当前版本不提供旧 Broker、Runtime、users.toml 或候选格式迁移，也不迁移缺少独立身份边界的旧本机工作区及旧恢复日志。旧格式保留并拒绝操作；不能删除身份标记来重建或解除区服约束。
 
 ## 检查与恢复
 
@@ -41,7 +49,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation inspect
 hoyo-roster --game genshin --uid YOUR_UID --operation recover
 ```
 
-inspect 在 current 缺失或失效时仍给出 `EMPTY` / `INVALID`、代际 UUID 与 `VERIFIED` / `UNVERIFIED`、是否有恢复日志和候选状态；不输出 UID、路径或 JSON 内容。UUID 是本机恢复标识，也应在公开反馈时脱敏。
+inspect 在 current 缺失或失效时仍给出 `EMPTY` / `INVALID`、代际 UUID 与 `VERIFIED` / `UNVERIFIED`、是否有恢复日志和候选状态；不输出 UID 或 JSON 内容；会显示本机结果路径，公开反馈前应脱敏。UUID 是本机恢复标识，也应在公开反馈时脱敏。
 
 保存有三个边界：
 

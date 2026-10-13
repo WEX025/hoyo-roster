@@ -13,8 +13,13 @@ python -m ruff check src tests tools --select F
 python -m ruff format --check src tests tools
 python tools/validate_repository.py --require-empty-baseline
 python tools/validate_repository.py --self-test
+python tools/check_private_data.py
 python -m build
 ```
+
+禁止提交个人结果。源码 `data/` 只允许跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略；认证目录必须在仓库外。提交前运行 `python tools/check_private_data.py`，它只检查 Git 索引路径、不读取私人内容，只要 data/ 内跟踪了其他文件就报错。检查失败时先保留本机文件，再从索引取消跟踪（例如 `git rm --cached -- PATH`），重新检查；已经上传的个人数据还须私下处理暴露与历史，不能认为后续忽略就能撤回。`.gitignore` 不保护已跟踪文件、强制 add 或整个目录打包。此检查是手动本地命令，不安装 hooks，也不新增 CI/workflow。
+
+测试使用临时目录与合成身份，认证 HOME/--auth-root 同样指向临时私有根。按改动范围运行定向测试及受影响回归；只有影响扩大时才有根据地扩展，不以默认全仓测试替代边界判断。
 
 合成回归只替换浏览器、网络及其时间等待，业务 Provider、协调器、双次采集、normalize、lifecycle、candidate 和 store 应运行真实代码。增加关键失败/恢复测试；不要以单个函数 stub 的成功证明完整链路。资源验证须从干净 wheel/sdist 安装运行，包含三游戏模块、schema 和验证器。
 

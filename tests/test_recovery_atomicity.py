@@ -152,7 +152,14 @@ def test_entire_journal_preflight_preserves_all_state(tmp_path, capsys, game, ex
     assert invoke(store, "recover", *extra) == 1
     output = capsys.readouterr().out
     assert "COMMIT_STATE=NOT_COMMITTED" in output
-    assert UID_A not in output and str(tmp_path) not in output
+    diagnostics = "\n".join(
+        line
+        for line in output.splitlines()
+        if not line.startswith(("RESULT_SCOPE=", "CURRENT_POINTER=", "CURRENT_RESULT="))
+    )
+    assert f"RESULT_SCOPE={store.root}" in output
+    assert f"CURRENT_POINTER={store.current_file}" in output
+    assert UID_A not in output and str(tmp_path) not in diagnostics
     assert tree_digest(store.root) == before
 
 

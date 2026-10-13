@@ -27,6 +27,7 @@ for wheel in (ROOT / "dist").glob("*.whl"):
             "chromium" in n.lower() or "hoyo_browser_session" in n or "state.sqlite3" in n
             for n in names
         )
+        assert not any(name.startswith("data/") for name in names)
     print("WHEEL_RESOURCES=PASS")
 for sdist in (ROOT / "dist").glob("*.tar.gz"):
     with tarfile.open(sdist) as archive:
@@ -43,7 +44,9 @@ for sdist in (ROOT / "dist").glob("*.tar.gz"):
             "AGENTS.md",
             "CLAUDE.md",
             ".agents/skills/local-roster/SKILL.md",
+            "data/.gitkeep",
         ]:
             assert path in members, path
+        assert {path for path in members if path.startswith("data/")} == {"data/.gitkeep"}
     print("SDIST_RESOURCES=PASS")
 print(f"PACKAGE_RESOURCE_COUNT={len(required)}")

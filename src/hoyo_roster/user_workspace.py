@@ -14,11 +14,12 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from . import paths
 from .storage.candidate import CandidateScope, REGIONS
 from .storage.common import (
     AtomicWriteError,
@@ -36,7 +37,7 @@ GAMES = {
     "hsr": "honkai-star-rail",
     "zzz": "zenless-zone-zero",
 }
-DEFAULT_DIRECT_ROOT = Path("~/.local/share/hoyo-roster")
+DEFAULT_DIRECT_ROOT = paths.PRIVATE_ROOT
 _ALIAS = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
 _UID = re.compile(r"[1-9][0-9]{0,31}\Z")
 
@@ -66,6 +67,7 @@ class UserConfiguration:
     user: str
     storage_root: Path
     uids: dict[str, str] = field(repr=False)
+    auth_root: Path = DEFAULT_DIRECT_ROOT
 
     def uid(self, game: str) -> str:
         if game not in self.uids:
@@ -77,18 +79,23 @@ def direct_configuration(
     game: str,
     uid: str,
     *,
-    storage_root: Path = DEFAULT_DIRECT_ROOT,
+    storage_root: Path | None = None,
+    auth_root: Path | None = None,
 ) -> UserConfiguration:
     """Resolve an explicit selector without reading or writing any config file."""
     if game not in GAMES:
         raise WorkspaceError("INVALID_GAME")
     if not isinstance(uid, str) or not _UID.fullmatch(uid):
         raise WorkspaceError("INVALID_UID")
+    storage_root = paths.default_storage_root() if storage_root is None else storage_root
+    auth_root = DEFAULT_DIRECT_ROOT if auth_root is None else auth_root
     if not storage_root.expanduser().is_absolute():
         raise WorkspaceError("INVALID_STORAGE_ROOT")
+    if not auth_root.expanduser().is_absolute():
+        raise WorkspaceError("INVALID_AUTH_ROOT")
     digest = hashlib.sha256(f"direct:v1:{game}:{uid}".encode()).hexdigest()
     alias = f"direct-{game}-{digest[:48]}"
-    return UserConfiguration(alias, storage_root, {game: uid})
+    return UserConfiguration(alias, storage_root, {game: uid}, auth_root)
 
 
 def validate_workspace(root: Path) -> None:
@@ -174,12 +181,6 @@ class LocalSnapshotStore:
 
     def __init__(self, source: Path, config: UserConfiguration, game: str) -> None:
         self.source = source.resolve()
-        for parent in (self.source, *self.source.parents):
-            if (parent / ".git").exists():
-                candidate = config.storage_root.expanduser().resolve()
-                if candidate.is_relative_to(parent) or parent.is_relative_to(candidate):
-                    raise WorkspaceError("UNSAFE_STORAGE_ROOT")
-                break
         if not _ALIAS.fullmatch(config.user) or game not in GAMES:
             raise WorkspaceError("INVALID_CONFIG")
         self.game = GAMES[game]
@@ -189,14 +190,50 @@ class LocalSnapshotStore:
         resolved = config.storage_root.expanduser().resolve()
         if resolved.is_relative_to(self.source) or self.source.is_relative_to(resolved):
             raise WorkspaceError("UNSAFE_STORAGE_ROOT")
-        root = private_directory(config.storage_root)
+        repository = paths.project_repository()
+        owner = paths.containing_repository(resolved)
+        repository_data = repository / "data" if repository else None
+        if owner is not None and (
+            repository_data is None or not resolved.is_relative_to(repository_data)
+        ):
+            raise WorkspaceError("UNSAFE_STORAGE_ROOT")
+        if repository is not None and repository.is_relative_to(resolved):
+            raise WorkspaceError("UNSAFE_STORAGE_ROOT")
+        auth = config.auth_root.expanduser().resolve()
+        if (
+            paths.containing_repository(auth) is not None
+            or auth.is_relative_to(self.source)
+            or self.source.is_relative_to(auth)
+            or (repository is not None and repository.is_relative_to(auth))
+        ):
+            raise WorkspaceError("UNSAFE_AUTH_ROOT")
+        # A cloned data/ container is usually 0755 because of its tracked placeholder.
+        # Leave it unchanged; all identity directories below it must still be 0700.
+        if resolved == repository_data and config.storage_root.exists():
+            metadata = config.storage_root.lstat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or metadata.st_mode & 0o022
+            ):
+                raise WorkspaceError("UNSAFE_PRIVATE_DIRECTORY")
+            root = config.storage_root
+        else:
+            root = private_directory(config.storage_root)
         self.user_root = private_directory(root / "users" / config.user)
         key = hashlib.sha256(f"{game}:{self._uid}".encode()).hexdigest()
         self.root = private_directory(self.user_root / game / key)
         self.candidate_base = self.root / "candidates"
-        # Browser state follows the same exact game/UID boundary as personal data.
-        # Existing advanced-mode shared Profiles are preserved, never copied or deleted.
-        self.browser_profile = self.root / "browser-profile"
+        auth = private_directory(config.auth_root)
+        self.auth_user_root = private_directory(auth / "users" / config.user)
+        self.auth_root = private_directory(self.auth_user_root / game / key)
+        if owner is not None and any(
+            os.path.lexists(self.root / name)
+            for name in ("browser-profile", "identity.key", "verified-identity.json")
+        ):
+            raise WorkspaceError("AUTH_STATE_IN_RESULT_DIRECTORY")
+        # Keep the old default authentication scope for session reuse; never migrate it.
+        self.browser_profile = self.auth_root / "browser-profile"
         self.current_file = self.root / "current.json"
         self._locked = False
         self.commit_state = "NOT_COMMITTED"
@@ -206,8 +243,20 @@ class LocalSnapshotStore:
 
     @contextmanager
     def locked(self) -> Iterator[LocalSnapshotStore]:
+        # Serialize both result writes and auth/session reuse across result destinations.
+        with ExitStack() as stack:
+            for root in sorted({self.user_root, self.auth_user_root}):
+                stack.enter_context(self._lock_directory(root))
+            self._locked = True
+            try:
+                yield self
+            finally:
+                self._locked = False
+
+    @contextmanager
+    def _lock_directory(self, root: Path) -> Iterator[None]:
         descriptor = os.open(
-            self.user_root / "workspace.lock",
+            root / "workspace.lock",
             os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
             0o600,
         )
@@ -219,10 +268,8 @@ class LocalSnapshotStore:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise WorkspaceError("USER_WORKSPACE_BUSY") from None
-            self._locked = True
-            yield self
+            yield
         finally:
-            self._locked = False
             os.close(descriptor)
 
     @property
@@ -415,7 +462,7 @@ class LocalSnapshotStore:
             ):
                 raise WorkspaceError("BROWSER_PROFILE_IN_USE_OR_STALE")
             remove_owned_tree(self.browser_profile)
-        for path in (self.root / "identity.key", self.root / "verified-identity.json"):
+        for path in (self.auth_root / "identity.key", self.auth_root / "verified-identity.json"):
             if os.path.lexists(path):
                 metadata = path.lstat()
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():

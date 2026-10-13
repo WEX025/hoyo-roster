@@ -86,7 +86,13 @@ hoyo-roster --game zzz --uid YOUR_UID --non-interactive --allow-login --login-me
 
 每次同步先核验所选游戏、UID 和区服，再采集两次；业务结果和来源覆盖一致、数据通过验证后才保存。不同游戏的字段范围见上方支持矩阵；只保存当前已支持的装备字段，不保存库存、货币、资源或推荐配装。
 
-默认数据位于 `~/.local/share/hoyo-roster`，按游戏和 UID 派生的哈希值隔离。不同身份使用独立的浏览器会话目录、锁和节流状态；哈希不是加密，也不能据此公开分享整个目录。可用 `--storage-root` 指定源码目录之外的私有数据位置，目录权限要求见[本机使用指南](docs/local-use.md)。
+从本项目 Git 仓库源码运行，或按上方步骤克隆后执行 `pip install .` / `pip install -e .`，结果默认集中在该仓库的 `data/`，按游戏和 UID 派生哈希隔离。程序从源码位置或安装时记录的本地源码地址核验本项目仓库；从仓库子目录或其他当前目录运行仍使用同一结果根，不选择当前目录里的任意仓库。单独安装 wheel、源码仓库已删除或无法核验时，结果回退到 `~/.local/share/hoyo-roster/results`，不会写入 `site-packages`。`--storage-root /absolute/private/results` 只覆盖结果位置。
+
+浏览器 Profile、认证 key/指纹、认证锁和节流继续留在仓库外的 `~/.local/share/hoyo-roster`，保持原游戏/UID 身份范围；可用 `--auth-root /absolute/private/auth` 明确覆盖认证根，必须在仓库外。默认改变结果位置不会自动迁移、删除旧结果或 Profile。旧结果的查看与复用方法见[本机使用指南](docs/local-use.md)。
+
+终端显示 `RESULT_SCOPE`（身份结果目录）、`CURRENT_POINTER`（当前指针）和 `CURRENT_RESULT`（当前 JSON 所在目录），据此打开 `profile.json`、`roster.json`、`builds/` 及绝区零的 `bangboos.json`。结果仍是当前快照，哈希不是加密；完整本机路径也不要贴到公开反馈。
+
+仓库只跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略。普通 `git add .` 不带出这些结果，但忽略规则不能保护已经跟踪或强制添加的文件，也不保护整个目录的打包分享。提交前运行 `python tools/check_private_data.py`，检查只读取 Git 路径列表，不读取私人内容；禁止提交个人结果。
 
 正常同步只保存本机数据，不修改源码，不提交或上传个人结果；浏览器仍会与官方页面及其引用的服务通信。会话目录包含敏感登录状态，不属于正式角色结果，不应收集、输出或上传。程序输出不打印 UID 或凭据，但你输入的 UID 可能留在命令行历史和进程参数中。
 

@@ -17,7 +17,6 @@ from .errors import OperationError, LoginTimeout
 from .progress import OPTIONS, LoginOptions, emit
 from .request_gate import RequestGate
 from .user_workspace import (
-    DEFAULT_DIRECT_ROOT,
     GAMES,
     LocalSnapshotStore,
     WorkspaceError,
@@ -36,6 +35,12 @@ OPERATIONS = (
     "logout",
 )
 CONTRACT_ROOT = Path(__file__).resolve().parent / "contracts"
+
+
+def print_current_result(store: LocalSnapshotStore) -> None:
+    current = store.current()
+    if current is not None:
+        print(f"CURRENT_RESULT={current / 'data' / store.game}")
 
 
 class PrivateArgumentParser(argparse.ArgumentParser):
@@ -75,7 +80,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--uid", help="your own UID; exact official Binding is required")
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
-    parser.add_argument("--storage-root", type=Path, default=DEFAULT_DIRECT_ROOT)
+    parser.add_argument(
+        "--storage-root",
+        type=Path,
+        help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为 ~/.local/share/hoyo-roster/results；不改变认证目录",
+    )
+    parser.add_argument(
+        "--auth-root",
+        type=Path,
+        help="仓库外的私有认证根目录（绝对路径，0700）；默认 ~/.local/share/hoyo-roster，保留旧会话范围",
+    )
     parser.add_argument("--login-method", choices=("qr", "phone", "cancel"))
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument(
@@ -131,7 +145,9 @@ def select_configuration(args):
         except ValueError:
             raise WorkspaceError(invalid) from None
     return (
-        direct_configuration(args.game, args.uid, storage_root=args.storage_root),
+        direct_configuration(
+            args.game, args.uid, storage_root=args.storage_root, auth_root=args.auth_root
+        ),
         args.game,
         args.operation,
     )
@@ -141,8 +157,11 @@ async def run(args) -> int:
     config, game, operation = select_configuration(args)
     store = LocalSnapshotStore(CONTRACT_ROOT, config, game)
     with store.locked():
+        print(f"RESULT_SCOPE={store.root}\nCURRENT_POINTER={store.current_file}")
         if operation == "inspect":
             state = store.inspect()
+            if state["current"] == "PRESENT":
+                print_current_result(store)
             print(
                 f"CURRENT_WORKSPACE={state['current']}\nRECOVERY_REQUIRED={'YES' if state['recovery_required'] else 'NO'}"
             )
@@ -178,6 +197,7 @@ async def run(args) -> int:
                 print(f"COMMIT_STATE={store.commit_state}")
                 raise
             emit("CLEANUP_PENDING" if store.cleanup_pending else "SAVED")
+            print_current_result(store)
             print(f"COMMIT_STATE={store.commit_state}")
             return 0
         if operation == "cleanup-generation":
@@ -211,6 +231,7 @@ async def run(args) -> int:
             print("LOCAL_SESSION=REMOVED")
             return 0
         workspace = store.prepare()
+        print_current_result(store)
         if store.cleanup_pending:
             emit("CLEANUP_PENDING")
             return 0 if operation == "init" else 1
@@ -218,7 +239,7 @@ async def run(args) -> int:
             print("LOCAL_WORKSPACE=READY")
             return 0
         module = importlib.import_module(MODULES[game])
-        gate = RequestGate(Settings(external_root=store.root))
+        gate = RequestGate(Settings(external_root=store.auth_root))
         domain_args = argparse.Namespace(
             repo_root=workspace,
             browser_profile=store.browser_profile,
@@ -243,6 +264,7 @@ async def run(args) -> int:
                 print("STATUS=PASS\nSTABLE_CODE=PASS")
             if store.cleanup_pending:
                 emit("CLEANUP_PENDING")
+            print_current_result(store)
             print(f"COMMIT_STATE={store.commit_state}")
             return result
         except module.SyncError as error:

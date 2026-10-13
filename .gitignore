@@ -31,7 +31,11 @@ recordings/
 videos/
 traces/
 
-# Per-user configuration/output belongs outside the source checkout.
+# Personal results may live in data/; authentication stays outside the checkout.
+/data/*
+!/data/.gitkeep
+
+# Other private configuration/output.
 .env
 .env.*
 users.toml

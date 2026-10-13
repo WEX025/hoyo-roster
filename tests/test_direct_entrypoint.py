@@ -178,6 +178,7 @@ class BusinessPage(Page):
 
 
 @pytest.mark.parametrize("uid", (UID_A, UID_B))
+@pytest.mark.parametrize("repository_output", (False, True))
 def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     tmp_path,
     source,
@@ -185,6 +186,7 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     monkeypatch,
     capsys,
     uid,
+    repository_output,
 ):
     import hoyo_roster.games.genshin.cli as domain
     from hoyo_roster.games.genshin.browser import BrowserSession, OfficialCollector
@@ -207,13 +209,21 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
     monkeypatch.setattr(OfficialCollector, "_throttle", simulated_network_pacing)
     root = tmp_path / "private"
+    if repository_output:
+        from hoyo_roster import paths
+
+        repo = tmp_path / "clone"
+        (repo / ".git").mkdir(parents=True)
+        root = repo / "data"
+        root.mkdir(mode=0o755)
+        (root / ".gitkeep").touch()
+        monkeypatch.setattr(paths, "project_repository", lambda: repo)
     args = [
         "--game",
         "genshin",
         "--uid",
         uid,
-        "--storage-root",
-        str(root),
+        *([] if repository_output else ["--storage-root", str(root)]),
         "--allow-login",
         "--login-method",
         "qr",

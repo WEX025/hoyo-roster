@@ -102,7 +102,12 @@ def test_sync_rejects_storage_failure_without_deleting_candidate(
         )
     output = capsys.readouterr().out
     assert "COLLECTING_2" in output and "SAVING" in output
-    assert UID_A not in output and str(root) not in output
+    diagnostics = "\n".join(
+        line
+        for line in output.splitlines()
+        if not line.startswith(("RESULT_SCOPE=", "CURRENT_POINTER=", "CURRENT_RESULT="))
+    )
+    assert UID_A not in output and str(root) not in diagnostics
     candidates = list(store.candidate_base.iterdir())
     assert (
         len(candidates) == 1
