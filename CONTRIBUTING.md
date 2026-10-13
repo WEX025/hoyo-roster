@@ -2,6 +2,8 @@
 
 先读 AGENTS.md。项目是 Python 3.12 单包、单用户命令；游戏源码在 `src/hoyo_roster/games/{genshin,zzz,hsr}`，共享登录/存储层只协调，不把不同游戏或身份混成同一 authority。contracts 内的 schema、空基线和验证器随 wheel/sdist 分发。
 
+当前产品边界：崩坏：星穹铁道暂时无法获取，请不要使用；保留实现/格式仅供开发和既有数据解释。原神目前不含圣遗物和完整属性面板，名单仍须闭合；绝区零已支持能力保持。技术模块、合成测试或历史安装验证存在不构成星铁可用承诺，不推断上游原因。
+
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate

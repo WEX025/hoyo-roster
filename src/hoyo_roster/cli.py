@@ -1,4 +1,8 @@
-"""Collect one explicitly selected game identity into private local storage."""
+"""Collect private local Genshin or ZZZ state.
+
+Honkai: Star Rail is temporarily unavailable; please do not use it.
+Genshin currently excludes artifacts and full stat panels.
+"""
 
 from __future__ import annotations
 import argparse
@@ -56,12 +60,19 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hoyo-roster",
         description=__doc__,
         epilog=(
+            "崩坏：星穹铁道暂时无法获取，请不要使用；hsr 参数仅保留接口。"
+            "原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，角色名单仍须闭合。"
+            "绝区零已支持能力保留，详见 docs/data-format.md。"
             "图片 CAPTCHA 请本人在本工具打开的官方浏览器窗口点击；AI 不自动选择、解图或绕过。"
             "验证期间暂停自动身份探测并保留会话，完成后继续本人发码/登录和精确身份核验；"
             "不自动重发短信，页面倒计时不代表实际送达。Ctrl-C 取消，窗口关闭停止。"
         ),
     )
-    parser.add_argument("--game", choices=tuple(GAMES))
+    parser.add_argument(
+        "--game",
+        choices=tuple(GAMES),
+        help="genshin/zzz; hsr interface retained, temporarily unavailable, do not use hsr",
+    )
     parser.add_argument("--uid", help="your own UID; exact official Binding is required")
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument("--storage-root", type=Path, default=DEFAULT_DIRECT_ROOT)

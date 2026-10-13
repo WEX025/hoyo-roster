@@ -8,7 +8,7 @@ Python 3.12 单包；唯一用户入口 `hoyo-roster` / `python -m hoyo_roster`�
 - 官方页面登录由本人选择二维码/手机号/取消并操作。会话有效时复用；凭据、手机号、验证码、Cookie/token、设备头、raw response、HAR/trace/截图不得收集、打印或提交。
 - 图片 CAPTCHA 必须明确提示本人在本工具打开的官方浏览器登录窗口点击；AI 不选择图片、不解图或绕过。暂停自动交互/Binding 探测并保留同一会话，面板消失后继续本人发码/登录及精确身份核验；不自动重发短信，不把页面倒计时当成实际送达。Ctrl-C 取消、超时或窗口关闭停止；重复检测不刷屏。其他风险控制仍停止。
 - 遇身份冲突、认证失效、风险控制、限流、schema/来源漂移应停止；不绕过验证、不自动第三次采集。保持两次业务及来源覆盖比较、Decimal、lifecycle、名单/Build bijection 和完整安装验证。
-- 原神 partial；绝区零仅满足闭合证据后 complete；星铁 partial，owned roster 不可证实时可能只更新 Profile并保留旧角色值。不得为了成功放宽来源/完整度。
+- 崩坏：星穹铁道暂时无法获取，请不要使用；保留 hsr 实现/格式/接口只供开发和既有数据解释，不推荐用户登录或采集，不推断上游原因。原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，名单仍须闭合。绝区零已支持能力保留，仅满足闭合证据后 complete。不得为了成功放宽来源/完整度。
 - 个人数据保持在源码之外，正常同步不提交/上传。存储提交前失败保留旧 current；replace 后持久化未知保留所有可能引用代际；已提交的清理失败报告待办。恢复核验所有权、身份、当前引用和验证，不能按 UUID 盲删。
 - 开发使用合成身份，只替浏览器/网络。运行 `python -m pytest -q`、`python -m ruff check src tests tools --select F`、`python -m ruff format --check src tests tools`、`python tools/validate_repository.py --require-empty-baseline` 与 `--self-test`。打包修改另跑 `python -m build` 和干净安装资源检查。
 - 报告固定 SHA、实际命令及 PASS/FAIL/NOT_RUN；离线成功不等于真实账号验收。公开 PR/Issue 不含个人路径或数据。未经授权不改可见性、部署、合并、CI/Actions或私有数据仓库。

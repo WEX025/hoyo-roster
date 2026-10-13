@@ -1,5 +1,7 @@
 # 本机使用
 
+**崩坏：星穹铁道暂时无法获取，请不要使用。原神目前不含圣遗物和完整属性面板。** 本文操作示例仅用于当前可用的原神（`genshin`）和绝区零（`zzz`）；保留的 `hsr` 参数、源码或历史验证不是使用建议。绝区零已支持能力见[数据格式和完整度](data-format.md)；原神角色名单仍须闭合，`partial` 表示覆盖字段有限。该停用说明是当前产品决定，不将未完成的真实验收推断为上游原因。
+
 ## 首次使用
 
 按 README 安装 Python 3.12、项目和 Playwright Chromium。在源码目录之外保存个人结果；可用 `--storage-root /absolute/private/path` 选择新目录。程序逐层把**本轮新建目录**设为 0700，不修改已存在的共享父目录。已存在的 storage-root 必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`；请选择新的私有子目录。普通结果和程序元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
@@ -24,7 +26,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --
 
 `--login-timeout 900` 是默认各登录等待阶段的上限，范围 0 < 秒数 ≤ 3600；入口加载使用该上限，不再固定 30 秒。等待显示 `WAITING_FOR_ENTRY`；浏览器操控暂时超时显示 `CONTROL_RETRY`，在上限内等待恢复。一直未看到入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`，可以检查浏览器后重新运行。不把这些状态报告为不支持登录。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消等待，释放锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
 
-图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`，星铁为 `act.mihoyo.com/sr/event/cultivation-tool/`。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
+图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`。星铁暂时无法获取，请不要使用其保留的登录/采集接口。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
 
 面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入该阶段 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
 
@@ -83,6 +85,8 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 
 | 状态 | 下一步 |
 |---|---|
+| 星铁（`hsr`）入口或历史说明 | 暂时无法获取，请不要使用；保留代码/格式不是支持声明 |
+| 原神 `partial` | 目前不含圣遗物和完整属性面板；保存时名单仍须闭合，不补造缺失字段 |
 | `AUTHENTICATION_REQUIRED` / `LOGIN_TIMEOUT` | 本人检查官方登录状态，明确选择方式后重新运行 |
 | `LOGIN_CANCELLED` / `INTERRUPTED` | 本人准备好后重新运行 |
 | `LOGIN_CONSENT_REQUIRED` | 阅读登录前说明并取得本人允许，再显式传入 `--allow-login` |
