@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests import candidate_policy_for
 from hoyo_roster import paths
 from hoyo_roster.cli import build_parser, select_configuration
 from hoyo_roster.storage.common import tree_digest
@@ -104,7 +105,12 @@ def test_no_verified_source_falls_back_to_user_directory(checkout, monkeypatch, 
 def test_explicit_roots_and_auth_isolation(checkout, tmp_path, monkeypatch, source):
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
     stores = [
-        LocalSnapshotStore(source, direct_configuration(game, uid), game)
+        LocalSnapshotStore(
+            source,
+            direct_configuration(game, uid),
+            game,
+            candidate_policy=candidate_policy_for(game),
+        )
         for game in ("genshin", "zzz")
         for uid in (UID, "987654321")
     ]
@@ -121,6 +127,7 @@ def test_explicit_roots_and_auth_isolation(checkout, tmp_path, monkeypatch, sour
             "genshin", UID, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
         ),
         "genshin",
+        candidate_policy=candidate_policy_for("genshin"),
     )
     assert custom.root.is_relative_to(tmp_path / "results")
     assert custom.auth_root.is_relative_to(tmp_path / "auth")
@@ -130,6 +137,7 @@ def test_explicit_roots_and_auth_isolation(checkout, tmp_path, monkeypatch, sour
             source,
             direct_configuration("genshin", UID, storage_root=tmp_path / "different"),
             "genshin",
+            candidate_policy=candidate_policy_for("genshin"),
         ).auth_root
     )
 
@@ -181,7 +189,9 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
         auth.symlink_to(checkout / "data", target_is_directory=True)
     with pytest.raises(WorkspaceError, match=error):
         config = direct_configuration("genshin", UID, storage_root=result, auth_root=auth)
-        LocalSnapshotStore(source, config, "genshin")
+        LocalSnapshotStore(
+            source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
+        )
 
 
 def test_old_data_and_profile_are_preserved_without_migration(
@@ -189,14 +199,21 @@ def test_old_data_and_profile_are_preserved_without_migration(
 ):
     old = tmp_path / "old-private"
     config = direct_configuration("genshin", UID, storage_root=old, auth_root=old)
-    store = LocalSnapshotStore(source, config, "genshin")
+    store = LocalSnapshotStore(
+        source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
+    )
     with store.locked():
         current = store.prepare()
     store.browser_profile.mkdir(mode=0o700)
     (store.browser_profile / "synthetic-state").write_text("synthetic")
     before = tree_digest(old)
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
-    new = LocalSnapshotStore(source, direct_configuration("genshin", UID, auth_root=old), "genshin")
+    new = LocalSnapshotStore(
+        source,
+        direct_configuration("genshin", UID, auth_root=old),
+        "genshin",
+        candidate_policy=candidate_policy_for("genshin"),
+    )
     assert new.current() is None
     assert new.browser_profile == store.browser_profile
     assert store.current() == current
@@ -214,10 +231,16 @@ def test_old_data_and_profile_are_preserved_without_migration(
 
 def test_auth_lock_serializes_different_result_destinations(tmp_path, source):
     a = LocalSnapshotStore(
-        source, direct_configuration("genshin", UID, storage_root=tmp_path / "a"), "genshin"
+        source,
+        direct_configuration("genshin", UID, storage_root=tmp_path / "a"),
+        "genshin",
+        candidate_policy=candidate_policy_for("genshin"),
     )
     b = LocalSnapshotStore(
-        source, direct_configuration("genshin", UID, storage_root=tmp_path / "b"), "genshin"
+        source,
+        direct_configuration("genshin", UID, storage_root=tmp_path / "b"),
+        "genshin",
+        candidate_policy=candidate_policy_for("genshin"),
     )
     with a.locked():
         with pytest.raises(WorkspaceError, match="USER_WORKSPACE_BUSY"):
@@ -277,10 +300,16 @@ def test_cli_reports_current_json_location(checkout, monkeypatch, local_tool, ca
 
 def test_logout_removes_only_selected_external_auth(tmp_path, source):
     store = LocalSnapshotStore(
-        source, direct_configuration("zzz", UID, storage_root=tmp_path / "results"), "zzz"
+        source,
+        direct_configuration("zzz", UID, storage_root=tmp_path / "results"),
+        "zzz",
+        candidate_policy=candidate_policy_for("zzz"),
     )
     other = LocalSnapshotStore(
-        source, direct_configuration("zzz", "987654321", storage_root=tmp_path / "results"), "zzz"
+        source,
+        direct_configuration("zzz", "987654321", storage_root=tmp_path / "results"),
+        "zzz",
+        candidate_policy=candidate_policy_for("zzz"),
     )
     with store.locked():
         current = store.prepare()
@@ -305,11 +334,15 @@ def test_logout_removes_only_selected_external_auth(tmp_path, source):
 def test_misplaced_legacy_profile_is_rejected_and_preserved(checkout, monkeypatch, source):
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
     config = direct_configuration("genshin", UID)
-    store = LocalSnapshotStore(source, config, "genshin")
+    store = LocalSnapshotStore(
+        source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
+    )
     misplaced = store.root / "browser-profile"
     misplaced.mkdir(mode=0o700)
     (misplaced / "synthetic-state").write_text("synthetic")
     before = tree_digest(store.root)
     with pytest.raises(WorkspaceError, match="AUTH_STATE_IN_RESULT_DIRECTORY"):
-        LocalSnapshotStore(source, config, "genshin")
+        LocalSnapshotStore(
+            source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
+        )
     assert tree_digest(store.root) == before

@@ -17,6 +17,7 @@ python tools/validate_repository.py --require-empty-baseline
 python tools/validate_repository.py --self-test
 python tools/check_private_data.py
 python -m build
+python tools/verify_distribution.py
 ```
 
 禁止提交个人结果。源码 `data/` 只允许跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略；认证目录必须在仓库外。提交前运行 `python tools/check_private_data.py`，它只检查 Git 索引路径、不读取私人内容，只要 data/ 内跟踪了其他文件就报错。检查失败时先保留本机文件，再从索引取消跟踪（例如 `git rm --cached -- PATH`），重新检查；已经上传的个人数据还须私下处理暴露与历史，不能认为后续忽略就能撤回。`.gitignore` 不保护已跟踪文件、强制 add 或整个目录打包。此检查是手动本地命令，不安装 hooks，也不新增 CI/workflow。
@@ -32,3 +33,5 @@ python -m build
 跨平台 I/O、Windows 本人验收及目录刷新边界见 [平台支持](docs/platform-support.md)。Windows 原语须实机验证；macOS mock 不能替代。历史合成回归保留其 POSIX 假设，不把全套 pytest 当成 Windows 平台通过；Windows 优先运行独立 native smoke。
 
 本项目采用 MIT；新增依赖先核实实际版本许可证并更新 THIRD_PARTY_NOTICES，不引入未授权游戏素材。不添加 CI/Actions、部署、合并或后台服务作为常规修改的一部分。
+
+本轮架构整理、引用清理和定向自测证据见 [架构验证记录](docs/architecture-validation.md)；Windows 实机边界仍见平台支持文档。

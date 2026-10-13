@@ -5,6 +5,7 @@ import stat
 import uuid
 import pytest
 import hoyo_roster.user_workspace as workspace
+from tests import candidate_policy_for
 from hoyo_roster.storage.common import (
     load_metadata,
     tree_digest,
@@ -20,6 +21,7 @@ def store(tmp_path, source):
         source,
         workspace.direct_configuration("genshin", UID_A, storage_root=tmp_path / "private"),
         "genshin",
+        candidate_policy=candidate_policy_for("genshin"),
     )
     with value.locked():
         yield value
@@ -49,7 +51,7 @@ def test_atomic_failure_explicit_phase(tmp_path, monkeypatch, stage):
 
 
 def test_pointer_post_replace_fsync_retains_both_and_recovers(store, monkeypatch):
-    old = store.prepare()
+    old = store._install(None)
     old_digest = tree_digest(old / "data")
     original = workspace.atomic_write_metadata
 
@@ -74,7 +76,7 @@ def test_pointer_post_replace_fsync_retains_both_and_recovers(store, monkeypatch
 
     monkeypatch.setattr(workspace, "atomic_write_metadata", injected)
     with pytest.raises(workspace.WorkspaceError, match="COMMIT_DURABILITY_UNKNOWN"):
-        store.prepare()
+        store._install(None)
     assert store.commit_state == "DURABILITY_UNKNOWN"
     new = store.current()
     assert new != old and new.exists() and old.exists()
@@ -82,11 +84,11 @@ def test_pointer_post_replace_fsync_retains_both_and_recovers(store, monkeypatch
     assert store.inspect()["recovery_required"]
     monkeypatch.setattr(workspace, "atomic_write_metadata", original)
     assert store.recover() == new and not old.exists()
-    store.prepare()
+    store._install(None)
 
 
 def test_cleanup_failure_is_success_with_recoverable_pending(store, monkeypatch):
-    old = store.prepare()
+    old = store._install(None)
     remove = workspace.remove_owned_tree
 
     def injected(path):
@@ -95,19 +97,19 @@ def test_cleanup_failure_is_success_with_recoverable_pending(store, monkeypatch)
         return remove(path)
 
     monkeypatch.setattr(workspace, "remove_owned_tree", injected)
-    new = store.prepare()
+    new = store._install(None)
     assert store.commit_state == "COMMITTED" and store.cleanup_pending and store.current() == new
     assert old.exists() and new.exists()
     monkeypatch.setattr(workspace, "remove_owned_tree", remove)
     assert store.recover() == new and not old.exists() and not store.cleanup_pending
-    store.prepare()
+    store._install(None)
 
 
 @pytest.mark.parametrize(
     "stage", ("validation", "data_fsync", "journal_replace", "pointer_replace")
 )
 def test_precommit_fault_preserves_old(store, monkeypatch, stage):
-    old = store.prepare()
+    old = store._install(None)
     digest = tree_digest(old / "data")
     original_atomic = workspace.atomic_write_metadata
     if stage == "validation":
@@ -128,7 +130,7 @@ def test_precommit_fault_preserves_old(store, monkeypatch, stage):
 
         monkeypatch.setattr(workspace, "atomic_write_metadata", injected)
     with pytest.raises((OSError, workspace.WorkspaceError)):
-        store.prepare()
+        store._install(None)
     monkeypatch.undo()
     assert store.current() == old and tree_digest(old / "data") == digest
     assert store.commit_state == "NOT_COMMITTED"
@@ -138,7 +140,7 @@ def test_precommit_fault_preserves_old(store, monkeypatch, stage):
 
 
 def test_invalid_pointer_inspect_and_verified_explicit_recovery(store):
-    old = store.prepare()
+    old = store._install(None)
     atomic_write_metadata(store.current_file, {"generation": str(uuid.uuid4())})
     assert store.inspect()["current"] == "INVALID"
     with pytest.raises(workspace.WorkspaceError, match="RECOVERY_GENERATION_REQUIRED"):
@@ -147,18 +149,18 @@ def test_invalid_pointer_inspect_and_verified_explicit_recovery(store):
 
 
 def test_uuid_is_not_cleanup_or_recovery_authority(store):
-    current = store.prepare()
+    current = store._install(None)
     unowned = store.root / str(uuid.uuid4())
     unowned.mkdir(mode=0o700)
     with pytest.raises((workspace.WorkspaceError, ValueError)):
         store.recover(unowned.name)
     assert unowned.exists() and store.current() == current
     with pytest.raises(workspace.WorkspaceError, match="RESIDUE"):
-        store.prepare()
+        store._install(None)
 
 
 def test_wrong_identity_or_corrupted_generation_recovery_rejected(store):
-    old = store.prepare()
+    old = store._install(None)
     profile = old / "data" / store.game / "profile.json"
     state = load_metadata(profile)
     state["account"]["uid"] = "900000002"
@@ -193,7 +195,7 @@ def test_symlink_rejected_without_touching_target(tmp_path):
 
 
 def test_partial_cleanup_can_resume_from_validated_inventory(store, monkeypatch):
-    old = store.prepare()
+    old = store._install(None)
     remove = workspace.remove_owned_tree
 
     def partial(path):
@@ -204,15 +206,15 @@ def test_partial_cleanup_can_resume_from_validated_inventory(store, monkeypatch)
         return remove(path)
 
     monkeypatch.setattr(workspace, "remove_owned_tree", partial)
-    new = store.prepare()
+    new = store._install(None)
     assert store.cleanup_pending and store.current() == new
     monkeypatch.setattr(workspace, "remove_owned_tree", remove)
     assert store.recover() == new and not old.exists()
-    store.prepare()
+    store._install(None)
 
 
 def test_changed_partial_cleanup_is_retained(store, monkeypatch):
-    old = store.prepare()
+    old = store._install(None)
     remove = workspace.remove_owned_tree
 
     def failed(path):
@@ -221,7 +223,7 @@ def test_changed_partial_cleanup_is_retained(store, monkeypatch):
         return remove(path)
 
     monkeypatch.setattr(workspace, "remove_owned_tree", failed)
-    new = store.prepare()
+    new = store._install(None)
     monkeypatch.setattr(workspace, "remove_owned_tree", remove)
     (old / "unknown.json").write_text("{}")
     (old / "unknown.json").chmod(0o600)
@@ -231,7 +233,7 @@ def test_changed_partial_cleanup_is_retained(store, monkeypatch):
 
 
 def test_explicit_cleanup_never_deletes_current_or_unowned(store):
-    current = store.prepare()
+    current = store._install(None)
     with pytest.raises(workspace.WorkspaceError, match="CURRENT_GENERATION_PROTECTED"):
         store.cleanup_generation(current.name)
     unowned = store.root / str(uuid.uuid4())

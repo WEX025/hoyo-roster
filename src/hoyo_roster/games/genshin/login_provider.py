@@ -24,7 +24,7 @@ from .errors import (
     RequestTransportError,
     RiskControlError,
 )
-from .jsonio import load_json
+from hoyo_roster.jsonio import load_json
 from .normalize import nonempty_string, positive_id, select_binding
 
 GAME = "genshin"
@@ -149,6 +149,9 @@ class GenshinLoginProvider:
                 region=binding["server"],
             ),
         )
+
+    def login_page(self, fallback: Page) -> Page:
+        return fallback
 
     async def prepare_login_or_session(
         self,

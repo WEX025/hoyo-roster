@@ -20,7 +20,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation login
 hoyo-roster --game genshin --uid YOUR_UID
 ```
 
-`init` 只建立验证后的空工作区，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
+`init` 只在没有 current 时建立验证后的空工作区；已有有效 current 经预检后原样复用，不换代、不改文件或时间戳，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
 
 启动浏览器后，程序先在同一持久 Context 中打开受限的临时官方页面，等待页面资源与已有会话校验完成，再发送初始 Binding；初始化页允许官方资源和已注册的会话校验，不允许短信、二维码创建或游戏业务请求。临时页关闭后才继续核验；初始化超时/网络/操控错误单独停止，不当成认证过期。初始化或会话指纹本身都不证明身份；每次登录/同步仍须通过精确官方 game/UID/region Binding。初始化阶段遇风险、限流或无效校验响应同样停止。程序不导出 Cookie/token，也不延长官方有效期。关闭持久 Context 完成后才停止 Playwright；关闭失败仍尝试停止运行时，不报告登录成功。
 
@@ -43,6 +43,8 @@ hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --
 关闭本工具后更新或重新安装代码，再运行原命令。本项目尚未发布，本轮不兼容历史目录/候选/恢复格式，不提供迁移，不搜索、读取或清理旧默认路径。默认认证目录策略已统一为平台系统用户数据根；已有私人结果和 Profile 留在原处。
 
 选定范围里若存在未知或旧格式残留，程序保留并拒绝继续操作；不能删除身份标记来重建或解除区服约束。本次代码开发不操作任何真实用户范围。
+
+同步/登录的最终 `STATUS=PASS` 只在浏览器和运行时关闭、工作区锁释放后输出。`PROGRESS=SAVED` 单独表示已经保存；随后关闭失败会报 `BROWSER_CLOSE=FAILED` / `BROWSER_CLOSE_FAILED`，并同时给出 `COMMIT_STATE` 和 `CLEANUP_PENDING=YES|NO`，不会再输出 PASS。确认已保存与完整操作成功是不同事实；以这些独立状态决定检查或恢复，不重复采集来掩盖关闭错误。
 
 ## 检查与恢复
 
@@ -73,7 +75,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation recover --generation VERIF
 
 清理中断而只剩部分旧代际时，recover 依据提交前已完整验证并持久化的文件清单，核对现存路径/哈希/所有权；出现新文件或改动就拒绝。恢复日志缺失时，先保留 current，用 inspect 选择完整 VERIFIED 的非当前代际，执行 `--operation cleanup-generation --generation VERIFIED_GENERATION_UUID`；当前代际和无法证明归属的残留不能删。
 
-候选残留与代际恢复分别处理。只有程序能证明归属的候选才允许清理。普通同步在候选预检/存储提交失败或持久化未知时保留已生成候选，供 inspect 后核验；确认 COMMITTED 后才自动清理。新候选在复制 contracts 或写入业务数据前，先原子落盘 v3 归属标记，绑定项目、游戏、UID 摘要、区服和 run UUID；building 与 validated 状态都保留同一范围。inspect/cleanup 要求显式所选身份，核对标记、权限和已写 Profile 的身份；validated 候选还核对实际游戏树及 contracts 摘要。已持久绑定区服时也要求候选区服一致，即使 current 缺失或损坏也不降低约束；空基线身份边界尚未绑定区服时要求候选所记区服属于该游戏支持范围并与其 Profile 一致。候选操作也核验留存完整代际的身份；矛盾或部分清理残留先处理恢复。身份边界无法证明时 inspect 显示 IDENTITY_BOUNDARY=UNPROVEN，候选不允许清理。
+候选残留与代际恢复分别处理。只有程序能证明归属的候选才允许清理。普通同步在候选预检/存储提交失败或持久化未知时保留已生成候选，供 inspect 后核验；确认 COMMITTED 后才自动清理。新候选在复制 contracts 或写入业务数据前，先原子落盘 v4 归属标记，绑定项目、游戏、UID 摘要、区服和 run UUID；building 与 validated 状态都保留同一范围。inspect/cleanup 要求显式所选身份，核对标记、权限和已写 Profile 的身份；validated 候选还核对实际游戏树及 contracts 摘要。已持久绑定区服时也要求候选区服一致，即使 current 缺失或损坏也不降低约束；空基线身份边界尚未绑定区服时要求候选所记区服属于该游戏支持范围并与其 Profile 一致。候选操作也核验留存完整代际的身份；矛盾或部分清理残留先处理恢复。身份边界无法证明时 inspect 显示 IDENTITY_BOUNDARY=UNPROVEN，候选不允许清理。
 
 `SCOPE_MISMATCH` 表示候选与所选身份/区服或其实际 Profile 冲突；`UNOWNED` 表示标记缺失、旧格式、不完整、权限或内容验证失败。两者均 `CANDIDATE_CLEANUP_ALLOWED=NO`，cleanup 报 `CANDIDATE_SCOPE_MISMATCH` 或 `CANDIDATE_OWNERSHIP_UNPROVEN` 并保留数据。`--run-id` / `--generation` 缺失、非规范 UUID、用在不对应操作中均给固定错误代码；错误值不回显。
 
@@ -95,7 +97,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 
 | 状态 | 下一步 |
 |---|---|
-| 星铁（`hsr`）入口或历史说明 | 暂时无法获取，请不要使用；保留代码/格式不是支持声明 |
+| `GAME_PAUSED`（星铁 login/sync） | 入口在选择私人路径或启动浏览器前拒绝；仅保留离线 init/inspect/recover 等数据操作 |
 | 原神 `partial` | 目前不含圣遗物和完整属性面板；保存时名单仍须闭合，不补造缺失字段 |
 | `AUTHENTICATION_REQUIRED` / `LOGIN_TIMEOUT` | 本人检查官方登录状态，明确选择方式后重新运行 |
 | `LOGIN_CANCELLED` / `INTERRUPTED` | 本人准备好后重新运行 |
@@ -109,6 +111,8 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 | Profile 在用或 Singleton 残留 | 关闭确切本工具浏览器并检查；不删除正在使用的 Profile |
 | `CANDIDATE_SCOPE_MISMATCH` / `CANDIDATE_OWNERSHIP_UNPROVEN` | 保留并私下备份候选，核实来源后由本人处置；不按 UUID 或临时文件名删除 |
 | `GENERATION_REQUIRED` / `INVALID_GENERATION` / `INVALID_CANDIDATE_RUN_ID` | 检查 inspect 标识及 --help，不复用其他身份的 UUID |
+| `BROWSER_CLOSE_FAILED` | 检查本工具浏览器是否已关闭；同时核对 COMMIT_STATE 与 CLEANUP_PENDING，保存成功仍保留 |
+| `WORKSPACE_VALIDATOR_TIMEOUT` / `VALIDATOR_TIMEOUT` | 本机离线验证超时，保留 current 和恢复证据，检查环境后重试 |
 | `RECOVERY_REQUIRED` / 持久化未知 / residue | inspect 后按上节恢复；不随意删 UUID 目录 |
 | Chromium 缺失 | 在相同虚拟环境运行 `python -m playwright install chromium` |
 

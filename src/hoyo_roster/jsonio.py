@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from ... import platform_io as io
+from . import platform_io as io
 import stat
 from collections.abc import Callable, Mapping
 from decimal import Decimal
@@ -44,15 +44,23 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def require_regular_file(path: Path) -> os.stat_result:
+    try:
+        io.check_components(path)
+    except io.UnsafePath:
+        raise StrictJsonError("unsafe JSON path") from None
     metadata = path.lstat()
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+    if io.is_redirect(metadata) or not stat.S_ISREG(metadata.st_mode):
         raise StrictJsonError(f"expected a regular file: {path.name}")
     return metadata
 
 
 def require_real_directory(path: Path) -> os.stat_result:
+    try:
+        io.check_components(path)
+    except io.UnsafePath:
+        raise StrictJsonError("unsafe JSON path") from None
     metadata = path.lstat()
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+    if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
         raise StrictJsonError(f"expected a real directory: {path.name}")
     return metadata
 
@@ -66,10 +74,11 @@ def require_real_path_chain(
     """Validate a trusted relative path component-by-component without following links."""
 
     try:
+        io.check_components(trusted_root)
         root_metadata = trusted_root.lstat()
-    except OSError as error:
+    except (OSError, io.UnsafePath) as error:
         raise StrictJsonError("trusted root inspection failed") from error
-    if stat.S_ISLNK(root_metadata.st_mode) or not stat.S_ISDIR(root_metadata.st_mode):
+    if io.is_redirect(root_metadata) or not stat.S_ISDIR(root_metadata.st_mode):
         raise StrictJsonError("trusted root must be a real directory")
 
     parts = relative_path.parts
@@ -87,15 +96,15 @@ def require_real_path_chain(
             raise StrictJsonError("trusted path inspection failed") from error
         is_final = index == len(parts) - 1
         if not is_final:
-            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
                 raise StrictJsonError(
                     "trusted path directory path component was not a real directory"
                 )
             continue
         if final_kind == "directory":
-            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
                 raise StrictJsonError("trusted path target was not a real directory")
-        elif stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        elif io.is_redirect(metadata) or not stat.S_ISREG(metadata.st_mode):
             raise StrictJsonError("trusted path target was not a regular file")
 
     try:
@@ -168,7 +177,7 @@ def _encode_json(
     if isinstance(value, Decimal):
         return _decimal_json_token(value)
     if isinstance(value, float):
-        return json.dumps(value, allow_nan=False)
+        return _decimal_json_token(Decimal(str(value)))
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, Mapping):
@@ -229,7 +238,7 @@ def _strict_json_bytes(
             level=0,
             sort_keys=sort_keys,
         )
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise StrictJsonError("value cannot be encoded as strict JSON") from error
     if trailing_newline:
         text += "\n"
@@ -278,8 +287,27 @@ def atomic_write_json(
         if before_replace is not None:
             before_replace(temporary)
         io.replace(temporary, path)
+        io.sync_directory(path.parent)
     except BaseException:
         try:
             temporary.unlink(missing_ok=True)
         finally:
             raise
+
+
+def loads_json(value: str) -> Any:
+    try:
+        return json.loads(
+            value,
+            object_pairs_hook=_reject_duplicates,
+            parse_constant=_reject_constant,
+            parse_float=Decimal,
+        )
+    except json.JSONDecodeError as error:
+        raise StrictJsonError("invalid JSON") from error
+
+
+def json_bytes(value: Any, *, sort_keys: bool = False, compact: bool = False) -> bytes:
+    return _strict_json_bytes(
+        value, indent=None if compact else 2, sort_keys=sort_keys, trailing_newline=not compact
+    )

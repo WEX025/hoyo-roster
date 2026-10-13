@@ -23,7 +23,7 @@ from .errors import (
     RiskControlError,
 )
 from .ids import parse_role_uid
-from .jsonio import load_json
+from hoyo_roster.jsonio import load_json
 from .transport import BrowserTransport
 
 GAME = "zzz"
@@ -143,6 +143,9 @@ class ZzzLoginProvider:
                 region=role.server,
             ),
         )
+
+    def login_page(self, fallback: Page) -> Page:
+        return fallback
 
     async def prepare_login_or_session(
         self,

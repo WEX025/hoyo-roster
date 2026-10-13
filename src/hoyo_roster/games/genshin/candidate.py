@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
-import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from hoyo_roster.blocking import command_timeout
 from hoyo_roster.storage.candidate import (
     CandidateErrors,
     CandidateEvidence,
@@ -27,9 +23,6 @@ from hoyo_roster.storage.candidate import (
     cleanup_candidate as _cleanup_candidate,
 )
 from hoyo_roster.storage.candidate import (
-    inspect_candidate as _inspect_candidate,
-)
-from hoyo_roster.storage.candidate import (
     inspect_candidates as _inspect_candidates,
 )
 from hoyo_roster.storage.common import (
@@ -41,22 +34,18 @@ from hoyo_roster.storage.common import (
     tree_digest as _shared_tree_digest,
 )
 
+from hoyo_roster.validation import ValidationFailure, run_validator as validate_contract
+
 from .errors import (
     CandidateCleanupError,
     CandidateValidationError,
     FormalRepositoryPrevalidationError,
 )
-from .jsonio import atomic_write_json
-from .lifecycle import GENSHIN_RELATIVE, load_formal
+from hoyo_roster.jsonio import atomic_write_json
+from .lifecycle import GENSHIN_RELATIVE
 from .model import Snapshot
-from .snapshot import business_digest
 
-CANDIDATE_BASE_ROOT = Path("~/.local/share/hoyo-roster/candidates/genshin-character-state-sync")
-CANDIDATE_MODE = 0o700
-STATE_FILE = "candidate-state.json"
-CANDIDATE_STATE_VERSION = 3
-MUTATION_OWNER = "genshin-character-state-sync"
-CANDIDATE_OWNER = MUTATION_OWNER
+CANDIDATE_OWNER = "genshin-character-state-sync"
 SCHEMA_PATHS = (
     Path("schemas/common/definitions.schema.json"),
     Path("schemas/repository-manifest.schema.json"),
@@ -71,11 +60,11 @@ CONTRACT_PATHS = (
 )
 
 
-def _policy(scope: CandidateScope | None = None) -> CandidatePolicy:
+def candidate_policy(scope: CandidateScope | None = None) -> CandidatePolicy:
     return CandidatePolicy(
         owner=CANDIDATE_OWNER,
         scope=scope,
-        candidate_base=CANDIDATE_BASE_ROOT,
+        candidate_base=None,
         target_relative=GENSHIN_RELATIVE,
         contract_paths=CONTRACT_PATHS,
         errors=CandidateErrors(
@@ -102,22 +91,10 @@ def contract_digest(root: Path) -> str:
 
 
 def run_validator(root: Path, *, scope_game: str | None = None) -> None:
-    command = [sys.executable, "tools/validate_repository.py", "--root", str(root)]
-    if scope_game:
-        command.extend(("--scope-game", scope_game))
     try:
-        result = subprocess.run(
-            command,
-            cwd=root,
-            check=False,
-            capture_output=True,
-            timeout=command_timeout(90),
-        )
-    except subprocess.TimeoutExpired as error:
-        raise CandidateValidationError("repository Validator timed out") from error
-    if result.returncode:
-        diagnostic = hashlib.sha256(result.stdout + b"\0" + result.stderr).hexdigest()[:12]
-        raise CandidateValidationError(f"repository Validator failed diagnostic={diagnostic}")
+        validate_contract(root, scope_game=scope_game)
+    except ValidationFailure as error:
+        raise CandidateValidationError(error.code) from None
 
 
 def prevalidate_repository(repo_root: Path) -> None:
@@ -136,10 +113,6 @@ def prevalidate_repository(repo_root: Path) -> None:
         ) from error
 
 
-def _inspection(path: Path) -> CandidateInspection:
-    return _inspect_candidate(_policy(), path)
-
-
 def inspect_candidates(
     *,
     candidate_base: Path | None = None,
@@ -147,13 +120,13 @@ def inspect_candidates(
     region: str | None = None,
 ) -> tuple[CandidateInspection, ...]:
     return _inspect_candidates(
-        _policy(CandidateScope.identity("genshin-impact", uid, region) if uid else None),
+        candidate_policy(CandidateScope.identity("genshin-impact", uid, region) if uid else None),
         candidate_base=candidate_base,
     )
 
 
 def assert_no_stale_candidates(*, candidate_base: Path | None = None) -> None:
-    _assert_no_stale_candidates(_policy(), candidate_base=candidate_base)
+    _assert_no_stale_candidates(candidate_policy(), candidate_base=candidate_base)
 
 
 def cleanup_candidate(
@@ -164,7 +137,7 @@ def cleanup_candidate(
     region: str | None = None,
 ) -> None:
     _cleanup_candidate(
-        _policy(CandidateScope.identity("genshin-impact", uid, region) if uid else None),
+        candidate_policy(CandidateScope.identity("genshin-impact", uid, region) if uid else None),
         run_id,
         candidate_base=candidate_base,
     )
@@ -182,12 +155,9 @@ class Candidate:
 
     def cleanup(self) -> None:
         if os.path.lexists(self.root):
-            _cleanup_candidate(_policy(self.scope), self.root.name, candidate_base=self.base)
-
-
-def canonical_business_digest(root: Path) -> str:
-    profile, roster, builds = load_formal(root)
-    return business_digest(Snapshot(profile, roster, builds, 0))
+            _cleanup_candidate(
+                candidate_policy(self.scope), self.root.name, candidate_base=self.base
+            )
 
 
 def create_candidate(
@@ -230,12 +200,11 @@ def create_candidate(
             raise CandidateValidationError("candidate contract copy drifted")
         return CandidateEvidence(
             game_tree_digest=tree_digest(workspace.target_dir),
-            business_digest=canonical_business_digest(workspace.root),
             contract_digest=repository_contract_digest,
         )
 
     workspace = create_candidate_workspace(
-        _policy(scope),
+        candidate_policy(scope),
         root,
         populate=populate,
         validate=validate,

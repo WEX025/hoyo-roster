@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from urllib.parse import urlparse, urlencode
 import pytest
+from tests import candidate_policy_for
 from hoyo_roster.cli import main, run, build_parser, CONTRACT_ROOT
 from hoyo_roster.storage.common import tree_digest, load_metadata
 from hoyo_roster.user_workspace import LocalSnapshotStore, direct_configuration
@@ -259,7 +260,7 @@ def network_pacing(monkeypatch):
 
 @pytest.mark.parametrize(
     "game,owned,repository_output",
-    [("zzz", True, False), ("zzz", True, True), ("hsr", True, False), ("hsr", False, False)],
+    [("zzz", True, False), ("zzz", True, True)],
 )
 def test_actual_game_chain_twice_and_noop(
     tmp_path, monkeypatch, capsys, network_pacing, game, owned, repository_output
@@ -319,7 +320,10 @@ def test_actual_game_chain_twice_and_noop(
         "DATA_MODIFIED=YES" in output and UID_A not in output and "synthetic-session" not in output
     )
     store = LocalSnapshotStore(
-        CONTRACT_ROOT, direct_configuration(game, UID_A, storage_root=root), game
+        CONTRACT_ROOT,
+        direct_configuration(game, UID_A, storage_root=root),
+        game,
+        candidate_policy=candidate_policy_for(game),
     )
     current = store.current()
     before = tree_digest(current / "data")

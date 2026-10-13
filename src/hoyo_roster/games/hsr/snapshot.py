@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .errors import SnapshotContentDrift
-from .jsonio import json_bytes
+from hoyo_roster.jsonio import json_bytes
 from .model import Snapshot
 
 

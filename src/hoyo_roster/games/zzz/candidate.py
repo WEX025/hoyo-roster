@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
-import shutil  # noqa: F401 - compatibility for existing fault-injection callers
-import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hoyo_roster.blocking import command_timeout
 from hoyo_roster.storage.candidate import (
     CandidateErrors,
     CandidateEvidence,
@@ -29,9 +24,6 @@ from hoyo_roster.storage.candidate import (
     cleanup_candidate as _cleanup_candidate,
 )
 from hoyo_roster.storage.candidate import (
-    inspect_candidate as _inspect_candidate,
-)
-from hoyo_roster.storage.candidate import (
     inspect_candidates as _inspect_candidates,
 )
 from hoyo_roster.storage.common import (
@@ -43,6 +35,8 @@ from hoyo_roster.storage.common import (
     tree_digest as _shared_tree_digest,
 )
 
+from hoyo_roster.validation import ValidationFailure, run_validator as validate_contract
+
 from .errors import (
     CandidateCleanupError,
     CandidateInspectionError,
@@ -51,16 +45,11 @@ from .errors import (
     SnapshotConsistencyError,
 )
 from .ids import parse_character_id
-from .jsonio import StrictJsonError, atomic_write_json, load_json
+from hoyo_roster.jsonio import StrictJsonError, atomic_write_json, load_json
 from .normalize import NormalizedSnapshot
 
 ZZZ_RELATIVE = Path("data/zenless-zone-zero")
-CANDIDATE_BASE_ROOT = Path("~/.local/share/hoyo-roster/candidates/zzz-character-state-sync")
-CANDIDATE_ROOT_MODE = 0o700
-CANDIDATE_STATE_FILE = "candidate-state.json"
-CANDIDATE_STATE_VERSION = 3
-MUTATION_OWNER = "zzz-character-state-sync"
-CANDIDATE_OWNER = MUTATION_OWNER
+CANDIDATE_OWNER = "zzz-character-state-sync"
 CANDIDATE_SCHEMA_PATHS = (
     Path("schemas/common/definitions.schema.json"),
     Path("schemas/repository-manifest.schema.json"),
@@ -76,11 +65,11 @@ CONTRACT_PATHS = (
 )
 
 
-def _policy(scope: CandidateScope | None = None) -> CandidatePolicy:
+def candidate_policy(scope: CandidateScope | None = None) -> CandidatePolicy:
     return CandidatePolicy(
         owner=CANDIDATE_OWNER,
         scope=scope,
-        candidate_base=CANDIDATE_BASE_ROOT,
+        candidate_base=None,
         target_relative=ZZZ_RELATIVE,
         contract_paths=CONTRACT_PATHS,
         errors=CandidateErrors(
@@ -118,29 +107,10 @@ def contract_digest(root: Path) -> str:
 
 
 def run_repository_validator(root: Path, *, scope_game: str | None = None) -> None:
-    command = [sys.executable, "tools/validate_repository.py", "--root", str(root)]
-    if scope_game is not None:
-        command.extend(("--scope-game", scope_game))
     try:
-        result = subprocess.run(
-            command,
-            cwd=root,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=command_timeout(90),
-        )
-    except subprocess.TimeoutExpired as error:
-        raise CandidateValidationError("repository Validator timed out") from error
-    if result.returncode != 0:
-        diagnostic = hashlib.sha256()
-        diagnostic.update(result.stdout.encode("utf-8"))
-        diagnostic.update(b"\0")
-        diagnostic.update(result.stderr.encode("utf-8"))
-        raise CandidateValidationError(
-            "repository Validator rejected the candidate",
-            diagnostic_sha256=diagnostic.hexdigest(),
-        )
+        validate_contract(root, scope_game=scope_game)
+    except ValidationFailure as error:
+        raise CandidateValidationError(error.code, diagnostic_sha256=error.diagnostic) from None
 
 
 def _check_nonshrinking_roster(
@@ -165,10 +135,6 @@ def _check_nonshrinking_roster(
         raise SnapshotConsistencyError("new complete roster is missing a prior character ID")
 
 
-def _inspection(path: Path) -> CandidateInspection:
-    return _inspect_candidate(_policy(), path)
-
-
 def inspect_candidates(
     *,
     candidate_base: Path | None = None,
@@ -176,13 +142,15 @@ def inspect_candidates(
     region: str | None = None,
 ) -> tuple[CandidateInspection, ...]:
     return _inspect_candidates(
-        _policy(CandidateScope.identity("zenless-zone-zero", uid, region) if uid else None),
+        candidate_policy(
+            CandidateScope.identity("zenless-zone-zero", uid, region) if uid else None
+        ),
         candidate_base=candidate_base,
     )
 
 
 def assert_no_stale_candidates(*, candidate_base: Path | None = None) -> None:
-    _assert_no_stale_candidates(_policy(), candidate_base=candidate_base)
+    _assert_no_stale_candidates(candidate_policy(), candidate_base=candidate_base)
 
 
 def cleanup_candidate(
@@ -193,7 +161,9 @@ def cleanup_candidate(
     region: str | None = None,
 ) -> None:
     _cleanup_candidate(
-        _policy(CandidateScope.identity("zenless-zone-zero", uid, region) if uid else None),
+        candidate_policy(
+            CandidateScope.identity("zenless-zone-zero", uid, region) if uid else None
+        ),
         run_id,
         candidate_base=candidate_base,
     )
@@ -213,11 +183,15 @@ class Candidate:
     def zzz_dir(self) -> Path:
         return self.root / ZZZ_RELATIVE
 
+    @property
+    def game_dir(self) -> Path:
+        return self.zzz_dir
+
     def cleanup(self) -> None:
         if not os.path.lexists(self.root):
             return
         _cleanup_candidate(
-            _policy(self.scope),
+            candidate_policy(self.scope),
             self.run_id,
             candidate_base=self.base_root or self.root.parent,
         )
@@ -295,12 +269,11 @@ def create_candidate(
             raise CandidateValidationError("candidate contract copy drifted")
         return CandidateEvidence(
             game_tree_digest=target_digest,
-            business_digest=target_digest,
             contract_digest=repository_contract_digest,
         )
 
     workspace = create_candidate_workspace(
-        _policy(scope),
+        candidate_policy(scope),
         root,
         populate=populate,
         validate=validate,

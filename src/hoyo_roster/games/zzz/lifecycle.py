@@ -17,7 +17,7 @@ from .errors import (
     SyncedAtRegressionError,
 )
 from .ids import parse_character_id
-from .jsonio import (
+from hoyo_roster.jsonio import (
     StrictJsonError,
     load_json,
     require_real_path_chain,

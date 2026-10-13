@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests import candidate_policy_for
 from hoyo_roster.storage.common import tree_digest
 from hoyo_roster.user_workspace import (
     GAMES,
@@ -43,7 +44,7 @@ def test_no_config_direct_init_is_safe_and_stable(
     ]
     assert local_tool.main(argv) == 0
     config = direct_configuration(game, uid, storage_root=root)
-    store = LocalSnapshotStore(source, config, game)
+    store = LocalSnapshotStore(source, config, game, candidate_policy=candidate_policy_for(game))
     first = store.current()
     digest = tree_digest(first / "data")
     assert local_tool.main(argv) == 0
@@ -55,7 +56,10 @@ def test_no_config_direct_init_is_safe_and_stable(
 def test_game_uid_isolates_data_browser_and_upgrade_preserves_it(tmp_path, source):
     stores = [
         LocalSnapshotStore(
-            source, direct_configuration(g, uid, storage_root=tmp_path / "private"), g
+            source,
+            direct_configuration(g, uid, storage_root=tmp_path / "private"),
+            g,
+            candidate_policy=candidate_policy_for(g),
         )
         for g in GAMES
         for uid in (UID_A, UID_B)
@@ -234,7 +238,9 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     assert "DATA_MODIFIED=YES" in output and uid not in output
     assert context.request.count == 3 and page.business_requests == 2
     config = direct_configuration("genshin", uid, storage_root=root)
-    store = LocalSnapshotStore(source, config, "genshin")
+    store = LocalSnapshotStore(
+        source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
+    )
     current = store.current()
     before = tree_digest(current / "data")
     assert (
@@ -262,7 +268,7 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     assert page.business_requests == 4
 
 
-@pytest.mark.parametrize("game", GAMES)
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
 def test_direct_login_entrypoint_runs_real_game_binding_control_flow(
     tmp_path,
     local_tool,

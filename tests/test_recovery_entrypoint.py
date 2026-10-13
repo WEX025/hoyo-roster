@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 
+from tests import candidate_policy_for
 from hoyo_roster import cli, user_workspace
 from hoyo_roster.storage.common import tree_digest
 from tests.test_login_flow import UID_A
@@ -56,9 +57,10 @@ def test_documented_cleanup_command_and_repeated_recovery(tmp_path, monkeypatch,
         cli.CONTRACT_ROOT,
         user_workspace.direct_configuration("genshin", UID_A, storage_root=root),
         "genshin",
+        candidate_policy=candidate_policy_for("genshin"),
     )
     with store.locked():
-        old = store.prepare()
+        old = store._install(None)
         remove = user_workspace.remove_owned_tree
 
         def fail_cleanup(path):
@@ -67,7 +69,7 @@ def test_documented_cleanup_command_and_repeated_recovery(tmp_path, monkeypatch,
             return remove(path)
 
         monkeypatch.setattr(user_workspace, "remove_owned_tree", fail_cleanup)
-        current = store.prepare()
+        current = store._install(None)
         monkeypatch.undo()
         assert store.cleanup_pending
         digest = tree_digest(current)

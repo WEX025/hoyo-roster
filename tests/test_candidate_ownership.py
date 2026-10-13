@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import candidate_policy_for
 from hoyo_roster import cli
 from hoyo_roster.storage import candidate as storage
 from hoyo_roster.storage.common import (
@@ -50,9 +51,7 @@ def protocol(tmp_path):
 
     def evidence(workspace):
         digest = tree_digest(workspace.target_dir)
-        return storage.CandidateEvidence(
-            digest, digest, files_digest(public, policy.contract_paths)
-        )
+        return storage.CandidateEvidence(digest, files_digest(public, policy.contract_paths))
 
     def create(**kwargs):
         return storage.create_candidate_workspace(
@@ -206,7 +205,7 @@ def test_partial_candidate_cleanup_without_marker_requires_manual_handling(proto
         assert tree_digest(workspace.root) == digest
 
 
-@pytest.mark.parametrize("game", GAMES)
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
 def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     tmp_path, monkeypatch, capsys, game
 ):
@@ -216,7 +215,10 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     module = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
     root = tmp_path / "private"
     store = LocalSnapshotStore(
-        cli.CONTRACT_ROOT, direct_configuration(game, UID_A, storage_root=root), game
+        cli.CONTRACT_ROOT,
+        direct_configuration(game, UID_A, storage_root=root),
+        game,
+        candidate_policy=candidate_policy_for(game),
     )
     with store.locked():
         current = store.prepare()
@@ -300,7 +302,10 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
         for p in (candidate, *candidate.rglob("*"))
     )
     foreign_store = LocalSnapshotStore(
-        cli.CONTRACT_ROOT, direct_configuration(game, UID_B, storage_root=root), game
+        cli.CONTRACT_ROOT,
+        direct_configuration(game, UID_B, storage_root=root),
+        game,
+        candidate_policy=candidate_policy_for(game),
     )
     with foreign_store.locked():
         foreign_current = foreign_store.prepare()

@@ -1,52 +1,100 @@
-"""Check exact wheel/sdist resources without launching a browser or logging in."""
+"""Check real nonempty wheel/sdist resources, also under python -O."""
 
 from __future__ import annotations
+import argparse
 import hashlib
 import tarfile
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-package = ROOT / "src/hoyo_roster"
-required = {
-    p.relative_to(ROOT / "src").as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-    for p in package.rglob("*")
-    if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
-}
-for wheel in (ROOT / "dist").glob("*.whl"):
-    with zipfile.ZipFile(wheel) as archive:
-        names = set(archive.namelist())
-        for name, digest in required.items():
-            assert name in names, name
-            assert hashlib.sha256(archive.read(name)).hexdigest() == digest, name
-        assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names)
-        for source in (ROOT / "third_party").iterdir():
-            name = next(n for n in names if n.endswith("/licenses/third_party/" + source.name))
-            assert archive.read(name) == source.read_bytes()
-        assert not any(
-            "chromium" in n.lower() or "hoyo_browser_session" in n or "state.sqlite3" in n
-            for n in names
-        )
-        assert not any(name.startswith("data/") for name in names)
-    print("WHEEL_RESOURCES=PASS")
-for sdist in (ROOT / "dist").glob("*.tar.gz"):
-    with tarfile.open(sdist) as archive:
-        members = {name.partition("/")[2]: name for name in archive.getnames()}
-        for name, digest in required.items():
-            path = "src/" + name
-            assert path in members, path
-            assert (
-                hashlib.sha256(archive.extractfile(members[path]).read()).hexdigest() == digest
-            ), path
-        for path in [
-            "LICENSE",
-            "THIRD_PARTY_NOTICES.md",
-            "AGENTS.md",
-            "CLAUDE.md",
-            ".agents/skills/local-roster/SKILL.md",
-            "data/.gitkeep",
-        ]:
-            assert path in members, path
-        assert {path for path in members if path.startswith("data/")} == {"data/.gitkeep"}
-    print("SDIST_RESOURCES=PASS")
-print(f"PACKAGE_RESOURCE_COUNT={len(required)}")
+
+
+class DistributionError(ValueError):
+    pass
+
+
+def require(condition: bool, code: str) -> None:
+    if not condition:
+        raise DistributionError(code)
+
+
+def verify(dist: Path) -> int:
+    wheels = sorted(dist.glob("*.whl"))
+    sdists = sorted(dist.glob("*.tar.gz"))
+    require(bool(wheels), "WHEEL_MISSING")
+    require(bool(sdists), "SDIST_MISSING")
+    required = {
+        p.relative_to(ROOT / "src").as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in (ROOT / "src/hoyo_roster").rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+    }
+    require(bool(required), "PACKAGE_EMPTY")
+    for wheel in wheels:
+        require(wheel.is_file() and wheel.stat().st_size > 0, "WHEEL_EMPTY")
+        with zipfile.ZipFile(wheel) as archive:
+            names = set(archive.namelist())
+            for name, digest in required.items():
+                require(name in names, "WHEEL_RESOURCE_MISSING")
+                require(
+                    hashlib.sha256(archive.read(name)).hexdigest() == digest, "WHEEL_RESOURCE_DRIFT"
+                )
+            require(
+                any(n.endswith(".dist-info/licenses/LICENSE") for n in names),
+                "WHEEL_LICENSE_MISSING",
+            )
+            for source in (ROOT / "third_party").iterdir():
+                matches = [n for n in names if n.endswith("/licenses/third_party/" + source.name)]
+                require(len(matches) == 1, "WHEEL_NOTICE_MISSING")
+                require(archive.read(matches[0]) == source.read_bytes(), "WHEEL_NOTICE_DRIFT")
+            require(
+                not any(
+                    "chromium" in n.lower() or "hoyo_browser_session" in n or "state.sqlite3" in n
+                    for n in names
+                ),
+                "WHEEL_PRIVATE_RESOURCE",
+            )
+            require(not any(n.startswith("data/") for n in names), "WHEEL_PERSONAL_DATA")
+        print("WHEEL_RESOURCES=PASS")
+    for sdist in sdists:
+        require(sdist.is_file() and sdist.stat().st_size > 0, "SDIST_EMPTY")
+        with tarfile.open(sdist) as archive:
+            members = {name.partition("/")[2]: name for name in archive.getnames()}
+            for name, digest in required.items():
+                path = "src/" + name
+                require(path in members, "SDIST_RESOURCE_MISSING")
+                stream = archive.extractfile(members[path])
+                require(stream is not None, "SDIST_RESOURCE_NOT_FILE")
+                require(hashlib.sha256(stream.read()).hexdigest() == digest, "SDIST_RESOURCE_DRIFT")
+            for path in [
+                "LICENSE",
+                "THIRD_PARTY_NOTICES.md",
+                "AGENTS.md",
+                "CLAUDE.md",
+                ".agents/skills/local-roster/SKILL.md",
+                "data/.gitkeep",
+            ]:
+                require(path in members, "SDIST_PUBLIC_RESOURCE_MISSING")
+            require(
+                {p for p in members if p.startswith("data/")} == {"data/.gitkeep"},
+                "SDIST_PERSONAL_DATA",
+            )
+        print("SDIST_RESOURCES=PASS")
+    print(f"PACKAGE_RESOURCE_COUNT={len(required)}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dist-dir", type=Path, default=ROOT / "dist")
+    args = parser.parse_args()
+    try:
+        return verify(args.dist_dir)
+    except (DistributionError, OSError, ValueError, tarfile.TarError, zipfile.BadZipFile) as error:
+        print("DISTRIBUTION=FAIL")
+        print(f"ERROR_CODE={error if isinstance(error, DistributionError) else 'ARCHIVE_INVALID'}")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

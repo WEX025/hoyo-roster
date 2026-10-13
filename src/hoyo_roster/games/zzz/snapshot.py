@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .errors import SnapshotContentDrift
-from .jsonio import canonical_compact_json_bytes
+from hoyo_roster.jsonio import canonical_compact_json_bytes
 from .normalize import NormalizedSnapshot
 
 
