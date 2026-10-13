@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import signal
-import subprocess
 import time
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, asynccontextmanager, contextmanager, suppress
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from pathlib import Path
 from typing import Any
 
 _DEADLINE: ContextVar[float | None] = ContextVar("hoyo_operation_deadline", default=None)
@@ -30,37 +26,6 @@ def command_timeout(max_seconds: float = 60.0) -> float:
     if deadline is None:
         return max_seconds
     return max(0.01, min(max_seconds, deadline - time.monotonic()))
-
-
-def bounded_command(
-    arguments: Sequence[str],
-    *,
-    cwd: Path,
-    env: Mapping[str, str],
-    timeout: float,
-) -> subprocess.CompletedProcess[bytes]:
-    """Terminate the command's own process group before reporting a timeout."""
-
-    with subprocess.Popen(
-        arguments,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    ) as process:
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired as error:
-            # Git can spawn SSH, credential helpers and hooks. Killing only Git
-            # would let descendants continue a push after its guard is released.
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            stdout, stderr = process.communicate()
-            raise subprocess.TimeoutExpired(
-                arguments, timeout, output=stdout, stderr=stderr
-            ) from error
-        return subprocess.CompletedProcess(arguments, process.returncode, stdout, stderr)
 
 
 async def run_blocking[T](

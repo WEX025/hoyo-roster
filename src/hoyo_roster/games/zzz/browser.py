@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from ... import platform_io as io
 import stat
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -60,21 +61,22 @@ def resolve_browser_profile(repo_root: Path, browser_profile: Path) -> Path:
             metadata = profile.lstat()
         except OSError as error:
             raise ConfigurationError("browser profile inspection failed") from error
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
             raise ConfigurationError("browser profile must be a real directory")
     resolved_profile = profile.resolve(strict=False)
     if resolved_profile == root or resolved_profile.is_relative_to(root):
         raise ConfigurationError("browser profile must be outside repo-root")
     try:
-        profile.mkdir(parents=True, exist_ok=True, mode=0o700)
-        profile.chmod(0o700)
+        from ...storage.common import secure_private_directory
+
+        secure_private_directory(profile)
         metadata = profile.lstat()
     except OSError as error:
         raise ConfigurationError("browser profile could not be secured") from error
     if (
-        stat.S_ISLNK(metadata.st_mode)
+        io.is_redirect(metadata)
         or not stat.S_ISDIR(metadata.st_mode)
-        or metadata.st_mode & 0o777 != 0o700
+        or not io.private(profile, 0o700)
     ):
         raise ConfigurationError("browser profile mode must be 0700")
     resolved_profile = profile.resolve()

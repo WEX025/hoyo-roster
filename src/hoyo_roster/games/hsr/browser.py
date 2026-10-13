@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import math
 import os
+from ... import platform_io as io
 import shlex
 import stat
 import subprocess
@@ -268,10 +269,10 @@ def preflight_browser_profile(
             diagnostics,
         )
     if (
-        stat.S_ISLNK(parent_metadata.st_mode)
+        io.is_redirect(parent_metadata)
         or not stat.S_ISDIR(parent_metadata.st_mode)
-        or parent_metadata.st_uid != os.getuid()
-        or parent_metadata.st_mode & 0o022
+        or not io.owned(parent)
+        or not io.repository_container_safe(parent)
         or not os.access(parent, os.R_OK | os.W_OK | os.X_OK)
     ):
         _raise_browser_error(
@@ -288,7 +289,7 @@ def preflight_browser_profile(
                 BrowserProfilePermissionDenied("browser profile category: permission denied"),
                 diagnostics,
             )
-        diagnostics.profile_symlink = stat.S_ISLNK(metadata.st_mode)
+        diagnostics.profile_symlink = io.is_redirect(metadata)
         if diagnostics.profile_symlink or not stat.S_ISDIR(metadata.st_mode):
             _raise_browser_error(
                 BrowserProfileInvalid("browser profile category: invalid directory"),
@@ -296,7 +297,7 @@ def preflight_browser_profile(
             )
     else:
         try:
-            profile.mkdir(mode=0o700)
+            io.mkdir_private(profile)
             metadata = profile.lstat()
         except PermissionError:
             _raise_browser_error(
@@ -310,11 +311,11 @@ def preflight_browser_profile(
             )
         diagnostics.profile_exists = True
     diagnostics.profile_mode = stat.S_IMODE(metadata.st_mode)
-    diagnostics.profile_owned_by_current_user = metadata.st_uid == os.getuid()
+    diagnostics.profile_owned_by_current_user = io.owned(profile)
     diagnostics.profile_writable = os.access(profile, os.R_OK | os.W_OK | os.X_OK)
     if (
         not diagnostics.profile_owned_by_current_user
-        or diagnostics.profile_mode != 0o700
+        or not io.private(profile, 0o700)
         or not diagnostics.profile_writable
     ):
         _raise_browser_error(

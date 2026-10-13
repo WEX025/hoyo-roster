@@ -14,7 +14,7 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 | 绝区零 | 代理人等级、晋阶、影画、技能、音擎、驱动盘、面板和邦布 | 只有名单、养成名单、逐角色详情、批量详情和邦布的覆盖条件全部满足，才输出 `complete`；不表示账号的所有信息 |
 | 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的接口和历史测试不是使用建议 |
 
-已验证的开发与安装平台为 macOS arm64、Python 3.12。目前不支持原生 Windows；Linux/WSL 尚未完成本轮平台验收。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
+已验证的开发与安装平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配，**尚待本人 Windows 实机端到端验收，不宣称跨平台正式可用**；Linux/WSL 尚未完成平台验收。Windows 当前目标为 Windows 11 x64、Python 3.12、Playwright Chromium、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
 
 更详细的字段、数据格式和完整度说明见[数据格式和完整度](docs/data-format.md)。
 
@@ -29,6 +29,18 @@ python -m pip install .
 python -m playwright install chromium
 hoyo-roster --game genshin --uid YOUR_UID
 ```
+
+Windows PowerShell（验收 PR 时先切换到该 PR 分支；无需激活脚本或修改系统执行策略）：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe tools\platform_smoke.py
+.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID
+```
+
+离线 smoke 仅用新临时目录检查权限、锁、保存和恢复，不登录、不发短信，不访问已有结果或认证目录。Windows 安装失败或 smoke 失败时先停止，报告固定错误代码与平台；不要用管理员运行或放宽 ACL 绕过。真实验收顺序见[平台验收](docs/platform-support.md#本人-windows-验收)。
 
 将 `YOUR_UID` 替换为你自己的游戏 UID。当前请仅使用 `--game genshin`（原神）或 `--game zzz`（绝区零）；不要使用保留的 `hsr` 参数。UID 用于选择本机身份范围，是否属于当前登录账号仍须由官方账号绑定信息核验。
 
@@ -86,9 +98,11 @@ hoyo-roster --game zzz --uid YOUR_UID --non-interactive --allow-login --login-me
 
 每次同步先核验所选游戏、UID 和区服，再采集两次；业务结果和来源覆盖一致、数据通过验证后才保存。不同游戏的字段范围见上方支持矩阵；只保存当前已支持的装备字段，不保存库存、货币、资源或推荐配装。
 
-从本项目 Git 仓库源码运行，或按上方步骤克隆后执行 `pip install .` / `pip install -e .`，结果默认集中在该仓库的 `data/`，按游戏和 UID 派生哈希隔离。程序从源码位置或安装时记录的本地源码地址核验本项目仓库；从仓库子目录或其他当前目录运行仍使用同一结果根，不选择当前目录里的任意仓库。单独安装 wheel、源码仓库已删除或无法核验时，结果回退到 `~/.local/share/hoyo-roster/results`，不会写入 `site-packages`。`--storage-root /absolute/private/results` 只覆盖结果位置。
+从本项目 Git 仓库源码运行，或按上方步骤克隆后执行 `pip install .` / `pip install -e .`，结果默认集中在该仓库的 `data/`，按游戏和 UID 派生哈希隔离。程序从源码位置或安装时记录的本地源码地址核验本项目仓库；从仓库子目录或其他当前目录运行仍使用同一结果根，不选择当前目录里的任意仓库。单独安装 wheel、源码仓库已删除或无法核验时，结果回退到 系统用户数据目录下的 `hoyo-roster/results`（具体位置见下文），不会写入 `site-packages`。`--storage-root /absolute/private/results` 只覆盖结果位置。
 
-浏览器 Profile、认证 key/指纹、认证锁和节流继续留在仓库外的 `~/.local/share/hoyo-roster`，保持原游戏/UID 身份范围；可用 `--auth-root /absolute/private/auth` 明确覆盖认证根，必须在仓库外。默认改变结果位置不会自动迁移、删除旧结果或 Profile。旧结果的查看与复用方法见[本机使用指南](docs/local-use.md)。
+系统用户数据根由 platformdirs 统一选择：macOS 为 `~/Library/Application Support/hoyo-roster`，Windows 为 `%LOCALAPPDATA%\hoyo-roster`，Linux 为 `$XDG_DATA_HOME/hoyo-roster`（未设置时 `~/.local/share/hoyo-roster`）。独立 wheel 的结果放在该根的 `results/` 下。
+
+浏览器 Profile、认证 key/指纹、认证锁和节流留在仓库外的上述系统用户数据根，按游戏/UID 隔离；可用 `--auth-root /absolute/private/auth` 明确覆盖认证根，必须在仓库外。本项目尚未发布，不提供历史逻辑兼容或数据迁移；既有目录保留原地，程序不搜索、迁移或清理它们。目录策略见[本机使用指南](docs/local-use.md)。
 
 终端显示 `RESULT_SCOPE`（身份结果目录）、`CURRENT_POINTER`（当前指针）和 `CURRENT_RESULT`（当前 JSON 所在目录），据此打开 `profile.json`、`roster.json`、`builds/` 及绝区零的 `bangboos.json`。结果仍是当前快照，哈希不是加密；完整本机路径也不要贴到公开反馈。
 

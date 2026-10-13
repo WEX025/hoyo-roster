@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn
+from .. import platform_io as io
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 PRIVATE_MODE = 0o700
@@ -40,19 +41,20 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def load_metadata(path: Path) -> object:
+def load_metadata(path: Path, *, private: bool = False) -> object:
     try:
+        io.check_components(path)
         metadata = path.lstat()
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        if io.is_redirect(metadata) or not stat.S_ISREG(metadata.st_mode):
             raise MetadataError("metadata path was not a regular file")
         return json.loads(
-            path.read_text(encoding="utf-8"),
+            io.read_regular(path, require_private=private).decode("utf-8"),
             object_pairs_hook=_strict_object,
             parse_constant=lambda value: (_ for _ in ()).throw(
                 MetadataError(f"invalid JSON constant: {value}")
             ),
         )
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    except (OSError, io.UnsafePath, UnicodeError, json.JSONDecodeError) as error:
         raise MetadataError("metadata could not be read") from error
 
 
@@ -72,11 +74,7 @@ def atomic_write_metadata(
     descriptor: int | None = None
     replaced = False
     try:
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-        )
+        descriptor = io.open_private(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
         payload = (json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode(
             "utf-8"
         )
@@ -84,16 +82,12 @@ def atomic_write_metadata(
             descriptor = None
             stream.write(payload)
             stream.flush()
-            os.fsync(stream.fileno())
+            io.sync_file(stream.fileno())
         if before_replace is not None:
             before_replace(temporary)
-        os.replace(temporary, path)
+        io.replace(temporary, path)
         replaced = True
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        io.sync_directory(path.parent)
     except BaseException as error:
         if descriptor is not None:
             os.close(descriptor)
@@ -116,20 +110,22 @@ def is_atomic_temporary_name(name: str, target_name: str) -> bool:
 
 def require_real_directory(path: Path) -> os.stat_result:
     try:
+        io.check_components(path)
         metadata = path.lstat()
-    except OSError as error:
+    except (OSError, io.UnsafePath) as error:
         raise MetadataError("directory was unavailable") from error
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+    if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
         raise MetadataError("path was not a real directory")
     return metadata
 
 
 def require_regular_file(path: Path) -> os.stat_result:
     try:
+        io.check_components(path)
         metadata = path.lstat()
-    except OSError as error:
+    except (OSError, io.UnsafePath) as error:
         raise MetadataError("file was unavailable") from error
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+    if io.is_redirect(metadata) or not stat.S_ISREG(metadata.st_mode):
         raise MetadataError("path was not a regular file")
     return metadata
 
@@ -141,18 +137,18 @@ def secure_private_directory(
 ) -> Path:
     path = value.expanduser().absolute()
     try:
+        io.check_components(path)
         for part in (*reversed(path.parents), path):
-            if part.is_symlink():
+            if os.path.lexists(part) and io.is_redirect(part.lstat()):
                 raise MetadataError("symbolic link in private path")
             if not part.exists():
-                part.mkdir(mode=PRIVATE_MODE)
-                part.chmod(PRIVATE_MODE)
+                io.mkdir_private(part)
             require_real_directory(part)
-        metadata = require_real_directory(path)
-        if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != PRIVATE_MODE:
+        require_real_directory(path)
+        if not io.private(path):
             raise MetadataError("existing private directory must be owner-only")
         resolved = path.resolve(strict=True)
-    except OSError as error:
+    except (OSError, io.UnsafePath) as error:
         raise MetadataError("private directory could not be secured") from error
     if repository_root is not None:
         repository = repository_root.resolve()
@@ -177,7 +173,7 @@ def tree_digest(path: Path) -> str:
             child_path = Path(child.path)
             metadata = child.stat(follow_symlinks=False)
             relative = child_path.relative_to(path).as_posix().encode("utf-8")
-            if stat.S_ISLNK(metadata.st_mode):
+            if io.is_redirect(metadata):
                 raise MetadataError("tree contained a symbolic link")
             if stat.S_ISDIR(metadata.st_mode):
                 digest.update(relative)

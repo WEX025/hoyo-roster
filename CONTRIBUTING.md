@@ -8,7 +8,9 @@
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-python -m pytest -q
+python tools/platform_smoke.py
+# 按变更选择受影响的 tests/test_*.py
+python -m pytest -q tests/test_platform_io.py
 python -m ruff check src tests tools --select F
 python -m ruff format --check src tests tools
 python tools/validate_repository.py --require-empty-baseline
@@ -19,12 +21,14 @@ python -m build
 
 禁止提交个人结果。源码 `data/` 只允许跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略；认证目录必须在仓库外。提交前运行 `python tools/check_private_data.py`，它只检查 Git 索引路径、不读取私人内容，只要 data/ 内跟踪了其他文件就报错。检查失败时先保留本机文件，再从索引取消跟踪（例如 `git rm --cached -- PATH`），重新检查；已经上传的个人数据还须私下处理暴露与历史，不能认为后续忽略就能撤回。`.gitignore` 不保护已跟踪文件、强制 add 或整个目录打包。此检查是手动本地命令，不安装 hooks，也不新增 CI/workflow。
 
-测试使用临时目录与合成身份，认证 HOME/--auth-root 同样指向临时私有根。按改动范围运行定向测试及受影响回归；只有影响扩大时才有根据地扩展，不以默认全仓测试替代边界判断。
+测试使用临时目录与合成身份，默认路径提供者/--auth-root 同样指向临时私有根，不能依赖导入时冻结的 HOME。按改动范围运行定向测试及受影响回归；只有影响扩大时才有根据地扩展，不以默认全仓测试替代边界判断。
 
 合成回归只替换浏览器、网络及其时间等待，业务 Provider、协调器、双次采集、normalize、lifecycle、candidate 和 store 应运行真实代码。增加关键失败/恢复测试；不要以单个函数 stub 的成功证明完整链路。资源验证须从干净 wheel/sdist 安装运行，包含三游戏模块、schema 和验证器。
 
 修改官方请求契约时引用官方公开静态源码并保留 URL/哈希/日期；静态证据与真实账号验收分开。官方验证码、短信、二维码等认证操作由本人完成，真实账号测试需明确授权。真实未执行记录 NOT_RUN，不能把离线通过称为发布验收通过。
 
 报告注明固定源码 SHA、实际命令、通过/失败/未执行和平台。PR 写清问题、行为变化和验证；不要附个人路径、真实账号、凭据或响应。提交问题时提供版本、操作系统/Python版本、固定错误代码、脱敏步骤及预期行为；完整数据和浏览器状态无需上传。发现隐私漏洞时先使用仓库所有者可用的私密联系渠道，不在公开 Issue 放入秘密。
+
+跨平台 I/O、Windows 本人验收及目录刷新边界见 [平台支持](docs/platform-support.md)。Windows 原语须实机验证；macOS mock 不能替代。历史合成回归保留其 POSIX 假设，不把全套 pytest 当成 Windows 平台通过；Windows 优先运行独立 native smoke。
 
 本项目采用 MIT；新增依赖先核实实际版本许可证并更新 THIRD_PARTY_NOTICES，不引入未授权游戏素材。不添加 CI/Actions、部署、合并或后台服务作为常规修改的一部分。

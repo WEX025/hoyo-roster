@@ -478,6 +478,8 @@ def run_mock_process(storage, operation, headed):
         UID_A,
         "--storage-root",
         storage,
+        "--auth-root",
+        str(Path(storage).parent / "synthetic-auth"),
         "--operation",
         operation,
         "--non-interactive",

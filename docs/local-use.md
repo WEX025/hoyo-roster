@@ -4,13 +4,15 @@
 
 ## 首次使用
 
-按 README 安装 Python 3.12、项目和 Playwright Chromium。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 `~/.local/share/hoyo-roster/results`，不会静默写入 `site-packages`。
+按 README 安装 Python 3.12、项目和 Playwright Chromium。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
 
-`--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认 `~/.local/share/hoyo-roster`；必须在所有 Git 仓库和包源码之外，属于当前用户且为 0700。Profile、认证 key/指纹、节流与认证锁按原身份布局留在那里；不同结果根共用同一认证范围时仍由认证锁互斥。
+`--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、认证 key/指纹、节流与认证锁按游戏/UID 隔离；不同结果根共用同一认证范围时仍由认证锁互斥。
 
 结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证范围为 `<认证根>/users/<scope>/<game>/<hash>/`。scope/hash 由游戏和 UID 确定，不含明文 UID。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
 
-程序逐层把**新建应用目录**设为 0700，不修改已有共享父目录。clone 创建且包含 `.gitkeep` 的顶层 `data/` 可保持属于本人、不可被组/其他人写入的 0755 权限；其下身份目录仍须 0700。其他已存在的结果根、认证根及身份目录必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`。普通结果和元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
+POSIX 上，程序逐层把**新建应用目录**设为 0700，不修改已有共享父目录。clone 创建且包含 `.gitkeep` 的顶层 `data/` 可保持属于本人、不可被组/其他人写入的 0755 权限；其下身份目录仍须 0700。其他已存在的结果根、认证根及身份目录必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`。普通结果和元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
+
+Windows 使用当前进程用户 SID 与 DACL 校验所有权和私有权限，不把 chmod/0600 当成 Windows 安全证据。新目录和文件创建时就给当前 SID 全权限并阻断其他 SID 的继承访问；Profile 根同样受保护。已有不安全根只拒绝，不修复其 ACL。clone 的公共 `data/` 容器只允许当前用户、SYSTEM、Administrators 写入，身份子目录仍须私有。路径各层的 reparse/junction 均拒绝。普通用户不需提权；详细边界见 [平台支持](platform-support.md)。
 
 ```bash
 hoyo-roster --game genshin --uid YOUR_UID --operation init
@@ -38,9 +40,9 @@ hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --
 
 ## 升级
 
-关闭本工具，更新或重新安装代码，然后运行原命令。此次默认结果位置调整不自动迁移、删除或读取旧结果，不搬动 Profile；仓库 `data/` 会作为新的结果根，而旧默认认证身份范围继续复用。要检查旧默认结果，显式指定 `--storage-root ~/.local/share/hoyo-roster --operation inspect`；要继续在那里保存，保留这个覆盖。原先使用自选旧根的用户，可同时传 `--storage-root /absolute/old/private --auth-root /absolute/old/private` 在仓库外继续使用原结果和 Profile。两根共用仅允许在仓库外，不要把含 Profile/key 的旧根整体搬入 `data/`。
+关闭本工具后更新或重新安装代码，再运行原命令。本项目尚未发布，本轮不兼容历史目录/候选/恢复格式，不提供迁移，不搜索、读取或清理旧默认路径。默认认证目录策略已统一为平台系统用户数据根；已有私人结果和 Profile 留在原处。
 
-如需人工迁移，先关闭所有相关进程并私下备份，按游戏/UID 核对完整结果身份范围（指针、代际、候选、工作区身份与恢复日志），只将结果部分复制到新的同身份范围；认证 Profile、identity.key、verified-identity.json、request-state.json 和认证锁留在旧私有位置。先用明确结果根 inspect/recover 验证，旧副本保留到本人确认成功；程序不提供自动迁移。程序从发行包携带的 contracts 生成新代际，复制本身份已保存数据，做完整验证，再替换 current 指针。升级不复制其他身份的 Profile，不从旧私有仓库导入数据。当前版本不提供旧 Broker、Runtime、users.toml 或候选格式迁移，也不迁移缺少独立身份边界的旧本机工作区及旧恢复日志。旧格式保留并拒绝操作；不能删除身份标记来重建或解除区服约束。
+选定范围里若存在未知或旧格式残留，程序保留并拒绝继续操作；不能删除身份标记来重建或解除区服约束。本次代码开发不操作任何真实用户范围。
 
 ## 检查与恢复
 
@@ -54,8 +56,8 @@ inspect 在 current 缺失或失效时仍给出 `EMPTY` / `INVALID`、代际 UUI
 保存有三个边界：
 
 - `NOT_COMMITTED`：新 current 未提交。之前的数据仍有效，已写恢复日志时必须 recover 后再运行。
-- `COMMITTED`：新 current 已替换且父目录 fsync 成功。旧代际或候选清理失败仅是清理待办，已经保存的数据有效；不会把保存说成失败。
-- `DURABILITY_UNKNOWN` / `COMMIT_DURABILITY_UNKNOWN`：替换已发生，父目录持久化失败。新旧代际和恢复日志都保留，不声称完成保存，停止采集并检查恢复。
+- `COMMITTED`：新 current 已替换且完成该平台提供的持久化操作（POSIX 文件及父目录 fsync；Windows 文件刷新与 WRITE_THROUGH 替换）。Windows 不承诺断电持久化等价，见平台边界。旧代际或候选清理失败仅是清理待办，已经保存的数据有效；不会把保存说成失败。
+- `DURABILITY_UNKNOWN` / `COMMIT_DURABILITY_UNKNOWN`：替换已发生，其后的平台持久化检查失败。新旧代际和恢复日志都保留，不声称完成保存，停止采集并检查恢复。
 
 recover 在锁内先完整预检，再提交指针，最后清理。身份权威是独立于 current 的 `workspace-identity.json`，绑定所选游戏、UID 摘要和区服；首次离线空基线尚未绑定区服，首次完整验证的业务提交会在指针提交前持久绑定，回退空基线或 logout 不解除绑定。缺失、损坏或矛盾的身份边界拒绝恢复和清理，不能从损坏 current 推断为任意区服。
 

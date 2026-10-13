@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from ... import platform_io as io
 import stat
-import tempfile
 from collections.abc import Callable, Mapping
 from decimal import Decimal
 from pathlib import Path
@@ -265,22 +265,19 @@ def atomic_write_json(
     mode: int = 0o600,
     before_replace: Callable[[Path], None] | None = None,
 ) -> None:
+    if mode != 0o600:
+        raise ValueError("private JSON files require owner-only mode")
     data = canonical_json_bytes(value)
     require_real_directory(path.parent)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=atomic_temporary_prefix(path.name),
-        dir=path.parent,
-    )
-    temporary = Path(temporary_name)
+    descriptor, temporary = io.temporary_file(path, atomic_temporary_prefix(path.name))
     try:
-        os.fchmod(descriptor, mode)
         with os.fdopen(descriptor, "wb") as output:
             output.write(data)
             output.flush()
-            os.fsync(output.fileno())
+            io.sync_file(output.fileno())
         if before_replace is not None:
             before_replace(temporary)
-        os.replace(temporary, path)
+        io.replace(temporary, path)
     except BaseException:
         try:
             temporary.unlink(missing_ok=True)
