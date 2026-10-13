@@ -257,9 +257,12 @@ def network_pacing(monkeypatch):
     monkeypatch.setattr(RequestGate, "reserve", reserve)
 
 
-@pytest.mark.parametrize("game,owned", [("zzz", True), ("hsr", True), ("hsr", False)])
+@pytest.mark.parametrize(
+    "game,owned,repository_output",
+    [("zzz", True, False), ("zzz", True, True), ("hsr", True, False), ("hsr", False, False)],
+)
 def test_actual_game_chain_twice_and_noop(
-    tmp_path, monkeypatch, capsys, network_pacing, game, owned
+    tmp_path, monkeypatch, capsys, network_pacing, game, owned, repository_output
 ):
     import importlib
 
@@ -285,13 +288,21 @@ def test_actual_game_chain_twice_and_noop(
 
     monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
     root = tmp_path / "private"
+    if repository_output:
+        from hoyo_roster import paths
+
+        repo = tmp_path / "clone"
+        (repo / ".git").mkdir(parents=True)
+        root = repo / "data"
+        root.mkdir(mode=0o755)
+        (root / ".gitkeep").touch()
+        monkeypatch.setattr(paths, "project_repository", lambda: repo)
     argv = [
         "--game",
         game,
         "--uid",
         UID_A,
-        "--storage-root",
-        str(root),
+        *([] if repository_output else ["--storage-root", str(root)]),
         "--allow-login",
         "--login-method",
         "phone",

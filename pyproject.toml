@@ -23,7 +23,7 @@ hoyo-roster = "hoyo_roster.cli:main"
 packages = ["src/hoyo_roster"]
 
 [tool.hatch.build.targets.sdist]
-include = [".gitattributes", ".gitignore", "src/", "tests/", "tools/", "docs/", "third_party/", ".agents/", "*.md", "LICENSE", "pyproject.toml"]
+include = [".gitattributes", ".gitignore", "data/.gitkeep", "src/", "tests/", "tools/", "docs/", "third_party/", ".agents/", "*.md", "LICENSE", "pyproject.toml"]
 
 [tool.ruff]
 target-version = "py312"
