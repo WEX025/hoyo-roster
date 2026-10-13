@@ -30,15 +30,23 @@ async def navigate_login_page(page: Page, url: str) -> None:
             response = await page.goto(
                 url, wait_until="domcontentloaded", timeout=login_timeout() * 1000
             )
-            check_navigation_response(response)
-            await page.bring_to_front()
     except (TimeoutError, PlaywrightTimeoutError):
         raise LoginTimeout("Official login page did not finish loading") from None
     except PlaywrightError as error:
         if page.is_closed():
-            raise ContextNotReusable("Login page unavailable") from None
+            raise LoginControlUnavailable(
+                "Official login page closed; reopen the command"
+            ) from None
         if "net::ERR_" in str(error):
             raise LoginNetworkError("Official login page unavailable") from None
+        raise LoginControlUnavailable("Official login page control unavailable") from None
+
+    check_navigation_response(response)
+    # Foreground control has its own bounded phase after navigation completes.
+    try:
+        async with asyncio.timeout(login_timeout()):
+            await page.bring_to_front()
+    except (TimeoutError, PlaywrightError):
         raise LoginControlUnavailable("Official login page control unavailable") from None
 
 

@@ -14,6 +14,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from hoyo_roster.browser import (
     guard_session_initialization,
     initialize_session_page,
+    navigate_login_page,
 )
 from hoyo_roster.errors import (
     AuthenticationRequired,
@@ -23,6 +24,7 @@ from hoyo_roster.errors import (
     LoginControlUnavailable,
     LoginNetworkError,
     LoginTimeout,
+    RateLimited,
     RiskControl,
     WrongAccount,
 )
@@ -110,6 +112,136 @@ def test_initialization_failure_closes_page_before_any_binding(failure, error):
     with pytest.raises(error):
         asyncio.run(initialize_session_page(context, "https://www.miyoushe.com/ys/"))
     assert context.pages[0].closed and context.request.count == 0
+
+
+@pytest.mark.parametrize(
+    "phase,failure,closed,error",
+    (
+        ("navigation", PlaywrightTimeoutError("synthetic"), False, LoginTimeout),
+        ("navigation", TimeoutError("synthetic"), False, LoginTimeout),
+        ("navigation", PlaywrightError("net::ERR_CONNECTION_RESET"), False, LoginNetworkError),
+        (
+            "navigation",
+            PlaywrightError("synthetic control failure"),
+            False,
+            LoginControlUnavailable,
+        ),
+        ("navigation", PlaywrightError("Target page closed"), True, LoginControlUnavailable),
+        ("navigation", PlaywrightError("net::ERR_CONNECTION_RESET"), True, LoginControlUnavailable),
+        ("foreground", PlaywrightTimeoutError("synthetic"), False, LoginControlUnavailable),
+        ("foreground", TimeoutError("synthetic"), False, LoginControlUnavailable),
+        (
+            "foreground",
+            PlaywrightError("net::ERR_CONNECTION_RESET"),
+            False,
+            LoginControlUnavailable,
+        ),
+        ("foreground", PlaywrightError("Target page closed"), True, LoginControlUnavailable),
+        ("navigation", asyncio.CancelledError(), False, asyncio.CancelledError),
+        ("foreground", asyncio.CancelledError(), False, asyncio.CancelledError),
+        ("navigation", RuntimeError("unexpected failure"), False, RuntimeError),
+        ("foreground", RuntimeError("unexpected failure"), False, RuntimeError),
+    ),
+)
+def test_login_page_failure_classification(phase, failure, closed, error):
+    events = []
+
+    class FailedPage(Page):
+        def is_closed(self):
+            return closed
+
+        async def goto(self, *args, **kwargs):
+            events.append("navigation")
+            if phase == "navigation":
+                raise failure
+            return SimpleNamespace(status=200)
+
+        async def bring_to_front(self):
+            events.append("foreground")
+            raise failure
+
+    with pytest.raises(error):
+        asyncio.run(navigate_login_page(FailedPage(), "https://www.miyoushe.com/ys/"))
+    assert events == (["navigation"] if phase == "navigation" else ["navigation", "foreground"])
+
+
+@pytest.mark.parametrize("phase", ("navigation", "foreground"))
+def test_login_page_phase_deadline_is_bounded(phase):
+    events = []
+
+    class HungPage(Page):
+        async def goto(self, *args, **kwargs):
+            assert kwargs == {"wait_until": "domcontentloaded", "timeout": 10}
+            events.append("navigation")
+            if phase == "navigation":
+                await asyncio.Future()
+            return SimpleNamespace(status=200)
+
+        async def bring_to_front(self):
+            events.append("foreground")
+            await asyncio.Future()
+
+    token = OPTIONS.set(LoginOptions(timeout=0.01))
+    try:
+        with pytest.raises(LoginTimeout if phase == "navigation" else LoginControlUnavailable):
+            asyncio.run(navigate_login_page(HungPage(), "https://www.miyoushe.com/ys/"))
+    finally:
+        OPTIONS.reset(token)
+    assert events == (["navigation"] if phase == "navigation" else ["navigation", "foreground"])
+
+
+@pytest.mark.parametrize("status,error", ((429, RateLimited), (503, LoginNetworkError)))
+def test_login_page_http_failure_precedes_foreground_control(status, error):
+    class FailedPage(Page):
+        async def goto(self, *args, **kwargs):
+            return SimpleNamespace(status=status)
+
+        async def bring_to_front(self):
+            pytest.fail("HTTP failure must stop before foreground control")
+
+    with pytest.raises(error):
+        asyncio.run(navigate_login_page(FailedPage(), "https://www.miyoushe.com/ys/"))
+
+
+@pytest.mark.parametrize("game", ("genshin", "zzz", "hsr"))
+@pytest.mark.parametrize("phase", ("navigation", "foreground"))
+def test_login_page_control_failure_stops_before_further_binding(tmp_path, source, game, phase):
+    root = tmp_path / "workspace"
+    empty_workspace(source, root)
+    provider, context, page, gate = provider_for(
+        game, root, [binding_payload(game, retcode=10001), binding_payload(game)]
+    )
+    original_new_page = context.new_page
+
+    async def failed_goto(url, **kwargs):
+        if url != "about:blank" and phase == "navigation":
+            page.closed = True
+            raise PlaywrightError("Target page closed")
+        return SimpleNamespace(status=200)
+
+    async def failed_foreground():
+        raise PlaywrightTimeoutError("synthetic control timeout")
+
+    page.goto = failed_goto
+    page.bring_to_front = failed_foreground
+
+    async def new_page():
+        if context.pages:  # HSR opens a separate manual-login page after SDK initialization.
+            context.pages.append(page)
+            return page
+        return await original_new_page()
+
+    context.new_page = new_page
+    token = OPTIONS.set(LoginOptions("qr", True, timeout=0.1, allow_login=True))
+    try:
+        with pytest.raises(LoginControlUnavailable):
+            asyncio.run(coordinate(root, provider, context, page, gate))
+    finally:
+        OPTIONS.reset(token)
+    assert context.request.count == 1
+    assert context.pages[0].closed
+    if game == "hsr":
+        assert page.closed and not page.routes and provider._login_page is None
 
 
 @pytest.mark.parametrize(
