@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from hoyo_roster import cli
+from hoyo_roster import cli, paths
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def private_test_home(tmp_path):
     # Never create or reuse real local authentication state in synthetic tests.
     with pytest.MonkeyPatch.context() as environment:
-        environment.setenv("HOME", str(tmp_path / "home"))
+        environment.setattr(paths, "default_private_root", lambda: tmp_path / "home" / "private")
         yield
 
 

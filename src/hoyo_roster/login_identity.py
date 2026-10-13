@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import os
 import re
-import stat
+from . import platform_io as io
 from dataclasses import dataclass
 from .config import Settings
 from .errors import ExpectedIdentityConflict, ConfigurationError
@@ -24,22 +24,20 @@ class LoginIdentityStore:
 
     def _key(self) -> bytes:
         try:
-            fd = os.open(self.key_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            fd = io.open_private(self.key_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             pass
         else:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(os.urandom(32))
                 stream.flush()
-                os.fsync(stream.fileno())
-        metadata = self.key_path.lstat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-        ):
-            raise ConfigurationError("Unsafe identity key")
-        key = self.key_path.read_bytes()
+                io.sync_file(stream.fileno())
+        try:
+            descriptor = io.open_private(self.key_path, os.O_RDONLY)
+            with os.fdopen(descriptor, "rb") as stream:
+                key = stream.read()
+        except (OSError, io.UnsafePath):
+            raise ConfigurationError("Unsafe identity key") from None
         if len(key) != 32:
             raise ConfigurationError("Invalid identity key")
         return key
@@ -47,7 +45,7 @@ class LoginIdentityStore:
     def read(self, game: str) -> VerifiedLoginIdentity | None:
         if not self.path.exists():
             return None
-        state = load_metadata(self.path)
+        state = load_metadata(self.path, private=True)
         if (
             not isinstance(state, dict)
             or set(state) != {"game", "fingerprint"}

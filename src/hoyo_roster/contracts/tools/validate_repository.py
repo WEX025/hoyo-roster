@@ -348,7 +348,8 @@ def write_json(path: Path, value: Any) -> None:
     )
     temporary = Path(temporary_name)
     try:
-        os.fchmod(descriptor, 0o600)
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb") as output:
             output.write(data)
             output.flush()

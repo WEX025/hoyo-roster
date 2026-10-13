@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from ... import platform_io as io
 import stat
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -69,14 +69,13 @@ def json_bytes(value: Any, *, sort_keys: bool = False) -> bytes:
 
 def atomic_write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, raw_temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(raw_temp)
+    descriptor, temporary = io.temporary_file(path, f".{path.name}.")
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(json_bytes(value))
             stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
+            io.sync_file(stream.fileno())
+        io.replace(temporary, path)
     finally:
         if temporary.exists():
             temporary.unlink()

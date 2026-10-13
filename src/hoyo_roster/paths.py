@@ -7,9 +7,13 @@ import subprocess
 import tomllib
 from importlib import metadata
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
+from platformdirs import user_data_path
 
-PRIVATE_ROOT = Path("~/.local/share/hoyo-roster")
+
+def default_private_root() -> Path:
+    return user_data_path("hoyo-roster", appauthor=False, roaming=False)
 
 
 def verified_repository(candidate: Path) -> Path | None:
@@ -49,7 +53,7 @@ def project_repository() -> Path | None:
         direct = json.loads(value) if value else {}
         url = urlsplit(direct.get("url", ""))
         if "dir_info" in direct and url.scheme == "file" and url.netloc in {"", "localhost"}:
-            return verified_repository(Path(unquote(url.path)))
+            return verified_repository(Path(url2pathname(url.path)))
     except (metadata.PackageNotFoundError, OSError, ValueError, TypeError, AttributeError):
         pass
     return None
@@ -57,7 +61,7 @@ def project_repository() -> Path | None:
 
 def default_storage_root() -> Path:
     repository = project_repository()
-    return repository / "data" if repository else PRIVATE_ROOT / "results"
+    return repository / "data" if repository else default_private_root() / "results"
 
 
 def containing_repository(path: Path) -> Path | None:

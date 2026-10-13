@@ -83,12 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--storage-root",
         type=Path,
-        help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为 ~/.local/share/hoyo-roster/results；不改变认证目录",
+        help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为系统用户数据根的 results/；不改变认证目录",
     )
     parser.add_argument(
         "--auth-root",
         type=Path,
-        help="仓库外的私有认证根目录（绝对路径，0700）；默认 ~/.local/share/hoyo-roster，保留旧会话范围",
+        help="仓库外的私有认证根目录（绝对路径）；默认系统用户数据根，须通过 POSIX 权限或 Windows SID/DACL 检查",
     )
     parser.add_argument("--login-method", choices=("qr", "phone", "cancel"))
     parser.add_argument("--non-interactive", action="store_true")

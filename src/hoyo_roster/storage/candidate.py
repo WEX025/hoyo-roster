@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from .. import platform_io as io
 import re
 import stat
 import uuid
@@ -268,8 +269,8 @@ def inspect_candidate(
     except ValueError:
         return CandidateInspection("UNKNOWN", "UNOWNED", False)
     try:
-        metadata = require_real_directory(path)
-        if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != policy.mode:
+        require_real_directory(path)
+        if not io.private(path, policy.mode):
             raise ValueError
         state_path = path / policy.state_file
         if not os.path.lexists(state_path):
@@ -277,11 +278,8 @@ def inspect_candidate(
             raise ValueError
         for item in (state_path, *path.rglob("*")):
             metadata = item.lstat()
-            if (
-                metadata.st_uid != os.getuid()
-                or stat.S_IMODE(metadata.st_mode)
-                != (0o700 if stat.S_ISDIR(metadata.st_mode) else 0o600)
-                or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode))
+            if not io.private(item) or not (
+                stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)
             ):
                 raise ValueError
         value = load_metadata(state_path)
@@ -401,9 +399,9 @@ def create_candidate_workspace(
     run_id = str(uuid.uuid4())
     candidate_root = base / run_id
     try:
-        candidate_root.mkdir(mode=policy.mode)
-        candidate_root.chmod(policy.mode)
-        if stat.S_IMODE(require_real_directory(candidate_root).st_mode) != policy.mode:
+        io.mkdir_private(candidate_root)
+        require_real_directory(candidate_root)
+        if not io.private(candidate_root, policy.mode):
             raise MetadataError("candidate run directory mode was invalid")
     except (MetadataError, OSError) as error:
         raise_as(policy.errors.inspection, "candidate workspace creation failed", error)
@@ -452,12 +450,12 @@ def create_candidate_workspace(
         for item in candidate_root.rglob("*"):
             metadata = item.lstat()
             if (
-                stat.S_ISLNK(metadata.st_mode)
-                or metadata.st_uid != os.getuid()
+                io.is_redirect(metadata)
+                or not io.owned(item)
                 or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode))
             ):
                 raise MetadataError("unsafe candidate path")
-            item.chmod(0o700 if stat.S_ISDIR(metadata.st_mode) else 0o600)
+            io.set_private(item)
         validate(candidate_root)
         confirmed = evidence(workspace)
         atomic_write_metadata(

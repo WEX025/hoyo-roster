@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import importlib
 import json
@@ -20,6 +19,8 @@ from pathlib import Path
 from typing import Protocol
 
 from . import paths
+from . import platform_io as io
+import portalocker
 from .storage.candidate import CandidateScope, REGIONS
 from .storage.common import (
     AtomicWriteError,
@@ -37,7 +38,6 @@ GAMES = {
     "hsr": "honkai-star-rail",
     "zzz": "zenless-zone-zero",
 }
-DEFAULT_DIRECT_ROOT = paths.PRIVATE_ROOT
 _ALIAS = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
 _UID = re.compile(r"[1-9][0-9]{0,31}\Z")
 
@@ -67,7 +67,7 @@ class UserConfiguration:
     user: str
     storage_root: Path
     uids: dict[str, str] = field(repr=False)
-    auth_root: Path = DEFAULT_DIRECT_ROOT
+    auth_root: Path = field(default_factory=paths.default_private_root)
 
     def uid(self, game: str) -> str:
         if game not in self.uids:
@@ -88,7 +88,7 @@ def direct_configuration(
     if not isinstance(uid, str) or not _UID.fullmatch(uid):
         raise WorkspaceError("INVALID_UID")
     storage_root = paths.default_storage_root() if storage_root is None else storage_root
-    auth_root = DEFAULT_DIRECT_ROOT if auth_root is None else auth_root
+    auth_root = paths.default_private_root() if auth_root is None else auth_root
     if not storage_root.expanduser().is_absolute():
         raise WorkspaceError("INVALID_STORAGE_ROOT")
     if not auth_root.expanduser().is_absolute():
@@ -173,7 +173,7 @@ def empty_workspace(source: Path, destination: Path) -> None:
 
 def write_json(path: Path, document: object) -> None:
     path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    io.set_private(path, 0o600)
 
 
 class LocalSnapshotStore:
@@ -187,6 +187,11 @@ class LocalSnapshotStore:
         self._uid = config.uid(game)
         if not _UID.fullmatch(self._uid):
             raise WorkspaceError("INVALID_CONFIG")
+        try:
+            io.check_components(config.storage_root)
+            io.check_components(config.auth_root)
+        except (io.UnsafePath, OSError):
+            raise WorkspaceError("UNSAFE_PRIVATE_DIRECTORY") from None
         resolved = config.storage_root.expanduser().resolve()
         if resolved.is_relative_to(self.source) or self.source.is_relative_to(resolved):
             raise WorkspaceError("UNSAFE_STORAGE_ROOT")
@@ -210,12 +215,7 @@ class LocalSnapshotStore:
         # A cloned data/ container is usually 0755 because of its tracked placeholder.
         # Leave it unchanged; all identity directories below it must still be 0700.
         if resolved == repository_data and config.storage_root.exists():
-            metadata = config.storage_root.lstat()
-            if (
-                not stat.S_ISDIR(metadata.st_mode)
-                or metadata.st_uid != os.getuid()
-                or metadata.st_mode & 0o022
-            ):
+            if not io.repository_container_safe(config.storage_root):
                 raise WorkspaceError("UNSAFE_PRIVATE_DIRECTORY")
             root = config.storage_root
         else:
@@ -232,7 +232,7 @@ class LocalSnapshotStore:
             for name in ("browser-profile", "identity.key", "verified-identity.json")
         ):
             raise WorkspaceError("AUTH_STATE_IN_RESULT_DIRECTORY")
-        # Keep the old default authentication scope for session reuse; never migrate it.
+        # Authentication is independent of the result destination; never migrate user data.
         self.browser_profile = self.auth_root / "browser-profile"
         self.current_file = self.root / "current.json"
         self._locked = False
@@ -255,22 +255,13 @@ class LocalSnapshotStore:
 
     @contextmanager
     def _lock_directory(self, root: Path) -> Iterator[None]:
-        descriptor = os.open(
-            root / "workspace.lock",
-            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
-            0o600,
-        )
         try:
-            metadata = os.fstat(descriptor)
-            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o600:
-                raise WorkspaceError("UNSAFE_LOCK")
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise WorkspaceError("USER_WORKSPACE_BUSY") from None
-            yield
-        finally:
-            os.close(descriptor)
+            with io.exclusive_lock(root / "workspace.lock"):
+                yield
+        except portalocker.exceptions.LockException:
+            raise WorkspaceError("USER_WORKSPACE_BUSY") from None
+        except io.UnsafePath:
+            raise WorkspaceError("UNSAFE_LOCK") from None
 
     @property
     def scope_digest(self) -> str:
@@ -351,10 +342,7 @@ class LocalSnapshotStore:
         if not path.is_dir():
             raise WorkspaceError("INVALID_CURRENT_POINTER")
         for item in (path, *path.rglob("*")):
-            metadata = item.lstat()
-            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != (
-                0o700 if item.is_dir() else 0o600
-            ):
+            if not io.private(item):
                 raise WorkspaceError("UNSAFE_GENERATION")
         marker = load_metadata(path / "generation.json")
         profile = load_metadata(path / "data" / self.game / "profile.json")
@@ -448,12 +436,7 @@ class LocalSnapshotStore:
     def logout(self) -> None:
         self._require_lock()
         if self.browser_profile.exists():
-            metadata = self.browser_profile.lstat()
-            if (
-                self.browser_profile.is_symlink()
-                or metadata.st_uid != os.getuid()
-                or stat.S_IMODE(metadata.st_mode) != 0o700
-            ):
+            if not io.private(self.browser_profile, 0o700):
                 raise WorkspaceError("UNSAFE_BROWSER_PROFILE")
             # Browser must be closed; never remove live or stale singleton authority.
             if any(
@@ -465,17 +448,12 @@ class LocalSnapshotStore:
         for path in (self.auth_root / "identity.key", self.auth_root / "verified-identity.json"):
             if os.path.lexists(path):
                 metadata = path.lstat()
-                if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+                if not stat.S_ISREG(metadata.st_mode) or not io.private(path, 0o600):
                     raise WorkspaceError("UNSAFE_IDENTITY_STATE")
                 path.unlink()
 
     def _verify_private_metadata(self, path: Path) -> None:
-        metadata = path.lstat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-        ):
+        if not path.is_file() or not io.private(path, 0o600):
             raise WorkspaceError("UNSAFE_METADATA")
 
     def _require_lock(self) -> None:
@@ -483,11 +461,7 @@ class LocalSnapshotStore:
             raise WorkspaceError("WORKSPACE_LOCK_REQUIRED")
 
     def _sync_pointer_directory(self) -> None:
-        descriptor = os.open(self.root, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        io.sync_directory(self.root)
 
     def _inventory(self, path: Path) -> dict[str, str]:
         tree_digest(path)
@@ -529,10 +503,7 @@ class LocalSnapshotStore:
         if not set(self._inventory(path).items()).issubset(set(inventory.items())):
             raise WorkspaceError("CLEANUP_RESIDUE_CHANGED")
         for item in (path, *path.rglob("*")):
-            metadata = item.lstat()
-            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != (
-                0o700 if item.is_dir() else 0o600
-            ):
+            if not io.private(item):
                 raise WorkspaceError("UNSAFE_CLEANUP_RESIDUE")
         marker = path / "generation.json"
         if os.path.lexists(marker):
@@ -687,10 +658,6 @@ class LocalSnapshotStore:
         allowed = {
             "current.json",
             "candidates",
-            "browser-profile",
-            "request-state.json",
-            "identity.key",
-            "verified-identity.json",
             "workspace-identity.json",
         }
         if old:
@@ -733,16 +700,15 @@ class LocalSnapshotStore:
                 },
             )
             for p in new.rglob("*"):
-                p.chmod(0o700 if p.is_dir() else 0o600)
+                io.set_private(p)
                 if p.is_file():
-                    with p.open("rb") as stream:
-                        os.fsync(stream.fileno())
+                    descriptor = io.open_private(p, os.O_RDWR)
+                    try:
+                        io.sync_file(descriptor)
+                    finally:
+                        os.close(descriptor)
             for directory in (*reversed([p for p in new.rglob("*") if p.is_dir()]), new):
-                descriptor = os.open(directory, os.O_RDONLY)
-                try:
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
+                io.sync_directory(directory)
             self._verify_generation(new, region=region)
             if region != self._identity_region():
                 atomic_write_metadata(self.identity_file, self._identity_document(region))

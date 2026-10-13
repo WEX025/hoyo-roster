@@ -68,7 +68,7 @@ def test_defaults_are_anchored_to_verified_project(
         build_parser().parse_args(["--game", "genshin", "--uid", UID])
     )
     assert config.storage_root == checkout / "data"
-    assert config.auth_root.expanduser() == Path.home() / ".local/share/hoyo-roster"
+    assert config.auth_root.expanduser() == paths.default_private_root()
 
 
 @pytest.mark.parametrize("missing", ["wheel", "removed", "wrong-project", "not-git"])
@@ -98,10 +98,7 @@ def test_no_verified_source_falls_back_to_user_directory(checkout, monkeypatch, 
         shutil.rmtree(checkout / ".git")
     monkeypatch.chdir(checkout)
     assert paths.project_repository() is None
-    assert (
-        paths.default_storage_root().expanduser()
-        == Path.home() / ".local/share/hoyo-roster/results"
-    )
+    assert paths.default_storage_root().expanduser() == paths.default_private_root() / "results"
 
 
 def test_explicit_roots_and_auth_isolation(checkout, tmp_path, monkeypatch, source):
@@ -180,6 +177,7 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
         auth = Path("auth")
         error = "INVALID_AUTH_ROOT"
     elif kind == "auth-symlink":
+        error = "UNSAFE_PRIVATE_DIRECTORY"
         auth.symlink_to(checkout / "data", target_is_directory=True)
     with pytest.raises(WorkspaceError, match=error):
         config = direct_configuration("genshin", UID, storage_root=result, auth_root=auth)
@@ -205,8 +203,12 @@ def test_old_data_and_profile_are_preserved_without_migration(
     assert tree_digest(old) == before
     assert not (new.root / "browser-profile").exists()
     data_digest = tree_digest(current / "data")
-    with store.locked():
-        assert tree_digest(store.prepare() / "data") == data_digest
+    with (
+        store.locked(),
+        pytest.raises(WorkspaceError, match="WORKSPACE_RESIDUE_REQUIRES_INSPECTION"),
+    ):
+        store.prepare()
+    assert tree_digest(current / "data") == data_digest
     assert (store.browser_profile / "synthetic-state").read_text() == "synthetic"
 
 

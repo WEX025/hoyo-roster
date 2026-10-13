@@ -17,7 +17,9 @@ class RequestGate:
         if not math.isfinite(requested_min_interval) or requested_min_interval < 2:
             raise ConfigurationError("Request interval must be at least two seconds")
         now = time.time()
-        state = load_metadata(self.path) if self.path.exists() else {"next_allowed_at": 0}
+        state = (
+            load_metadata(self.path, private=True) if self.path.exists() else {"next_allowed_at": 0}
+        )
         if not isinstance(state, dict) or set(state) != {"next_allowed_at"}:
             raise ConfigurationError("Request state invalid")
         next_at = state["next_allowed_at"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+from ... import platform_io as io
 import stat
 import time
 from collections.abc import AsyncIterator, Mapping
@@ -69,18 +70,19 @@ def resolve_browser_profile(repo_root: Path, value: Path) -> Path:
     _assert_diagnostic_profile_authority(profile)
     if os.path.lexists(profile):
         metadata = profile.lstat()
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
             raise ConfigurationError("browser profile must be a real directory")
     resolved = profile.resolve(strict=False)
     if resolved == root or resolved.is_relative_to(root):
         raise ConfigurationError("browser profile must be outside repo-root")
     try:
-        profile.mkdir(parents=True, exist_ok=True, mode=0o700)
-        profile.chmod(0o700)
+        from ...storage.common import secure_private_directory
+
+        secure_private_directory(profile)
         metadata = profile.lstat()
     except OSError as error:
         raise ConfigurationError("browser profile could not be secured") from error
-    if stat.S_ISLNK(metadata.st_mode) or metadata.st_mode & 0o777 != 0o700:
+    if io.is_redirect(metadata) or not io.private(profile, 0o700):
         raise ConfigurationError("browser profile mode must be 0700")
     resolved_profile = profile.resolve()
     _assert_diagnostic_profile_authority(resolved_profile)

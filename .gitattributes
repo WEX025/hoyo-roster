@@ -1,2 +1,5 @@
 # Preserve upstream notice bytes, including their trailing newlines.
 third_party/* whitespace=-blank-at-eof
+
+# Exact Windows upstream notice bytes include CRLF and trailing spaces.
+third_party/pywin32-*-LICENSE.txt whitespace=-blank-at-eof,-blank-at-eol
