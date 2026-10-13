@@ -78,3 +78,5 @@ smoke 只创建新临时根，运行真实 SID/DACL、身份 key、安全打开�
 | Windows SID/DACL/句柄/锁/替换/Chromium/真实账号端到端；Linux/WSL 平台；断电持久化 | NOT_RUN：无对应实机环境或未授权真实登录；mock 不能替代 |
 
 另一次较早开发回归为 363 passed / 10 skipped；它发生在后续安全读取和常量/句柄细化前，只作开发记录，不冒充最终提交逐项重跑。Git 索引 diff 检查最初将原样保留的 Windows 上游许可证 CRLF/行尾空白报告为格式错误；已在仓库 .gitattributes 仅为这些许可证声明保留上游空白，未改全局设置或改写许可证。早期失败均已修正，最终上述命令无未解决失败。没有 CI/Actions、独立审计、合并、仓库重建或隐私历史清理；提交仅含代码、合成测试和公开文档/许可证。
+
+合并后的固定基线 `2dd590ef2a6f991506114c4313ca240a65b864ba` 上的后续架构整理与实际验证见 [架构验证记录](architecture-validation.md)。该轮保留平台 I/O 与 Windows 原生策略，Windows 本人实机仍为 NOT_RUN，不能用新增离线回归替代端到端验收。

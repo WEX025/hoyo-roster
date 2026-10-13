@@ -14,7 +14,12 @@ from .errors import (
     LifecycleRegression,
     PartialFieldCoverageRegression,
 )
-from .jsonio import StrictJsonError, load_json, require_real_directory, require_regular_file
+from hoyo_roster.jsonio import (
+    StrictJsonError,
+    load_json,
+    require_real_directory,
+    require_regular_file,
+)
 from .model import Snapshot
 from .normalize import CORE_SKILL_FIELDS, ELEMENT_ATTR_TO_CANONICAL, TRAVELER_IDS
 from .snapshot import business_digest

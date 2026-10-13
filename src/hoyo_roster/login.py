@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import math
 import string
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -110,6 +110,8 @@ class LoginProvider(Protocol):
 
     async def probe(self, context: BrowserContextAccess) -> LoginProbeResult: ...
 
+    def login_page(self, fallback: Page) -> Page: ...
+
     async def prepare_login_or_session(
         self,
         context: BrowserContextAccess,
@@ -124,53 +126,6 @@ class LoginProvider(Protocol):
     ) -> None: ...
 
     def on_login_success(self) -> None: ...
-
-
-@dataclass(slots=True)
-class CallbackLoginProvider:
-    """Bind an existing game collector to the common login state machine."""
-
-    game: str
-    identity: ExpectedIdentity
-    probe_callback: Callable[[], Awaitable[LoginProbeResult]] = field(repr=False)
-    prepare_callback: Callable[[], Awaitable[None]] = field(repr=False)
-    finish_callback: Callable[[], Awaitable[None]] = field(repr=False)
-    success_callback: Callable[[], None] = field(default=lambda: None, repr=False)
-
-    def __post_init__(self) -> None:
-        if self.game != self.identity.game:
-            raise ValueError("callback login provider identity game mismatch")
-
-    async def expected_identity(self, repo_root: Path) -> ExpectedIdentity:
-        del repo_root
-        return self.identity
-
-    async def initialize_session(self) -> None:
-        return
-
-    async def probe(self, context: BrowserContextAccess) -> LoginProbeResult:
-        del context
-        return await self.probe_callback()
-
-    async def prepare_login_or_session(
-        self,
-        context: BrowserContextAccess,
-        page: Page,
-        request_gate: RequestGate | None,
-    ) -> None:
-        del context, page, request_gate
-        await self.prepare_callback()
-
-    async def finish_login_or_session(
-        self,
-        context: BrowserContextAccess,
-        page: Page,
-    ) -> None:
-        del context, page
-        await self.finish_callback()
-
-    def on_login_success(self) -> None:
-        self.success_callback()
 
 
 def identity_digest(*, game: str, game_biz: str, uid: str, region: str) -> str:
@@ -304,7 +259,7 @@ async def coordinate_login(
         method = await choose_method()
         prepared.append(provider)
         await provider.prepare_login_or_session(context, page, request_gate)
-        login_page = getattr(provider, "_login_page", None) or page
+        login_page = provider.login_page(page)
         captcha_wait = ManualCaptchaWait(game=provider.game)
         login_waits.append((login_page, captcha_wait))
         await confirm_method_entry(login_page, method, captcha_wait=captcha_wait)

@@ -40,9 +40,6 @@ from .browser_launch import (
     BrowserLaunchDiagnostics as BrowserLaunchDiagnostics,
 )
 from .browser_launch import (
-    LaunchMatrixDecision as LaunchMatrixDecision,
-)
-from .browser_launch import (
     _browser_executable_path as _browser_executable_path,
 )
 from .browser_launch import (
@@ -62,9 +59,6 @@ from .browser_launch import (
 )
 from .browser_launch import (
     _record_playwright_error as _record_playwright_error,
-)
-from .browser_launch import (
-    decide_launch_matrix as decide_launch_matrix,
 )
 from .endpoint_specs import (
     AVATAR_DETAIL,
@@ -101,9 +95,8 @@ from .errors import (
     RiskControlError,
     SessionInitializationError,
 )
-from .jsonio import StrictJsonError, loads_json
+from hoyo_roster.jsonio import StrictJsonError, loads_json
 
-DEFAULT_BROWSER_PROFILE = Path("~/.local/share/hoyo-roster/miyoushe-profile-hsr")
 LOGIN_URL = "https://www.miyoushe.com/sr/"
 CULTIVATION_URL = (
     "https://act.mihoyo.com/sr/event/cultivation-tool/index.html"
@@ -1197,7 +1190,6 @@ async def persistent_browser(
     browser_profile: Path,
     headed: bool,
     browser_channel: Literal["chromium", "chrome"] = "chromium",
-    launch_check_only: bool = False,
 ) -> AsyncIterator[BrowserSession]:
     if browser_channel not in {"chromium", "chrome"}:
         raise ConfigurationError("browser channel was invalid")
@@ -1267,15 +1259,7 @@ async def persistent_browser(
             launch_diagnostics=diagnostics,
         )
 
-        if launch_check_only:
-
-            async def route_guard(route: Route) -> None:
-                session.network_request_count += 1
-                await route.abort("blockedbyclient")
-
-            await context.route("**/*", route_guard)
-        else:
-            await install_business_guard(session, require_binding=False)
+        await install_business_guard(session, require_binding=False)
         yield session
     finally:
         cleanup_error: PlaywrightError | None = None

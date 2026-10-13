@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any
 
 from .errors import SnapshotContentDrift
+from hoyo_roster.jsonio import canonical_compact_json_bytes
 from .model import Snapshot
 
 
@@ -20,28 +20,7 @@ def business_document(snapshot: Snapshot) -> dict[str, Any]:
 
 
 def business_digest(snapshot: Snapshot) -> str:
-    encoded = json.dumps(
-        business_document(snapshot),
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def roster_id_set_digest(snapshot: Snapshot) -> str:
-    character_ids = sorted(snapshot.roster["characters"])
-    encoded = json.dumps(
-        character_ids, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def roster_business_digest(snapshot: Snapshot) -> str:
-    encoded = json.dumps(
-        snapshot.roster, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    encoded = canonical_compact_json_bytes(business_document(snapshot), sort_keys=True)
     return hashlib.sha256(encoded).hexdigest()
 
 

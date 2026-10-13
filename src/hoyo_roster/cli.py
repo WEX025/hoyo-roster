@@ -16,6 +16,7 @@ from .config import Settings
 from .errors import OperationError, LoginTimeout
 from .progress import OPTIONS, LoginOptions, emit
 from .request_gate import RequestGate
+from .sync import OperationResult
 from .user_workspace import (
     GAMES,
     LocalSnapshotStore,
@@ -119,6 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
 def select_configuration(args):
     if args.game is None:
         raise WorkspaceError("GAME_REQUIRED")
+    if args.game == "hsr" and args.operation in {"login", "sync"}:
+        raise WorkspaceError("GAME_PAUSED")
     if args.uid is None:
         raise WorkspaceError("UID_REQUIRED")
     if not math.isfinite(args.login_timeout) or not 0 < args.login_timeout <= 3600:
@@ -155,127 +158,133 @@ def select_configuration(args):
 
 async def run(args) -> int:
     config, game, operation = select_configuration(args)
-    store = LocalSnapshotStore(CONTRACT_ROOT, config, game)
-    with store.locked():
-        print(f"RESULT_SCOPE={store.root}\nCURRENT_POINTER={store.current_file}")
-        if operation == "inspect":
-            state = store.inspect()
-            if state["current"] == "PRESENT":
-                print_current_result(store)
-            print(
-                f"CURRENT_WORKSPACE={state['current']}\nRECOVERY_REQUIRED={'YES' if state['recovery_required'] else 'NO'}"
-            )
-            for item in state["generations"]:
-                print(
-                    f"GENERATION={item['generation']}\nGENERATION_STATUS={item['status']}\nGENERATION_CURRENT={'YES' if item['current'] else 'NO'}"
-                )
-            candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
-            try:
-                region = store.candidate_region
-                candidate_uid = config.uid(game)
-            except WorkspaceError:
-                region = None
-                candidate_uid = None
-                print("IDENTITY_BOUNDARY=UNPROVEN")
-            for item in candidate.inspect_candidates(
-                candidate_base=store.candidate_base,
-                uid=candidate_uid,
-                region=region,
-            ):
-                print(
-                    f"CANDIDATE_RUN_ID={item.run_id}\nCANDIDATE_STATUS={item.status}\nCANDIDATE_CLEANUP_ALLOWED={'YES' if item.cleanup_allowed else 'NO'}"
-                )
-                if not item.cleanup_allowed:
-                    print(
-                        "提示=候选归属或内容未通过核验；保留并私下备份，确认来源后人工处置，不按 UUID 删除。"
-                    )
-            return 0
-        if operation == "recover":
-            try:
-                store.recover(args.generation)
-            except Exception:
-                print(f"COMMIT_STATE={store.commit_state}")
-                raise
-            emit("CLEANUP_PENDING" if store.cleanup_pending else "SAVED")
-            print_current_result(store)
-            print(f"COMMIT_STATE={store.commit_state}")
-            return 0
-        if operation == "cleanup-generation":
-            if args.generation is None:
-                raise WorkspaceError("GENERATION_REQUIRED")
-            store.cleanup_generation(args.generation)
-            print("LOCAL_GENERATION=CLEANED")
-            return 0
-        if operation == "cleanup-candidate":
-            if args.run_id is None:
-                raise WorkspaceError("CANDIDATE_RUN_ID_REQUIRED")
-            candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
-            try:
-                candidate.cleanup_candidate(
-                    args.run_id,
-                    candidate_base=store.candidate_base,
-                    uid=config.uid(game),
-                    region=store.candidate_region,
-                )
-            except candidate.CandidateCleanupError as error:
-                code = str(error)
-                raise WorkspaceError(
-                    code
-                    if code in {"CANDIDATE_SCOPE_MISMATCH", "CANDIDATE_OWNERSHIP_UNPROVEN"}
-                    else "CANDIDATE_CLEANUP_FAILED"
-                ) from None
-            print("LOCAL_CANDIDATE=CLEANED")
-            return 0
-        if operation == "logout":
-            store.logout()
-            print("LOCAL_SESSION=REMOVED")
-            return 0
-        workspace = store.prepare()
-        print_current_result(store)
+    candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
+    store = LocalSnapshotStore(
+        CONTRACT_ROOT, config, game, candidate_policy=candidate.candidate_policy()
+    )
+    result = None
+    try:
+        with store.locked():
+            print(f"RESULT_SCOPE={store.root}\nCURRENT_POINTER={store.current_file}")
+            result = await run_locked(args, config, game, operation, store)
+    finally:
+        # Persistence remains observable even if collection, close, cancellation or lock release fails.
+        print(
+            f"COMMIT_STATE={store.commit_state}\nCLEANUP_PENDING={'YES' if store.cleanup_pending else 'NO'}"
+        )
         if store.cleanup_pending:
             emit("CLEANUP_PENDING")
-            return 0 if operation == "init" else 1
-        if operation == "init":
-            print("LOCAL_WORKSPACE=READY")
-            return 0
-        module = importlib.import_module(MODULES[game])
-        gate = RequestGate(Settings(external_root=store.auth_root))
-        domain_args = argparse.Namespace(
-            repo_root=workspace,
-            browser_profile=store.browser_profile,
-            uid=config.uid(game),
-            headed=not args.headless,
-            request_interval=2.0,
-            login_check_only=operation == "login",
-            browser_channel="chromium",
-            login_wait_seconds=args.login_timeout,
-        )
-        token = OPTIONS.set(
-            LoginOptions(
-                args.login_method, args.non_interactive, args.login_timeout, args.allow_login
-            )
-        )
-        try:
-            result = await module.run_sync(
-                domain_args, snapshot_store=store, request_gate_override=gate
-            )
-            if operation == "login" and result == 0:
-                # Domain browser context has now closed and flushed its local session.
-                print("STATUS=PASS\nSTABLE_CODE=PASS")
-            if store.cleanup_pending:
-                emit("CLEANUP_PENDING")
+    if isinstance(result, OperationResult):
+        result.report()
+        return 0
+    return result
+
+
+async def run_locked(args, config, game, operation, store):
+    if operation == "inspect":
+        state = store.inspect()
+        if state["current"] == "PRESENT":
             print_current_result(store)
-            print(f"COMMIT_STATE={store.commit_state}")
-            return result
-        except module.SyncError as error:
-            reporter = importlib.import_module(f"hoyo_roster.games.{game}.redaction")
-            code, _ = reporter.public_error(error)
+        print(
+            f"CURRENT_WORKSPACE={state['current']}\nRECOVERY_REQUIRED={'YES' if state['recovery_required'] else 'NO'}"
+        )
+        for item in state["generations"]:
             print(
-                f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={code}\n提示=参阅 docs/local-use.md；身份/风险/限流错误应停止。"
+                f"GENERATION={item['generation']}\nGENERATION_STATUS={item['status']}\nGENERATION_CURRENT={'YES' if item['current'] else 'NO'}"
             )
-            return 1
-        finally:
-            OPTIONS.reset(token)
+        candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
+        try:
+            region = store.candidate_region
+            candidate_uid = config.uid(game)
+        except WorkspaceError:
+            region = None
+            candidate_uid = None
+            print("IDENTITY_BOUNDARY=UNPROVEN")
+        for item in candidate.inspect_candidates(
+            candidate_base=store.candidate_base,
+            uid=candidate_uid,
+            region=region,
+        ):
+            print(
+                f"CANDIDATE_RUN_ID={item.run_id}\nCANDIDATE_STATUS={item.status}\nCANDIDATE_CLEANUP_ALLOWED={'YES' if item.cleanup_allowed else 'NO'}"
+            )
+            if not item.cleanup_allowed:
+                print(
+                    "提示=候选归属或内容未通过核验；保留并私下备份，确认来源后人工处置，不按 UUID 删除。"
+                )
+        return 0
+    if operation == "recover":
+        store.recover(args.generation)
+        emit("SAVED")
+        print_current_result(store)
+        return 0
+    if operation == "cleanup-generation":
+        if args.generation is None:
+            raise WorkspaceError("GENERATION_REQUIRED")
+        store.cleanup_generation(args.generation)
+        print("LOCAL_GENERATION=CLEANED")
+        return 0
+    if operation == "cleanup-candidate":
+        if args.run_id is None:
+            raise WorkspaceError("CANDIDATE_RUN_ID_REQUIRED")
+        candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
+        try:
+            candidate.cleanup_candidate(
+                args.run_id,
+                candidate_base=store.candidate_base,
+                uid=config.uid(game),
+                region=store.candidate_region,
+            )
+        except candidate.CandidateCleanupError as error:
+            code = str(error)
+            raise WorkspaceError(
+                code
+                if code in {"CANDIDATE_SCOPE_MISMATCH", "CANDIDATE_OWNERSHIP_UNPROVEN"}
+                else "CANDIDATE_CLEANUP_FAILED"
+            ) from None
+        print("LOCAL_CANDIDATE=CLEANED")
+        return 0
+    if operation == "logout":
+        store.logout()
+        print("LOCAL_SESSION=REMOVED")
+        return 0
+    workspace = store.prepare()
+    print_current_result(store)
+    if store.cleanup_pending:
+        return 0 if operation == "init" else 1
+    if operation == "init":
+        print("LOCAL_WORKSPACE=READY")
+        return 0
+    module = importlib.import_module(MODULES[game])
+    gate = RequestGate(Settings(external_root=store.auth_root))
+    domain_args = argparse.Namespace(
+        repo_root=workspace,
+        browser_profile=store.browser_profile,
+        uid=config.uid(game),
+        headed=not args.headless,
+        request_interval=2.0,
+        login_check_only=operation == "login",
+        browser_channel="chromium",
+        login_wait_seconds=args.login_timeout,
+    )
+    token = OPTIONS.set(
+        LoginOptions(args.login_method, args.non_interactive, args.login_timeout, args.allow_login)
+    )
+    try:
+        result = await module.run_sync(
+            domain_args, snapshot_store=store, request_gate_override=gate
+        )
+        print_current_result(store)
+        return result
+    except module.SyncError as error:
+        reporter = importlib.import_module(f"hoyo_roster.games.{game}.redaction")
+        code, _ = reporter.public_error(error)
+        print(
+            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={code}\n提示=参阅 docs/local-use.md；身份/风险/限流错误应停止。"
+        )
+        return 1
+    finally:
+        OPTIONS.reset(token)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -670,7 +670,7 @@ def test_entry_can_arrive_after_old_thirty_second_cutoff(monkeypatch):
         OPTIONS.reset(token)
 
 
-@pytest.mark.parametrize("game", ("genshin", "zzz", "hsr"))
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
 def test_cli_login_does_not_report_success_when_persistent_close_fails(
     tmp_path, monkeypatch, capsys, game
 ):

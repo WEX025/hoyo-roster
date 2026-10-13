@@ -3,25 +3,23 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import re
 import shutil
 import stat
-import subprocess
-import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Callable
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, Literal
 
 from . import paths
 from . import platform_io as io
 import portalocker
-from .storage.candidate import CandidateScope, REGIONS
+from .storage.candidate import CandidateScope, CandidatePolicy, inspect_candidates, REGIONS
+from .validation import ValidationFailure, run_validator
 from .storage.common import (
     AtomicWriteError,
     MetadataError,
@@ -46,12 +44,27 @@ class WorkspaceError(ValueError):
     """A fixed privacy-safe error code, never a source value."""
 
 
-class SnapshotStore(Protocol):
-    """The collectors own validation; storage owns installation only."""
+CommitState = Literal["NOT_COMMITTED", "PRE_COMMIT", "DURABILITY_UNKNOWN", "COMMITTED"]
 
+
+@dataclass(frozen=True, slots=True)
+class CommitResult:
+    state: CommitState
+    cleanup_pending: bool
+
+
+class SnapshotStore(Protocol):
     candidate_base: Path
 
-    def commit(self, game_dir: Path) -> None: ...
+    @property
+    def commit_state(self) -> CommitState: ...
+
+    @property
+    def cleanup_pending(self) -> bool: ...
+
+    def commit(self, game_dir: Path) -> CommitResult: ...
+
+    def cleanup_candidate(self, cleanup: Callable[[], None]) -> None: ...
 
 
 def private_directory(path: Path) -> Path:
@@ -99,19 +112,14 @@ def direct_configuration(
 
 
 def validate_workspace(root: Path) -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(Path(__file__).resolve().parent / "contracts/tools/validate_repository.py"),
-            "--root",
-            str(root),
-        ],
-        capture_output=True,
-        check=False,
-        timeout=90,
-    )
-    if result.returncode:
-        raise WorkspaceError("WORKSPACE_VALIDATION_FAILED")
+    try:
+        run_validator(root, validator_root=Path(__file__).resolve().parent / "contracts")
+    except ValidationFailure as error:
+        raise WorkspaceError(
+            "WORKSPACE_VALIDATION_FAILED"
+            if error.code == "VALIDATOR_REJECTED"
+            else "WORKSPACE_" + error.code
+        ) from None
 
 
 def empty_workspace(source: Path, destination: Path) -> None:
@@ -124,51 +132,9 @@ def empty_workspace(source: Path, destination: Path) -> None:
     copy_regular_file(
         source / "tools/validate_repository.py", destination / "tools/validate_repository.py"
     )
-    manifest: dict[str, dict[str, str]] = {}
-    for game in GAMES.values():
-        base = f"data/{game}"
-        manifest[game] = {
-            "profile": f"{base}/profile.json",
-            "roster": f"{base}/roster.json",
-            "builds_dir": f"{base}/builds",
-        }
-        game_dir = destination / base
-        (game_dir / "builds").mkdir(parents=True)
-        (game_dir / "builds/.gitkeep").write_bytes(b"")
-        write_json(
-            game_dir / "profile.json",
-            {
-                "schema_version": "game-profile/v1",
-                "game": game,
-                "account": dict.fromkeys(("uid", "server", "nickname", "player_level")),
-                "sync": {"state": "not_synced", "source": None, "synced_at": None},
-            },
-        )
-        write_json(
-            game_dir / "roster.json",
-            {
-                "schema_version": f"{game}-roster/v1",
-                "game": game,
-                "characters": {},
-            },
-        )
-        if game == "zenless-zone-zero":
-            manifest[game]["bangboos"] = f"{base}/bangboos.json"
-            write_json(
-                game_dir / "bangboos.json",
-                {
-                    "schema_version": "zenless-zone-zero-bangboos/v1",
-                    "game": game,
-                    "items": {},
-                },
-            )
-    write_json(
-        destination / "data/manifest.json",
-        {
-            "schema_version": "repository-manifest/v1",
-            "games": manifest,
-        },
-    )
+    # The packaged, validated public empty template is the sole initialization source.
+    tree_digest(source / "data")
+    shutil.copytree(source / "data", destination / "data")
 
 
 def write_json(path: Path, document: object) -> None:
@@ -179,7 +145,15 @@ def write_json(path: Path, document: object) -> None:
 class LocalSnapshotStore:
     """One current validated generation per user, game, and UID; atomic pointer install."""
 
-    def __init__(self, source: Path, config: UserConfiguration, game: str) -> None:
+    def __init__(
+        self,
+        source: Path,
+        config: UserConfiguration,
+        game: str,
+        *,
+        candidate_policy: CandidatePolicy | None = None,
+    ) -> None:
+        self._candidate_policy = candidate_policy
         self.source = source.resolve()
         if not _ALIAS.fullmatch(config.user) or game not in GAMES:
             raise WorkspaceError("INVALID_CONFIG")
@@ -236,8 +210,8 @@ class LocalSnapshotStore:
         self.browser_profile = self.auth_root / "browser-profile"
         self.current_file = self.root / "current.json"
         self._locked = False
-        self.commit_state = "NOT_COMMITTED"
-        self.cleanup_pending = False
+        self._commit_state = "NOT_COMMITTED"
+        self._cleanup_pending = False
         self.transaction_file = self.root / "transaction.json"
         self.identity_file = self.root / "workspace-identity.json"
 
@@ -409,29 +383,54 @@ class LocalSnapshotStore:
             "recovery_required": os.path.lexists(self.transaction_file),
         }
 
-    def prepare(self) -> Path:
-        return self._install(None)
+    @property
+    def commit_state(self) -> CommitState:
+        return self._commit_state
 
-    def commit(self, game_dir: Path) -> None:
+    @property
+    def cleanup_pending(self) -> bool:
+        return self._cleanup_pending
+
+    def prepare(self) -> Path:
+        self._preflight()
+        current = self.current()
+        return current if current is not None else self._install(None)
+
+    def commit(self, game_dir: Path) -> CommitResult:
         self._require_lock()
-        self.commit_state = "NOT_COMMITTED"
-        self.cleanup_pending = False
+        self._commit_state = "NOT_COMMITTED"
+        self._cleanup_pending = False
         region = self.candidate_region
         root = game_dir.parent.parent
         if root.parent != self.candidate_base or game_dir != root / "data" / self.game:
             raise WorkspaceError("CANDIDATE_OWNERSHIP_UNPROVEN")
         self._generation(root.name)
-        key = next(key for key, game in GAMES.items() if game == self.game)
-        module = importlib.import_module(f"hoyo_roster.games.{key}.candidate")
-        evidence = module.inspect_candidates(
-            candidate_base=self.candidate_base, uid=self._uid, region=region
+        if (
+            self._candidate_policy is None
+            or self._candidate_policy.target_relative != Path("data") / self.game
+        ):
+            raise WorkspaceError("CANDIDATE_POLICY_REQUIRED")
+        policy = replace(
+            self._candidate_policy, scope=CandidateScope.identity(self.game, self._uid, region)
         )
+        evidence = inspect_candidates(policy, candidate_base=self.candidate_base)
         if not any(
             item.run_id == root.name and item.status == "VALIDATED" and item.cleanup_allowed
             for item in evidence
         ):
             raise WorkspaceError("CANDIDATE_OWNERSHIP_UNPROVEN")
         self._install(game_dir)
+        return CommitResult(self.commit_state, self.cleanup_pending)
+
+    def cleanup_candidate(self, cleanup: Callable[[], None]) -> None:
+        """Drain verified candidate cleanup only after a confirmed commit."""
+        self._require_lock()
+        if self.commit_state != "COMMITTED":
+            return
+        try:
+            cleanup()
+        except Exception:
+            self._cleanup_pending = True
 
     def logout(self) -> None:
         self._require_lock()
@@ -537,8 +536,8 @@ class LocalSnapshotStore:
     def recover(self, generation: str | None = None) -> Path:
         """Preflight the entire operation, then persist the pointer, then clean up."""
         self._require_lock()
-        self.commit_state = "NOT_COMMITTED"
-        self.cleanup_pending = False
+        self._commit_state = "NOT_COMMITTED"
+        self._cleanup_pending = False
         target, cleanup, has_journal = self._recovery_plan(generation)
         # No validation below this point: rejection cannot switch current or delete data.
         try:
@@ -547,14 +546,14 @@ class LocalSnapshotStore:
             else:
                 self._sync_pointer_directory()
         except AtomicWriteError:
-            self.commit_state = "DURABILITY_UNKNOWN"
+            self._commit_state = "DURABILITY_UNKNOWN"
             raise WorkspaceError("COMMIT_DURABILITY_UNKNOWN") from None
         except OSError:
             if generation is None:
-                self.commit_state = "DURABILITY_UNKNOWN"
+                self._commit_state = "DURABILITY_UNKNOWN"
                 raise WorkspaceError("COMMIT_DURABILITY_UNKNOWN") from None
             raise WorkspaceError("RECOVERY_COMMIT_FAILED") from None
-        self.commit_state = "COMMITTED"
+        self._commit_state = "COMMITTED"
         return self._finish_recovery(target, cleanup, has_journal)
 
     def _recovery_plan(self, generation: str | None) -> tuple[Path, list[Path], bool]:
@@ -633,7 +632,7 @@ class LocalSnapshotStore:
         return target, cleanup, has_journal
 
     def _finish_recovery(self, target: Path, cleanup: list[Path], has_journal: bool) -> Path:
-        self.cleanup_pending = False
+        self._cleanup_pending = False
         try:
             for path in cleanup:
                 remove_owned_tree(path)
@@ -641,19 +640,18 @@ class LocalSnapshotStore:
                 self.transaction_file.unlink()
                 self._sync_pointer_directory()
         except (OSError, MetadataError):
-            self.cleanup_pending = True
+            self._cleanup_pending = True
         return target
 
-    def _install(self, game_dir: Path | None) -> Path:
+    def _preflight(self) -> None:
         self._require_lock()
         if os.path.lexists(self.transaction_file):
             raise WorkspaceError("RECOVERY_REQUIRED")
-        self.commit_state = "NOT_COMMITTED"
         if not os.path.lexists(self.identity_file):
             if any(self.root.iterdir()):
                 raise WorkspaceError("IDENTITY_BOUNDARY_UNPROVEN")
             atomic_write_metadata(self.identity_file, self._identity_document(None))
-        region = self._identity_region()
+        self._identity_region()
         old = self.current()
         allowed = {
             "current.json",
@@ -664,9 +662,15 @@ class LocalSnapshotStore:
             allowed.add(old.name)
         if any(p.name not in allowed for p in self.root.iterdir()):
             raise WorkspaceError("WORKSPACE_RESIDUE_REQUIRES_INSPECTION")
+
+    def _install(self, game_dir: Path | None) -> Path:
+        self._commit_state = "NOT_COMMITTED"
+        self._preflight()
+        region = self._identity_region()
+        old = self.current()
         new = self.root / str(uuid.uuid4())
         journal_attempted = False
-        self.commit_state = "PRE_COMMIT"
+        self._commit_state = "PRE_COMMIT"
         try:
             empty_workspace(self.source, new)
             existing = (
@@ -739,13 +743,13 @@ class LocalSnapshotStore:
             try:
                 atomic_write_metadata(self.current_file, {"generation": new.name})
             except AtomicWriteError:
-                self.commit_state = "DURABILITY_UNKNOWN"
+                self._commit_state = "DURABILITY_UNKNOWN"
                 raise WorkspaceError("COMMIT_DURABILITY_UNKNOWN") from None
-            self.commit_state = "COMMITTED"
+            self._commit_state = "COMMITTED"
             return self._finish_recovery(new, cleanup, True)
         except Exception:
-            if self.commit_state == "PRE_COMMIT":
-                self.commit_state = "NOT_COMMITTED"
+            if self._commit_state == "PRE_COMMIT":
+                self._commit_state = "NOT_COMMITTED"
             raise
         finally:
             # Once a journal may exist, retain both generations for verified recovery.

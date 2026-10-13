@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import candidate_policy_for
 from hoyo_roster import cli, user_workspace as uw
 from hoyo_roster.storage.common import load_metadata, tree_digest
 from tests.test_direct_entrypoint import BusinessPage
@@ -14,7 +15,7 @@ from tests.test_game_chains import OfficialContext
 from tests.test_login_flow import Context, UID_A, binding_payload
 
 
-@pytest.mark.parametrize("game", uw.GAMES)
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
 @pytest.mark.parametrize("after_replace", (False, True))
 def test_sync_rejects_storage_failure_without_deleting_candidate(
     tmp_path, monkeypatch, capsys, game, after_replace
@@ -50,7 +51,10 @@ def test_sync_rejects_storage_failure_without_deleting_candidate(
     monkeypatch.setattr(RequestGate, "reserve", reserve)
     root = tmp_path / "private"
     store = uw.LocalSnapshotStore(
-        cli.CONTRACT_ROOT, uw.direct_configuration(game, UID_A, storage_root=root), game
+        cli.CONTRACT_ROOT,
+        uw.direct_configuration(game, UID_A, storage_root=root),
+        game,
+        candidate_policy=candidate_policy_for(game),
     )
     original_replace, original_fsync = os.replace, os.fsync
     ready, replaced = False, False

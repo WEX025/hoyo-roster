@@ -27,7 +27,6 @@ from .errors import (
     BrowserProfileInvalid,
     BrowserProfilePermissionDenied,
     BrowserSandboxOrPlatformFailure,
-    ConfigurationError,
 )
 
 _BROWSER_LOG_SIGNATURE_ORDER = (
@@ -74,59 +73,6 @@ class BrowserLaunchDiagnostics:
     host_arch: str = field(default_factory=lambda: platform.machine() or "UNKNOWN")
     profile_singleton_after_failure: tuple[str, ...] = ()
     active_profile_process_after_failure: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class LaunchMatrixDecision:
-    root_cause: str
-    production_launch_config_change_required: bool
-    current_profile_reusable: bool | None
-    selected_browser_channel: Literal["chromium", "chrome"] | None
-
-
-def decide_launch_matrix(
-    attempt_a: str,
-    attempt_b: str,
-    attempt_c: str,
-    attempt_d: str,
-) -> LaunchMatrixDecision:
-    allowed = {"PASS", "FAIL", "NOT_AVAILABLE", "NOT_RUN"}
-    if any(result not in allowed for result in (attempt_a, attempt_b, attempt_c, attempt_d)):
-        raise ConfigurationError("launch matrix result was invalid")
-    if attempt_a == "PASS":
-        return LaunchMatrixDecision(
-            "TRANSIENT_OR_OLD_CLASSIFIER_ONLY",
-            False,
-            True,
-            "chromium",
-        )
-    if attempt_b == "PASS":
-        return LaunchMatrixDecision(
-            "EXPLICIT_LAUNCH_ARGUMENT_REGRESSION",
-            True,
-            True,
-            "chromium",
-        )
-    if attempt_c == "PASS":
-        return LaunchMatrixDecision(
-            "CURRENT_PROFILE_SPECIFIC",
-            False,
-            False,
-            "chromium",
-        )
-    if attempt_d == "PASS":
-        return LaunchMatrixDecision(
-            "BUNDLED_CHROMIUM_RUNTIME_INCOMPATIBLE",
-            True,
-            False,
-            "chrome",
-        )
-    return LaunchMatrixDecision(
-        "PLATFORM_OR_BROWSER_RUNTIME_BLOCKED",
-        False,
-        None,
-        None,
-    )
 
 
 def _browser_log_signatures(raw_error: str) -> tuple[str, ...]:

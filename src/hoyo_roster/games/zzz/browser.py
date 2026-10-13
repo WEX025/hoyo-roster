@@ -31,7 +31,6 @@ from playwright.async_api import (
 from .errors import ConfigurationError, LoginRequired, RiskControlError
 
 MIYOUSHE_ZZZ_URL = "https://www.miyoushe.com/zzz/"
-DEFAULT_BROWSER_PROFILE = Path("~/.local/share/hoyo-roster/miyoushe-profile")
 CHROMIUM_INSTALL_COMMAND = "python -m playwright install chromium"
 _CAPTURED_RPC_HEADERS = (
     "x-rpc-device_id",

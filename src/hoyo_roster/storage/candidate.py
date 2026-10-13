@@ -25,8 +25,8 @@ from .common import (
     files_digest,
 )
 
-CANDIDATE_AUTHORITY = "hoyo-repository-mutation/candidate-v3"
-CANDIDATE_STATE_VERSION = 3
+CANDIDATE_AUTHORITY = "hoyo-repository-mutation/candidate-v4"
+CANDIDATE_STATE_VERSION = 4
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 FaultInjector = Callable[[str], None]
@@ -99,7 +99,7 @@ class CandidateScope:
 @dataclass(frozen=True, slots=True)
 class CandidatePolicy:
     owner: str
-    candidate_base: Path
+    candidate_base: Path | None
     target_relative: Path
     contract_paths: tuple[Path, ...]
     errors: CandidateErrors
@@ -123,13 +123,11 @@ class CandidatePolicy:
 @dataclass(frozen=True, slots=True)
 class CandidateEvidence:
     game_tree_digest: str
-    business_digest: str
     contract_digest: str
 
     def __post_init__(self) -> None:
         for value in (
             self.game_tree_digest,
-            self.business_digest,
             self.contract_digest,
         ):
             if SHA256_RE.fullmatch(value) is None:
@@ -142,7 +140,6 @@ class CandidateInspection:
     status: str
     cleanup_allowed: bool
     game_tree_digest: str | None = None
-    business_digest: str | None = None
     contract_digest: str | None = None
     metadata_version: int | None = None
 
@@ -180,8 +177,11 @@ def _base(
     repo_root: Path | None = None,
 ) -> Path:
     try:
+        selected = candidate_base or policy.candidate_base
+        if selected is None:
+            raise MetadataError("explicit candidate base required")
         return secure_private_directory(
-            candidate_base or policy.candidate_base,
+            selected,
             repository_root=repo_root,
         )
     except MetadataError as error:
@@ -201,7 +201,7 @@ def _valid_digest(value: object) -> str:
     return value
 
 
-def _inspect_v3(
+def _inspect_current(
     policy: CandidatePolicy,
     run_id: str,
     state: dict[str, object],
@@ -244,7 +244,6 @@ def _inspect_v3(
     expected = {
         *common,
         "game_tree_digest",
-        "business_digest",
         "contract_digest",
     }
     if status != "validated" or set(state) != expected:
@@ -254,7 +253,6 @@ def _inspect_v3(
         "VALIDATED",
         True,
         _valid_digest(state["game_tree_digest"]),
-        _valid_digest(state["business_digest"]),
         _valid_digest(state["contract_digest"]),
         CANDIDATE_STATE_VERSION,
     )
@@ -287,7 +285,7 @@ def inspect_candidate(
             raise ValueError
         state = dict(value)
         if state.get("authority") == CANDIDATE_AUTHORITY:
-            inspection = _inspect_v3(policy, run_id, state)
+            inspection = _inspect_current(policy, run_id, state)
             if not inspection.cleanup_allowed:
                 return inspection
             if inspection.status == "VALIDATED":
@@ -468,7 +466,6 @@ def create_candidate_workspace(
                 "run_id": run_id,
                 "status": "validated",
                 "game_tree_digest": confirmed.game_tree_digest,
-                "business_digest": confirmed.business_digest,
                 "contract_digest": confirmed.contract_digest,
             },
         )

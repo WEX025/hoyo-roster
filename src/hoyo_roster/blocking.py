@@ -1,31 +1,9 @@
-"""Bound host commands and keep blocking work outside the browser event loop."""
+"""Drain blocking mutations before cancellation releases their authority."""
 
 from __future__ import annotations
-
 import asyncio
-import time
-from collections.abc import AsyncIterator, Callable, Iterator
-from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable
 from typing import Any
-
-_DEADLINE: ContextVar[float | None] = ContextVar("hoyo_operation_deadline", default=None)
-
-
-@contextmanager
-def operation_deadline(seconds: float) -> Iterator[None]:
-    token = _DEADLINE.set(time.monotonic() + seconds)
-    try:
-        yield
-    finally:
-        _DEADLINE.reset(token)
-
-
-def command_timeout(max_seconds: float = 60.0) -> float:
-    deadline = _DEADLINE.get()
-    if deadline is None:
-        return max_seconds
-    return max(0.01, min(max_seconds, deadline - time.monotonic()))
 
 
 async def run_blocking[T](
@@ -56,28 +34,3 @@ async def run_blocking[T](
                     continue
             cleanup.result()
         raise
-
-
-@asynccontextmanager
-async def blocking_context[T](manager: AbstractContextManager[T]) -> AsyncIterator[T]:
-    def exit_cancelled(_value: T) -> None:
-        manager.__exit__(None, None, None)
-
-    value = await run_blocking(
-        manager.__enter__,
-        on_cancel=exit_cancelled,
-    )
-    try:
-        yield value
-    except BaseException as error:
-        if not await run_cleanup(manager.__exit__, type(error), error, error.__traceback__):
-            raise
-    else:
-        await run_cleanup(manager.__exit__, None, None, None)
-
-
-async def run_cleanup[T](function: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """Give owned-resource cleanup a bounded grace period after the Job deadline."""
-
-    with operation_deadline(60):
-        return await run_blocking(function, *args, **kwargs)

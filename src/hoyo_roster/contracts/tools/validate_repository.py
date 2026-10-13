@@ -301,7 +301,7 @@ def load_json(path: Path, *, exact_numbers: bool = False) -> Any:
 
 
 def _exact_json_text(value: Any, *, level: int = 0) -> str:
-    """Match the ZZZ writer without rounding JSON numbers through float."""
+    """Canonical data numbers without rounding through float."""
     if isinstance(value, float):
         value = Decimal(str(value))
     if isinstance(value, Decimal):
@@ -336,7 +336,7 @@ def _exact_json_text(value: Any, *, level: int = 0) -> str:
 def write_json(path: Path, value: Any) -> None:
     text = (
         _exact_json_text(value)
-        if "zenless-zone-zero" in path.parts
+        if "data" in path.parts
         else json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)
     )
     data = (text + "\n").encode("utf-8")
@@ -503,7 +503,7 @@ def _load_documents(
         try:
             documents[relative] = load_json(
                 path,
-                exact_numbers=relative.startswith("data/zenless-zone-zero/"),
+                exact_numbers=relative.startswith("data/"),
             )
         except (
             OSError,
@@ -915,10 +915,10 @@ def _validate_common_definition_references(documents: dict[str, Any]) -> list[st
 def _validate_canonical_format(root: Path, documents: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     for path, value in documents.items():
-        exact_zzz = path.startswith("data/zenless-zone-zero/")
+        exact_data = path.startswith("data/")
         expected = (
             (_exact_json_text(value) + "\n")
-            if exact_zzz
+            if exact_data
             else (
                 json.dumps(
                     value,

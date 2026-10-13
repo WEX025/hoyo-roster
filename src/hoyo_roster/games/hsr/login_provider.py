@@ -39,7 +39,7 @@ from .errors import (
     RequestTransportError,
     RiskControlError,
 )
-from .jsonio import load_json
+from hoyo_roster.jsonio import load_json
 from .normalize import nonempty_string, positive_id, select_binding
 
 GAME = "hsr"
@@ -294,6 +294,9 @@ class HsrLoginProvider:
 
     def on_login_success(self) -> None:
         self.record_verified_identity()
+
+    def login_page(self, fallback: Page) -> Page:
+        return self._login_page or fallback
 
     async def prepare_login_or_session(
         self,

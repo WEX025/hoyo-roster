@@ -44,7 +44,6 @@ from .errors import (
     UnsupportedMultiPageContract,
 )
 
-DEFAULT_BROWSER_PROFILE = Path("~/.local/share/hoyo-roster/miyoushe-profile")
 CALCULATOR_URL = "https://act.mihoyo.com/ys/event/calculator/index.html#/character"
 CHROMIUM_INSTALL_COMMAND = "python -m playwright install chromium"
 RISK_RETCODES = {1034, 10035}

@@ -376,7 +376,6 @@ def test_genshin_no_explicit_identity_fails_clearly_instead_of_assertion(tmp_pat
                 session,
                 repo_root=root,
                 uid=None,
-                job_id=None,
                 request_gate=gate,
                 request_interval=2,
             )

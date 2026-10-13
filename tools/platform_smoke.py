@@ -14,6 +14,8 @@ from hoyo_roster.cli import CONTRACT_ROOT
 from hoyo_roster.config import Settings
 from hoyo_roster.login_identity import LoginIdentityStore
 from hoyo_roster.storage.common import tree_digest
+from hoyo_roster.games.genshin.candidate import candidate_policy
+
 from hoyo_roster.user_workspace import LocalSnapshotStore, direct_configuration
 
 
@@ -22,7 +24,9 @@ def check() -> None:
         root = Path(temporary).resolve()
         result, auth = root / "results", root / "auth"
         config = direct_configuration("genshin", "123456789", storage_root=result, auth_root=auth)
-        store = LocalSnapshotStore(CONTRACT_ROOT, config, "genshin")
+        store = LocalSnapshotStore(
+            CONTRACT_ROOT, config, "genshin", candidate_policy=candidate_policy()
+        )
         code = """import sys, portalocker
 from pathlib import Path
 from hoyo_roster.platform_io import exclusive_lock
@@ -40,11 +44,11 @@ except portalocker.exceptions.LockException:
                 ).returncode
                 == 23
             )
-            old = store.prepare()
+            old = store._install(None)
             digest = tree_digest(old)
             with patch.object(io, "sync_file", side_effect=OSError("synthetic flush failure")):
                 try:
-                    store.prepare()
+                    store._install(None)
                 except OSError:
                     pass
                 else:
@@ -60,7 +64,7 @@ except portalocker.exceptions.LockException:
                 return remove(path)
 
             with patch.object(workspace, "remove_owned_tree", side_effect=fail_cleanup):
-                new = store.prepare()
+                new = store._install(None)
             assert store.cleanup_pending and store.commit_state == "COMMITTED"
             assert old.exists() and store.current() == new
             assert store.recover() == new and not old.exists()

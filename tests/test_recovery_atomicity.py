@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tests import candidate_policy_for
 from hoyo_roster import cli, user_workspace as uw
 from hoyo_roster.storage.common import atomic_write_metadata, load_metadata, tree_digest
 from tests.test_login_flow import UID_A
@@ -16,10 +17,13 @@ from tests.test_login_flow import UID_A
 
 def make_store(root, game="genshin"):
     store = uw.LocalSnapshotStore(
-        cli.CONTRACT_ROOT, uw.direct_configuration(game, UID_A, storage_root=root), game
+        cli.CONTRACT_ROOT,
+        uw.direct_configuration(game, UID_A, storage_root=root),
+        game,
+        candidate_policy=candidate_policy_for(game),
     )
     with store.locked():
-        store.prepare()
+        store._install(None)
     return store
 
 
@@ -53,7 +57,7 @@ def pending(store, partial=False):
         return remove(path)
 
     with store.locked(), patch.object(uw, "remove_owned_tree", side_effect=fail):
-        new = store.prepare()
+        new = store._install(None)
     assert store.commit_state == "COMMITTED" and store.cleanup_pending
     return old, new
 
