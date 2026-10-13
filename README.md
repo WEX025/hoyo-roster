@@ -28,6 +28,8 @@ hoyo-roster --game hsr --uid YOUR_UID --operation login --login-method qr
 hoyo-roster --game genshin --uid YOUR_UID --operation inspect
 ```
 
+遇图片 CAPTCHA，终端显示 `WAITING_FOR_MANUAL_CAPTCHA` 并说明对应的官方浏览器登录窗口：**请本人自己点击图片或操作滑块，AI 不自动选择、不解图或绕过**。保持该窗口和命令运行，程序保留同一会话并暂停自动身份探测；面板消失后继续本人发码、登录和精确身份核验。程序不自动发码或重发，页面倒计时不代表短信实际送达；面板消失也不代表登录成功。Ctrl-C 可取消，超时或窗口关闭则停止；Profile 保留供重新运行复用。其他风控和限流仍停止。
+
 默认数据在 `~/.local/share/hoyo-roster` 的游戏/UID 哈希隔离目录中。正常同步仅保存本机数据，不修改源码、不提交或上传个人结果。UID 出现在你输入的命令中，可能留在 shell 历史和进程参数里；程序输出不打印 UID 或凭据。
 
 阅读 [首次使用、升级与恢复](docs/local-use.md)、[数据完整度](docs/data-format.md)、[隐私和清理](docs/privacy.md)、[开发指南](CONTRIBUTING.md)、[验证记录](docs/release-validation.md)。

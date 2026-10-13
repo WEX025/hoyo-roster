@@ -78,6 +78,15 @@ class RequestAPI:
         return Response(payload)
 
 
+class InvisibleLocator:
+    @property
+    def first(self):
+        return self
+
+    async def is_visible(self):
+        return False
+
+
 class Page:
     def __init__(self, *, interrupt=False):
         self.urls = []
@@ -98,7 +107,14 @@ class Page:
         return (self,)
 
     def get_by_text(self, pattern):
-        return self
+        return (
+            self
+            if "扫码登录" in pattern.pattern or "手机号" in pattern.pattern
+            else InvisibleLocator()
+        )
+
+    def locator(self, selector):
+        return InvisibleLocator()
 
     @property
     def first(self):

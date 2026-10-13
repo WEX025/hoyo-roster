@@ -24,6 +24,10 @@ hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --
 
 `--login-timeout 900` 是默认各登录等待阶段的上限，范围 0 < 秒数 ≤ 3600；入口加载使用该上限，不再固定 30 秒。等待显示 `WAITING_FOR_ENTRY`；浏览器操控暂时超时显示 `CONTROL_RETRY`，在上限内等待恢复。一直未看到入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`，可以检查浏览器后重新运行。不把这些状态报告为不支持登录。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消等待，释放锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
 
+图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`，星铁为 `act.mihoyo.com/sr/event/cultivation-tool/`。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
+
+面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入该阶段 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
+
 ## 升级
 
 关闭本工具，更新或重新安装代码，然后运行原命令。程序从发行包携带的 contracts 生成新代际，复制本身份已保存数据，做完整验证，再替换 current 指针。升级不复制其他身份的 Profile，不从旧私有仓库导入数据。当前版本不提供旧 Broker、Runtime、users.toml 或候选格式迁移，也不迁移缺少独立身份边界的旧本机工作区及旧恢复日志。旧格式保留并拒绝操作；不能删除身份标记来重建或解除区服约束。

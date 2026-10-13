@@ -52,7 +52,15 @@ class PrivateArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = PrivateArgumentParser(prog="hoyo-roster", description=__doc__)
+    parser = PrivateArgumentParser(
+        prog="hoyo-roster",
+        description=__doc__,
+        epilog=(
+            "图片 CAPTCHA 请本人在本工具打开的官方浏览器窗口点击；AI 不自动选择、解图或绕过。"
+            "验证期间暂停自动身份探测并保留会话，完成后继续本人发码/登录和精确身份核验；"
+            "不自动重发短信，页面倒计时不代表实际送达。Ctrl-C 取消，窗口关闭停止。"
+        ),
+    )
     parser.add_argument("--game", choices=tuple(GAMES))
     parser.add_argument("--uid", help="your own UID; exact official Binding is required")
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
@@ -64,7 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="authorize manual official login and local session reuse; new terms still need user review",
     )
-    parser.add_argument("--login-timeout", type=float, default=900)
+    parser.add_argument(
+        "--login-timeout",
+        type=float,
+        default=900,
+        help="each login wait phase limit in seconds, including manual CAPTCHA (default: 900)",
+    )
     parser.add_argument(
         "--headless",
         action="store_true",

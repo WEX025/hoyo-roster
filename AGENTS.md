@@ -6,6 +6,7 @@ Python 3.12 单包；唯一用户入口 `hoyo-roster` / `python -m hoyo_roster`�
 - 游戏实现位于 src/hoyo_roster/games/{genshin,zzz,hsr}；contracts 的 schema、空基线、验证器是格式权威。共享层只负责登录协调、锁、节流、候选和存储。
 - 明确的本人游戏/UID 请求只授权该身份本机采集。使用用户提供的 UID，不推断他人身份；必须精确验证官方 game/UID/region Binding。不同身份的 Profile、锁和节流保持独立。
 - 官方页面登录由本人选择二维码/手机号/取消并操作。会话有效时复用；凭据、手机号、验证码、Cookie/token、设备头、raw response、HAR/trace/截图不得收集、打印或提交。
+- 图片 CAPTCHA 必须明确提示本人在本工具打开的官方浏览器登录窗口点击；AI 不选择图片、不解图或绕过。暂停自动交互/Binding 探测并保留同一会话，面板消失后继续本人发码/登录及精确身份核验；不自动重发短信，不把页面倒计时当成实际送达。Ctrl-C 取消、超时或窗口关闭停止；重复检测不刷屏。其他风险控制仍停止。
 - 遇身份冲突、认证失效、风险控制、限流、schema/来源漂移应停止；不绕过验证、不自动第三次采集。保持两次业务及来源覆盖比较、Decimal、lifecycle、名单/Build bijection 和完整安装验证。
 - 原神 partial；绝区零仅满足闭合证据后 complete；星铁 partial，owned roster 不可证实时可能只更新 Profile并保留旧角色值。不得为了成功放宽来源/完整度。
 - 个人数据保持在源码之外，正常同步不提交/上传。存储提交前失败保留旧 current；replace 后持久化未知保留所有可能引用代际；已提交的清理失败报告待办。恢复核验所有权、身份、当前引用和验证，不能按 UUID 盲删。

@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from time import monotonic
 from typing import Protocol
 
 from playwright.async_api import Page
@@ -26,7 +27,7 @@ from .errors import (
     RiskControl,
     WrongAccount,
 )
-from .login_ui import choose_method, confirm_method_entry
+from .login_ui import ManualCaptchaWait, choose_method, confirm_method_entry
 from .progress import OPTIONS, emit
 from .models import LoginProbeResult, LoginProbeStatus
 from .request_gate import RequestGate
@@ -285,6 +286,7 @@ async def coordinate_login(
         raise ValueError("login provider returned an identity for another game")
 
     prepared: list[LoginProvider] = []
+    login_waits: list[tuple[Page, ManualCaptchaWait]] = []
     primary_error: BaseException | None = None
     result: LoginCoordinatorResult | None = None
     waiting_signal_count = 0
@@ -303,7 +305,9 @@ async def coordinate_login(
         prepared.append(provider)
         await provider.prepare_login_or_session(context, page, request_gate)
         login_page = getattr(provider, "_login_page", None) or page
-        await confirm_method_entry(login_page, method)
+        captcha_wait = ManualCaptchaWait(game=provider.game)
+        login_waits.append((login_page, captcha_wait))
+        await confirm_method_entry(login_page, method, captcha_wait=captcha_wait)
         emit("VERIFYING_IDENTITY")
 
     try:
@@ -340,9 +344,10 @@ async def coordinate_login(
                 await prepare(provider)
                 notify_waiting()
 
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout
+            deadline = monotonic() + timeout
             while True:
+                for login_page, captcha_wait in login_waits:
+                    await captcha_wait.ready(login_page, deadline)
                 coverage = await _probe_coverage(
                     context=context,
                     providers=providers,
@@ -354,9 +359,9 @@ async def coordinate_login(
                 if observed.available_coverage_success:
                     result = observed
                     break
-                if loop.time() >= deadline:
+                if monotonic() >= deadline:
                     raise LoginTimeout("login coverage probe timed out")
-                await asyncio.sleep(min(poll_interval, max(0.0, deadline - loop.time())))
+                await asyncio.sleep(min(poll_interval, max(0.0, deadline - monotonic())))
     except BaseException as error:
         primary_error = error
         raise
