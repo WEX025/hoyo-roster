@@ -1,6 +1,6 @@
 # Chromium Profile 跨模式修复验证
 
-基线：已合并 main `0c9956781532d2dbf3d651048fbeab05ffa456e0`。本轮只修原神和绝区零的持久 Context 启动参数，采集、Binding、候选、存储和平台 I/O 不变。
+基线：已合并 main `0c9956781532d2dbf3d651048fbeab05ffa456e0`。本记录跟踪原神和绝区零持久 Context 的启动参数修复；同一分支随后补充的登录流程修复见 [登录流程验证记录](login-workflow-validation.md)。
 
 ## 问题与修复
 

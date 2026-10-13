@@ -29,14 +29,20 @@ hoyo-roster --game genshin --uid YOUR_UID
 非交互进程需登录时使用 `--non-interactive --login-method qr|phone --allow-login`；缺失方式报 `AUTHENTICATION_REQUIRED`，缺失允许报 `LOGIN_CONSENT_REQUIRED`，都在打开可执行认证的登录页面前停止。`--login-method cancel` 取消新登录。自动化调用者应先向本人展示本段说明并取得允许，再传入该标志；它不替代官方页面协议确认。
 
 ```bash
-hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --login-method phone --allow-login
+hoyo-roster --game genshin --uid YOUR_UID --non-interactive --login-method qr --allow-login
 ```
 
-`--login-timeout 900` 是默认各登录等待阶段的上限，范围 0 < 秒数 ≤ 3600；入口加载使用该上限，不再固定 30 秒。等待显示 `WAITING_FOR_ENTRY`；浏览器操控暂时超时显示 `CONTROL_RETRY`，在上限内等待恢复。一直未看到入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`，可以检查浏览器后重新运行。不把这些状态报告为不支持登录。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消等待，释放锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
+通常直接使用正常同步命令：需登录时在同一浏览器完成登录，随后继续两次采集、验证和保存；不必先跑临时登录脚本。程序在确认需要本人参与且已取得允许后立即输出 `WAITING_FOR_USER`，再打开页面。已识别的官方普通面板/方式控件唯一且可见时自动点击一次：原神头像、米游社“登录”、SDK 模式 SVG 和“短信登录”标签。操作不包含退出账号、切换角色、协议、发码或 CAPTCHA；结构未知或短暂操控故障在入口等待约 15 秒后显示 `LOGIN_PANEL_MANUAL`，请本人在同一窗口打开/切换面板。点击结果不确定时不重复点击。
+
+`--login-timeout 900` 是默认本人登录总等待预算，范围 0 < 秒数 ≤ 3600；页面打开、入口等待、CAPTCHA 和身份轮询共用期限，不逐阶段重新计时。此前已有会话的初始化、页面导航和前台控制各最多 30 秒（用户设置更短时取更短）。等待显示 `WAITING_FOR_ENTRY`；短暂操控超时显示 `CONTROL_RETRY`，在期限内等待恢复。一直未见入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消，排空后台回执任务、释放监听和锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
+
+`QR_READY` 表示 SDK 二维码图片已加载且未显示过期；`QR_SCANNED_WAIT_CONFIRM` 只表示页面提示扫码，仍需本人在手机确认。入口等待同时检查精确 Binding；扫码成功后面板消失或跳转不再因找不到旧入口而判失败。`LOGIN_CONFIRMED` 仅说明身份通过，公共最终 PASS 仍须等完整操作、清理和浏览器关闭结束；关闭失败不会报最终成功。
+
+手机号方式显示 `WAITING_FOR_PHONE_AND_TERMS`，请本人在官方窗口输入手机号、阅读并确认协议、点击一次发送并输入验证码。程序不读取输入值或自动发送。只有观察到实际官方 POST 才输出 `SMS_REQUESTING`；回执须为 HTTP 200、整数 retcode=0、布尔 `data.sent_new` 和非负整数 `data.countdown`。`SMS_ACCEPTED` 表示官方接受新发码，不证明手机送达；`SMS_COOLDOWN` 表示已有验证码/倒计时，未新发短信。点击、倒计时或单独 retcode=0 都不能证明发码。网络失败、畸形回执或请求后 30 秒仍无回执报 `SMS_RECEIPT_UNKNOWN`，读取单次回执最多 5 秒；不重试。官方拒绝或同一命令又观察到发码请求报 `SMS_REQUEST_REJECTED`，风险/限流保留原错误码。手动 CAPTCHA 期间不推进身份探测，清除后再检查已观察的回执。回执未知时停止本次流程并做既有关闭/清理，不以再次点击试探；固定状态不能替代手机送达确认。
 
 图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`。星铁暂时无法获取，请不要使用其保留的登录/采集接口。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
 
-面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入该阶段 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
+面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入本人登录总预算 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
 
 ## 升级
 
@@ -123,3 +129,5 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。
 
 可见登录与 `--headless` 会话复用使用同一个完整 Chromium channel，避免两个浏览器可执行文件混用同一 Profile。本轮 Mac 原生合成交接证据见 [Profile 验证记录](browser-profile-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。
+
+本轮登录流程的公开静态证据、合成回归及真实验收边界见 [登录流程验证记录](login-workflow-validation.md)。

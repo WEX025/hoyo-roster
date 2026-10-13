@@ -37,3 +37,5 @@ python tools/verify_distribution.py
 本轮架构整理、引用清理和定向自测证据见 [架构验证记录](docs/architecture-validation.md)；Windows 实机边界仍见平台支持文档。
 
 涉及浏览器可见/无头切换或 Profile 复用时，安装 Chromium 后运行 `python tools/browser_profile_smoke.py`。它仅创建新临时合成 Profile，不登录、不访问官方服务，不读取真实认证。
+
+登录流程修改的定向 Chromium 合成测试：`HOYO_NATIVE_LOGIN_SMOKE=1 python -m pytest -q tests/test_login_dom.py`。所有页面/请求均由测试拦截，未知请求直接阻止；不访问官方服务、不使用真实认证。回执、超时与精确身份回归见 `tests/test_sms_receipt.py`、`tests/test_login_ux.py`、`tests/test_manual_captcha.py` 和 `tests/test_session_handoff.py`。实际证据见 [登录流程验证记录](docs/login-workflow-validation.md)。

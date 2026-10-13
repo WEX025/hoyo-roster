@@ -86,8 +86,14 @@ class InvisibleLocator:
     async def is_visible(self):
         return False
 
+    async def count(self):
+        return 0
+
 
 class Page:
+    parent_frame = None
+    url = "https://user.mihoyo.com/login-platform/index.html"
+
     def __init__(self, *, interrupt=False):
         self.urls = []
         self.foregrounds = 0
@@ -114,7 +120,7 @@ class Page:
         )
 
     def locator(self, selector):
-        return InvisibleLocator()
+        return self if selector in {"img.qr-loaded", "input#mobile"} else InvisibleLocator()
 
     @property
     def first(self):
@@ -122,6 +128,9 @@ class Page:
 
     async def is_visible(self):
         return True
+
+    async def count(self):
+        return 0  # no synthetic switch control; readiness locators carry the selected entry
 
     async def goto(self, url, **kwargs):
         self.urls.append(url)
@@ -150,6 +159,13 @@ class Context:
         self.request = RequestAPI(payloads)
         self.pages = []
         self.interrupt = interrupt
+        self.callbacks = {}
+
+    def on(self, event, handler):
+        self.callbacks.setdefault(event, []).append(handler)
+
+    def remove_listener(self, event, handler):
+        self.callbacks[event].remove(handler)
 
     async def new_page(self):
         page = Page(interrupt=self.interrupt)

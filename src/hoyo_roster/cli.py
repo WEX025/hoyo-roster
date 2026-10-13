@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--login-timeout",
         type=float,
         default=900,
-        help="each login wait phase limit in seconds, including manual CAPTCHA (default: 900)",
+        help="total human login budget in seconds, including panel and manual CAPTCHA (default: 900)",
     )
     parser.add_argument(
         "--headless",

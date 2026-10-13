@@ -21,7 +21,7 @@ type BrowserContextAccess = BrowserContext
 
 def login_timeout() -> float:
     options = OPTIONS.get()
-    return options.timeout if options else 900
+    return min(30.0, options.timeout) if options else 30.0
 
 
 async def navigate_login_page(page: Page, url: str) -> None:

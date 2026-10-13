@@ -75,3 +75,11 @@ class LoginControlUnavailable(OperationError):
 
 class LoginMethodUnavailable(OperationError):
     code = "LOGIN_METHOD_UNAVAILABLE"
+
+
+class SmsReceiptUnknown(OperationError):
+    code = "SMS_RECEIPT_UNKNOWN"
+
+
+class SmsRequestRejected(OperationError):
+    code = "SMS_REQUEST_REJECTED"
