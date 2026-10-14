@@ -249,6 +249,7 @@ async def coordinate_login(
     interaction_required = False
     deadline = None
     sms_watches: list[SmsReceiptWatch] = []
+    phone_actions = []
 
     def notify_waiting() -> None:
         nonlocal waiting_signal_count, interaction_required
@@ -269,12 +270,26 @@ async def coordinate_login(
             watch = SmsReceiptWatch(context)
             watch.start()
             sms_watches.append(watch)
+        action = None
+        if method == "phone" and options is not None and options.phone_input is not None:
+            if options.phone_input.used:
+                emit("PHONE_AUTHORIZATION_USED")
+            else:
+                from .phone_login import PhoneLoginAction, read_phone
+
+                options.phone_input.used = True
+                async with asyncio.timeout(max(0.0, deadline - monotonic())):
+                    action = PhoneLoginAction(await read_phone(), watch)
+                phone_actions.append(action)
         prepared.append(provider)
         async with asyncio.timeout(max(0.0, deadline - monotonic())):
             await provider.prepare_login_or_session(context, page, request_gate)
         login_page = provider.login_page(page)
         captcha_wait = ManualCaptchaWait(game=provider.game)
         login_waits.append((login_page, captcha_wait))
+        if action is not None:
+            action.page = login_page
+            action.captcha_wait = captcha_wait
 
         async def authenticated() -> bool:
             for watch in sms_watches:
@@ -291,6 +306,8 @@ async def coordinate_login(
             if not success:
                 for watch in sms_watches:
                     watch.check()
+            elif action is not None:
+                action.authenticated()
             return success
 
         await confirm_method_entry(
@@ -301,7 +318,6 @@ async def coordinate_login(
             authenticated=authenticated,
             poll_interval=poll_interval,
         )
-        emit("VERIFYING_IDENTITY")
 
     try:
         for provider, identity in zip(providers, identities, strict=True):
@@ -342,6 +358,10 @@ async def coordinate_login(
                     await captcha_wait.ready(login_page, deadline)
                 for watch in sms_watches:
                     watch.check_protection()
+                for action in phone_actions:
+                    await action.step(
+                        action.page, captcha_wait=action.captcha_wait, deadline=deadline
+                    )
                 async with asyncio.timeout(max(0.0, deadline - monotonic())):
                     coverage = await _probe_coverage(
                         context=context,
@@ -352,6 +372,7 @@ async def coordinate_login(
                     raise WrongAccount("login coverage did not match the expected account")
                 observed = LoginCoordinatorResult(coverage, True, waiting_signal_count)
                 if observed.available_coverage_success:
+                    emit("VERIFYING_IDENTITY")
                     result = observed
                     break
                 for watch in sms_watches:
@@ -368,6 +389,8 @@ async def coordinate_login(
     finally:
         cleanup_failed = False
         cleanup_cancelled: asyncio.CancelledError | None = None
+        for action in phone_actions:
+            action.close()
         for watch in reversed(sms_watches):
             try:
                 await watch.close()

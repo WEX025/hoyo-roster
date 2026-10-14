@@ -17,12 +17,15 @@ from .errors import (
     LoginTimeout,
 )
 from .progress import OPTIONS, emit
+from .terminal import read_terminal
 
 LOGIN_NOTICE = (
-    "登录前说明：二维码需本人扫码并确认；手机号方式需本人在官方页面输入手机号、"
-    "请求短信并输入验证码。允许本工具打开官方页面、等待本人登录、核验所选游戏/UID/区服，"
+    "登录前说明：二维码需本人扫码并确认；手机号默认由本人在官方页面输入、请求短信并输入验证码。"
+    "显式选择 --phone-stdin --allow-sms 可从终端临时隐藏输入号码，待本人在官方窗口勾选协议后程序至多点一次发码；"
+    "号码只在本次内存使用，不记录或输出，程序不读取浏览器输入值。"
+    "允许本工具打开官方页面、等待本人登录、核验所选游戏/UID/区服，"
     "并在本机该身份独立 Profile 中保存及复用会话。浏览器与官方服务通信；"
-    "工具不接收或输出凭据。必要的官方协议与隐私条款请本人阅读并在官方页面确认；"
+    "工具不接收验证码或输出凭据。必要的官方协议与隐私条款请本人阅读并在官方页面确认；"
     "程序不会自动勾选。图片 CAPTCHA 必须由本人在本工具打开的官方浏览器窗口点击；"
     "AI 不选择图片、不解图或绕过验证。等待期间保留会话，不重复发短信；"
     "页面倒计时不代表短信实际送达。若出现未知新协议、额外权限或其他风控，请暂停并另行确认，"
@@ -150,7 +153,7 @@ async def choose_method() -> str | None:
         name = "二维码" if options.method == "qr" else "手机号/短信验证码"
         prompt = f"允许上述操作并使用{name}登录？[y/N]："
     try:
-        answer = (await asyncio.to_thread(input, prompt)).strip().lower()
+        answer = (await read_terminal(prompt)).strip().lower()
     except EOFError:
         answer = ""
     if options.method is None:

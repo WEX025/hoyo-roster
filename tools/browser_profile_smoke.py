@@ -39,7 +39,8 @@ async def verify_session(browser, profile, *, game, headed):
 
 
 async def check():
-    root = io.filesystem_path(Path(tempfile.mkdtemp(prefix="hoyo-browser-profile-")))
+    temporary = io.temporary_root()
+    root = io.filesystem_path(Path(tempfile.mkdtemp(prefix="hoyo-browser-profile-", dir=temporary)))
     completed = False
     try:
         for game in ("genshin", "zzz"):
@@ -82,9 +83,8 @@ async def check():
         completed = True
     finally:
         if completed:
-            if root.parent != io.filesystem_path(
-                Path(tempfile.gettempdir())
-            ) or not root.name.startswith("hoyo-browser-profile-"):
+            io.check_components(root)
+            if root.parent != temporary or not root.name.startswith("hoyo-browser-profile-"):
                 raise AssertionError("temporary scope was not proven")
             shutil.rmtree(root)
         else:

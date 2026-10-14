@@ -91,3 +91,7 @@ class SmsReceiptUnknown(OperationError):
 
 class SmsRequestRejected(OperationError):
     code = "SMS_REQUEST_REJECTED"
+
+
+class PhoneInputInvalid(OperationError):
+    code = "PHONE_INPUT_INVALID"

@@ -553,6 +553,7 @@ def test_persistent_close_finishes_before_runtime_stop(
                 io.filesystem_path(tmp_path / "profile" / "chromium")
             )
             assert kwargs["channel"] == "chromium"
+            assert kwargs["handle_sigint"] is False
             assert kwargs["headless"] is (not headed)
             return context
 

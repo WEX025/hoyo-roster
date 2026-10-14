@@ -20,9 +20,7 @@ from hoyo_roster.user_workspace import LocalSnapshotStore, direct_configuration
 
 
 def check() -> None:
-    with tempfile.TemporaryDirectory(
-        prefix="hoyo-platform-", dir=io.filesystem_path(Path(tempfile.gettempdir()))
-    ) as temporary:
+    with tempfile.TemporaryDirectory(prefix="hoyo-platform-", dir=io.temporary_root()) as temporary:
         root = Path(temporary).resolve()
         result, auth = root / "results", root / "auth"
 

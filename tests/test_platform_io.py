@@ -64,6 +64,49 @@ def test_reparse_attribute_is_rejected_without_following():
     assert not io.is_redirect(SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink policy")
+def test_custom_redirected_tmpdir_still_rejected(tmp_path, monkeypatch):
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    alias = tmp_path / "untrusted-temp"
+    alias.symlink_to(destination, target_is_directory=True)
+    monkeypatch.setattr(io.tempfile, "gettempdir", lambda: str(alias))
+    with pytest.raises(io.UnsafePath, match="UNSAFE_REDIRECTED_PATH"):
+        io.temporary_root()
+    with pytest.raises(io.UnsafePath):
+        io.check_components(alias / "user-auth")
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native macOS system aliases")
+def test_macos_temporary_root_does_not_relax_user_paths():
+    lexical = Path(io.tempfile.gettempdir()).absolute()
+    assert io.temporary_root() == lexical.resolve()
+    io.check_components(io.temporary_root())
+    if Path("/var") in lexical.parents:
+        with pytest.raises(io.UnsafePath):
+            io.check_components(lexical / "private-auth")
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native macOS system alias boundary")
+@pytest.mark.parametrize("foreign", ("owner", "target"))
+def test_macos_alias_requires_system_owner_and_exact_target(monkeypatch, foreign):
+    original = Path.lstat
+    monkeypatch.setattr(io.tempfile, "gettempdir", lambda: "/var/folders")
+    if foreign == "owner":
+
+        def metadata(path):
+            if path == Path("/var"):
+                return SimpleNamespace(st_mode=stat.S_IFLNK, st_uid=501)
+            return original(path)
+
+        monkeypatch.setattr(Path, "lstat", metadata)
+    else:
+        monkeypatch.setattr(io.os, "readlink", lambda path: "private/attacker")
+    with pytest.raises(io.UnsafePath):
+        io.temporary_root()
+
+
 def test_local_file_url_uses_platform_converter(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "__file__", str(tmp_path / "site-packages/hoyo_roster/paths.py"))
     monkeypatch.setattr(

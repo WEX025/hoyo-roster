@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from .config import Settings
 from .errors import OperationError, LoginTimeout, BrowserUnavailable, BrowserProfileInvalid
-from .progress import OPTIONS, LoginOptions, emit
+from .progress import OPTIONS, options_from_args, emit
 from .request_gate import RequestGate
 from .sync import OperationResult
 from .user_workspace import (
@@ -99,6 +99,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--login-method", choices=("qr", "phone", "cancel"))
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument(
+        "--phone-stdin",
+        action="store_true",
+        help="read an ephemeral phone number from stdin (hidden on a terminal); requires phone and --allow-sms; never a command-line number",
+    )
+    parser.add_argument(
+        "--allow-sms",
+        action="store_true",
+        help="authorize one automatic SMS click per command after the user checks official terms; requires --phone-stdin",
+    )
+    parser.add_argument(
         "--allow-login",
         action="store_true",
         help="authorize manual official login and local session reuse; new terms still need user review",
@@ -162,6 +172,16 @@ def select_configuration(args):
 
 
 async def run(args) -> int:
+    phone_stdin, allow_sms = getattr(args, "phone_stdin", False), getattr(args, "allow_sms", False)
+    if phone_stdin != allow_sms or (
+        phone_stdin
+        and (
+            args.login_method != "phone"
+            or args.headless
+            or args.operation not in {"discover", "login", "sync"}
+        )
+    ):
+        raise WorkspaceError("INVALID_PHONE_LOGIN_OPTIONS")
     if args.operation == "discover" or (args.uid is None and args.operation in {"login", "sync"}):
         from .discovery import run_discovery
 
@@ -278,9 +298,7 @@ async def run_locked(args, config, game, operation, store):
         login_check_only=operation == "login",
         login_wait_seconds=args.login_timeout,
     )
-    token = OPTIONS.set(
-        LoginOptions(args.login_method, args.non_interactive, args.login_timeout, args.allow_login)
-    )
+    token = OPTIONS.set(options_from_args(args))
     try:
         result = await module.run_sync(
             domain_args, snapshot_store=store, request_gate_override=gate

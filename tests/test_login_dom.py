@@ -11,6 +11,7 @@ from playwright.async_api import async_playwright
 from hoyo_roster.errors import LoginTimeout
 from hoyo_roster.login_ui import ManualCaptchaWait, confirm_method_entry
 from hoyo_roster.sms import SMS_PATH, SmsReceiptWatch
+from hoyo_roster.phone_login import PhoneLoginAction
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("HOYO_NATIVE_LOGIN_SMOKE") != "1", reason="explicit isolated browser smoke only"
@@ -126,6 +127,51 @@ def test_phone_terms_and_one_manual_request(capsys):
 
     asyncio.run(isolated(run, html))
     assert "SMS_ACCEPTED" in capsys.readouterr().out
+
+
+def test_authorized_phone_fill_waits_for_terms_and_one_real_dom_click(capsys):
+    html = (
+        '<input id="mobile"><label class="agree-checkbox"><input type="checkbox">'
+        '已阅读并同意<a href="https://user.mihoyo.com/#/agreement?hideBack=true">《米哈游用户协议》</a>'
+        '<a href="https://user.mihoyo.com/#/privacyAgreement?hideBack=true">《米哈游隐私政策》</a>'
+        "，未注册的手机号验证通过将自动注册。</label>"
+        '<span onclick="clicks++;fetch(' + repr(SMS) + ",{method:'POST'})\">获取验证码</span>"
+        "<script>window.clicks=0</script>"
+    )
+
+    async def run(context, page, sent):
+        watch = SmsReceiptWatch(context)
+        watch.start()
+        action = PhoneLoginAction("19900000000", watch)
+        captcha = ManualCaptchaWait("genshin")
+        deadline = monotonic() + 4
+        try:
+            await page.goto(SDK)
+            await action.step(page, captcha_wait=captcha, deadline=deadline)
+            await action.step(page, captcha_wait=captcha, deadline=deadline)
+            assert await page.locator("#mobile").input_value() == "19900000000"
+            assert not await page.get_by_role("checkbox").is_checked() and sent == []
+            await page.get_by_role("checkbox").check()  # synthetic person confirms terms
+            await action.step(page, captcha_wait=captcha, deadline=deadline)
+            while watch.state is None and monotonic() < deadline:
+                watch.check()
+                await asyncio.sleep(0.02)
+            await action.step(page, captcha_wait=captcha, deadline=deadline)
+            assert sent == [SMS] and watch.state == "SMS_ACCEPTED"
+            assert await page.evaluate("clicks") == 1
+        finally:
+            action.close()
+            await watch.close()
+
+    asyncio.run(isolated(run, html))
+    output = capsys.readouterr().out
+    assert "19900000000" not in output
+    assert output.index("WAITING_FOR_TERMS") < output.index("SMS_SUBMITTING")
+    assert (
+        output.index("SMS_SUBMITTING")
+        < output.index("SMS_REQUESTING")
+        < output.index("SMS_ACCEPTED")
+    )
 
 
 def test_captcha_pauses_probes_and_disappeared_panel_accepts_binding(capsys):

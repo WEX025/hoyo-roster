@@ -134,6 +134,24 @@ def test_panel_and_identity_wait_share_deadline(tmp_path, source, monkeypatch):
     assert context.pages[0].closed
 
 
+def test_phone_entry_ready_keeps_manual_wait_until_binding(tmp_path, source, capsys):
+    root = tmp_path / "workspace"
+    empty_workspace(source, root)
+    provider, context, page, gate = provider_for(
+        "genshin", root, [binding_payload("genshin", retcode=10001)]
+    )
+    token = OPTIONS.set(LoginOptions("phone", True, timeout=0.02, allow_login=True))
+    try:
+        with pytest.raises(LoginTimeout):
+            asyncio.run(coordinate(root, provider, context, page, gate))
+    finally:
+        OPTIONS.reset(token)
+    output = capsys.readouterr().out
+    assert "PROGRESS=WAITING_FOR_PHONE_AND_TERMS" in output
+    assert "PROGRESS=VERIFYING_IDENTITY" not in output
+    assert "PROGRESS=SMS_REQUESTING" not in output
+
+
 @pytest.mark.parametrize(
     "url",
     (

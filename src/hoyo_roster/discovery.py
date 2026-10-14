@@ -17,7 +17,7 @@ from .config import Settings
 from .errors import ConfigurationError, LoginBindingFailed
 from .login import ExpectedIdentity, coordinate_login
 from .models import LoginProbeResult, LoginProbeStatus
-from .progress import OPTIONS, LoginOptions
+from .progress import OPTIONS, options_from_args
 from .request_gate import RequestGate
 from .sync import operation_browser
 from .storage.common import atomic_write_metadata, load_metadata
@@ -243,9 +243,7 @@ async def run_discovery(args) -> int:
     games = SUPPORTED_GAMES if args.game in {None, "all"} else (args.game,)
     parent = discovery_root(args.auth_root, CONTRACT_ROOT)
     failed = False
-    token = OPTIONS.set(
-        LoginOptions(args.login_method, args.non_interactive, args.login_timeout, args.allow_login)
-    )
+    token = OPTIONS.set(options_from_args(args))
     try:
         with io.exclusive_lock(parent / "workspace.lock"):
             for game in games:

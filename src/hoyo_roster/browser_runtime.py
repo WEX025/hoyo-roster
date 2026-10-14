@@ -86,6 +86,7 @@ async def launch_profile(playwright, profile: Path, *, headed: bool, args=()):
                 headless=not headed,
                 channel=channel,
                 accept_downloads=False,
+                handle_sigint=False,  # CLI cancellation owns/drains browser teardown.
                 args=list(args),
             )
         except PlaywrightError:
