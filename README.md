@@ -14,7 +14,7 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 | 绝区零 | 代理人等级、晋阶、影画、技能、音擎、驱动盘、面板和邦布 | 只有名单、养成名单、逐角色详情、批量详情和邦布的覆盖条件全部满足，才输出 `complete`；不表示账号的所有信息 |
 | 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的接口和历史测试不是使用建议 |
 
-已验证的开发与安装平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配，**尚待本人 Windows 实机端到端验收，不宣称跨平台正式可用**；Linux/WSL 尚未完成平台验收。Windows 当前目标为 Windows 11 x64、Python 3.12、Playwright Chromium、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
+开发与安装的历史验收平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配；Windows 11 x64 上 Chromium 的本人真实流程曾通过，系统 Edge 的原生离线复用通过，**当前默认 Edge 的真实端到端、macOS 系统 Chrome 及 Linux/WSL 实机验收仍未完成，不宣称跨平台正式可用**。Windows 当前目标为 Python 3.12、已安装的 Edge（Chromium 备用）、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)及[系统浏览器验证](docs/browser-selection-validation.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
 
 更详细的字段、数据格式和完整度说明见[数据格式和完整度](docs/data-format.md)。
 
@@ -26,7 +26,7 @@ cd hoyo-roster
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
-# 没有已安装的 Chrome、或需要 Chromium 备用时执行：
+# macOS 未安装 Chrome 时需要；Linux 必须安装；也可作为备用：
 python -m playwright install chromium
 hoyo-roster --game all
 ```

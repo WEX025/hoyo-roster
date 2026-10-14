@@ -221,7 +221,9 @@ def test_all_games_discovery_uses_each_exact_identity(tmp_path, monkeypatch, cap
     async def fake(game, args, scope, source):
         visited.append(game)
         profile = secure_private_directory(scope / "browser-profile")
-        return profile, discovery.binding_roles(game, binding_payload(game)["data"])
+        data = binding_payload(game)["data"]
+        data["list"].extend(binding_payload(game, UID_B)["data"]["list"])
+        return profile, discovery.binding_roles(game, data)
 
     async def exact(args):
         exact_calls.append((args.game, args.uid, args.discovered_region))
@@ -241,14 +243,45 @@ def test_all_games_discovery_uses_each_exact_identity(tmp_path, monkeypatch, cap
     )
     assert asyncio.run(discovery.run_discovery(args)) == 0
     assert visited == ["genshin", "zzz"]
-    assert [item[0] for item in exact_calls] == visited
-    assert all(item[1] == UID_A for item in exact_calls)
+    assert [item[0] for item in exact_calls] == ["genshin", "genshin", "zzz", "zzz"]
+    assert [item[1] for item in exact_calls] == [UID_A, UID_B, UID_A, UID_B]
     output = capsys.readouterr().out
     assert "GAME_PAUSED" in output and UID_A not in output
     # A new invocation reuses selectors, still running exact authentication per role.
     visited.clear()
     assert asyncio.run(discovery.run_discovery(args)) == 0
-    assert visited == [] and len(exact_calls) == 4
+    assert visited == [] and len(exact_calls) == 8
+
+
+@pytest.mark.parametrize("role_count", (1, 2))
+def test_zzz_business_requires_discovered_identity_without_collecting(role_count):
+    from hoyo_roster.games.zzz.endpoints import EndpointClient
+    from hoyo_roster.games.zzz.errors import ConfigurationError
+
+    data = binding_payload("zzz")["data"]
+    if role_count == 2:
+        data["list"].extend(binding_payload("zzz", UID_B)["data"]["list"])
+
+    class NoBusinessRequests:
+        async def request_json(self, *args, **kwargs):
+            pytest.fail("Unresolved identity must never start a business request")
+
+    with pytest.raises(ConfigurationError):
+        asyncio.run(EndpointClient(NoBusinessRequests()).collect_from_binding(data, uid=None))
+
+
+def test_zzz_business_selects_only_exact_discovered_role():
+    from hoyo_roster.games.zzz.endpoints import select_role
+    from hoyo_roster.games.zzz.errors import ConfigurationError
+
+    data = binding_payload("zzz")["data"]
+    data["list"].extend(binding_payload("zzz", UID_B)["data"]["list"])
+    assert select_role(data, UID_B).uid == UID_B
+    with pytest.raises(ConfigurationError):
+        select_role(data, "555555555")
+    data["list"].append(copy.deepcopy(data["list"][1]))
+    with pytest.raises(ConfigurationError):
+        select_role(data, UID_B)
 
 
 @pytest.mark.parametrize(
