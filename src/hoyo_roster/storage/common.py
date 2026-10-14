@@ -135,7 +135,7 @@ def secure_private_directory(
     *,
     repository_root: Path | None = None,
 ) -> Path:
-    path = value.expanduser().absolute()
+    path = io.filesystem_path(value)
     try:
         io.check_components(path)
         for part in (*reversed(path.parents), path):
@@ -151,7 +151,7 @@ def secure_private_directory(
     except (OSError, io.UnsafePath) as error:
         raise MetadataError("private directory could not be secured") from error
     if repository_root is not None:
-        repository = repository_root.resolve()
+        repository = io.filesystem_path(repository_root).resolve()
         if resolved == repository or resolved.is_relative_to(repository):
             raise MetadataError("private directory must be outside the repository")
     return resolved

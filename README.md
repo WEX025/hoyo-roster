@@ -27,7 +27,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 python -m playwright install chromium
-hoyo-roster --game genshin --uid YOUR_UID
+hoyo-roster --game all
 ```
 
 Windows PowerShell（验收 PR 时先切换到该 PR 分支；无需激活脚本或修改系统执行策略）：
@@ -37,12 +37,14 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
 .\.venv\Scripts\python.exe -m playwright install chromium
 .\.venv\Scripts\python.exe tools\platform_smoke.py
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID
+.\.venv\Scripts\python.exe -m hoyo_roster --game all
 ```
 
 离线 smoke 仅用新临时目录检查权限、锁、保存和恢复，不登录、不发短信，不访问已有结果或认证目录。Windows 安装失败或 smoke 失败时先停止，报告固定错误代码与平台；不要用管理员运行或放宽 ACL 绕过。真实验收顺序见[平台验收](docs/platform-support.md#本人-windows-验收)。
 
-将 `YOUR_UID` 替换为你自己的游戏 UID。当前请仅使用 `--game genshin`（原神）或 `--game zzz`（绝区零）；不要使用保留的 `hsr` 参数。UID 用于选择本机身份范围，是否属于当前登录账号仍须由官方账号绑定信息核验。
+首次使用可以省略 UID：`--game all` 在官方登录后发现本人原神和绝区零的受支持绑定，并逐身份核验、同步；不指定游戏时也执行这两个游戏。`--game genshin` / `--game zzz` 只发现对应游戏。`--operation discover` 只发现并保存本机角色选择，不采集角色数据。再次运行读取私有选择文件，但仍重新验证官方身份，选择文件不能证明会话有效。多个角色逐一处理，不默认挑选其中一个。星铁仍暂停。
+
+也可显式指定 `--uid YOUR_UID`，将 `YOUR_UID` 替换为你自己的游戏 UID。UID 用于选择本机身份范围，是否属于当前登录账号仍须由官方账号绑定信息核验。
 
 `hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。浏览器由 Playwright 单独安装，本项目发行包不包含 Chromium。
 

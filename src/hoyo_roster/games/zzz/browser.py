@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from hoyo_roster.browser import navigate_login_page
+from hoyo_roster.browser import navigate_login_page, chromium_profile_path
 from hoyo_roster.config import (
     resolve_private_profile_path,
 )
@@ -52,8 +52,8 @@ def _assert_diagnostic_profile_authority(candidate: Path) -> Path:
 def resolve_browser_profile(repo_root: Path, browser_profile: Path) -> Path:
     """Create a private real directory outside the repository."""
 
-    root = repo_root.expanduser().resolve()
-    profile = browser_profile.expanduser().absolute()
+    root = io.filesystem_path(repo_root).resolve()
+    profile = io.filesystem_path(browser_profile)
     _assert_diagnostic_profile_authority(profile)
     if os.path.lexists(profile):
         try:
@@ -121,7 +121,7 @@ async def persistent_browser(
             )
         try:
             context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
+                user_data_dir=chromium_profile_path(profile),
                 headless=not headed,
                 # One executable owns this Profile in both modes; never switch to headless shell.
                 channel="chromium",

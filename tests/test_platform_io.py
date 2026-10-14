@@ -37,19 +37,24 @@ def test_unsafe_lock_does_not_modify_file(tmp_path):
     lock = tmp_path / "workspace.lock"
     lock.write_bytes(b"synthetic")
     lock.chmod(0o644)
-    with pytest.raises(io.UnsafePath):
+    with pytest.raises(OSError if io.WINDOWS else io.UnsafePath):
         with io.exclusive_lock(lock):
             pytest.fail("unsafe lock admitted")
     assert lock.read_bytes() == b"synthetic"
-    assert stat.S_IMODE(lock.stat().st_mode) == 0o644
+    if io.WINDOWS:
+        assert not io.private(lock)
+    else:
+        assert stat.S_IMODE(lock.stat().st_mode) == 0o644
 
 
 def test_hardlink_key_rejected(tmp_path):
     key = tmp_path / "key"
     key.write_bytes(b"synthetic")
     key.chmod(0o600)
+    if io.WINDOWS:
+        io.set_private(key)
     os.link(key, tmp_path / "other")
-    with pytest.raises(io.UnsafePath):
+    with pytest.raises(OSError if io.WINDOWS else io.UnsafePath):
         io.open_private(key, os.O_RDONLY)
     assert key.read_bytes() == b"synthetic"
 
@@ -261,7 +266,10 @@ def test_existing_insecure_browser_profile_preserved(tmp_path):
     profile.mkdir(mode=0o755)
     with pytest.raises((ConfigurationError, MetadataError)):
         resolve_browser_profile(tmp_path / "contracts", profile)
-    assert stat.S_IMODE(profile.stat().st_mode) == 0o755
+    if io.WINDOWS:
+        assert not io.private(profile)
+    else:
+        assert stat.S_IMODE(profile.stat().st_mode) == 0o755
 
 
 def test_windows_open_transfers_verified_handle_mock(windows, monkeypatch):

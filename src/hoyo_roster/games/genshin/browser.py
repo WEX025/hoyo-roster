@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from hoyo_roster.browser import navigate_login_page
+from hoyo_roster.browser import navigate_login_page, chromium_profile_path
 from hoyo_roster.config import (
     resolve_private_profile_path,
 )
@@ -64,8 +64,8 @@ def _assert_diagnostic_profile_authority(candidate: Path) -> Path:
 
 
 def resolve_browser_profile(repo_root: Path, value: Path) -> Path:
-    root = repo_root.expanduser().resolve()
-    profile = value.expanduser().absolute()
+    root = io.filesystem_path(repo_root).resolve()
+    profile = io.filesystem_path(value)
     _assert_diagnostic_profile_authority(profile)
     if os.path.lexists(profile):
         metadata = profile.lstat()
@@ -110,7 +110,7 @@ async def persistent_browser(
             )
         try:
             context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
+                user_data_dir=chromium_profile_path(profile),
                 headless=not headed,
                 # One executable owns this Profile in both modes; never switch to headless shell.
                 channel="chromium",

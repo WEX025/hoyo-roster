@@ -20,6 +20,12 @@ class UnsafePath(ValueError):
     """A fixed, privacy-safe filesystem rejection."""
 
 
+def filesystem_path(path: Path) -> Path:
+    """Use the local extended namespace internally, without resolving redirects."""
+    path = path.expanduser().absolute()
+    return backend.extended_path(path) if WINDOWS else path
+
+
 def is_redirect(metadata: os.stat_result) -> bool:
     return stat.S_ISLNK(metadata.st_mode) or bool(
         getattr(metadata, "st_file_attributes", 0) & 0x400

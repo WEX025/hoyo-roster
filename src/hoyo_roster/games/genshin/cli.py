@@ -67,6 +67,7 @@ async def _binding_with_login(
     uid: str,
     request_gate: RequestGate | None,
     request_interval: float,
+    expected_region: str | None = None,
 ) -> dict[str, Any]:
     provider = create_routine_login_provider(
         context=session.context,
@@ -76,6 +77,7 @@ async def _binding_with_login(
         headed=session.headed,
         request_gate=request_gate,
         request_interval=request_interval,
+        expected_region=expected_region,
     )
 
     def print_waiting() -> None:
@@ -107,6 +109,7 @@ async def _pass(
     uid: str,
     request_gate: RequestGate | None,
     request_interval: float,
+    expected_region: str | None = None,
 ) -> tuple[Snapshot, int]:
     start = collector.request_count
     binding_data = await _binding_with_login(
@@ -116,6 +119,7 @@ async def _pass(
         uid=uid,
         request_gate=request_gate,
         request_interval=request_interval,
+        expected_region=expected_region,
     )
     binding = select_binding(binding_data, uid)
     list_data, request_size = await collector.cultivation_list(
@@ -162,6 +166,7 @@ async def run_sync(
                 uid=args.uid,
                 request_gate=request_gate,
                 request_interval=args.request_interval,
+                expected_region=getattr(args, "expected_region", None),
             )
             select_binding(binding_data, args.uid)
             return OperationResult("genshin", "login")
@@ -173,6 +178,7 @@ async def run_sync(
             uid=args.uid,
             request_gate=request_gate,
             request_interval=args.request_interval,
+            expected_region=getattr(args, "expected_region", None),
         )
         emit("COLLECTING_2")
         second, second_requests = await _pass(
@@ -182,6 +188,7 @@ async def run_sync(
             uid=args.uid,
             request_gate=request_gate,
             request_interval=args.request_interval,
+            expected_region=getattr(args, "expected_region", None),
         )
         first_requests = first_requests_after_binding
         assert_stable(first, second)

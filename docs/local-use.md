@@ -4,11 +4,15 @@
 
 ## 首次使用
 
+直接运行 `hoyo-roster --game all` 可先在各游戏官方页面由本人登录，再发现该账号所有受支持国服绑定。省略游戏等同 all，原神/绝区零也可分别选择；星铁不登录、不采集。省略 UID 只用于 sync/login/discover，init/inspect/recover 等已有身份操作仍需要明确游戏/UID。`--operation discover` 不采集角色；指定 UID 时维持原有精确身份流程。
+
+首次发现用认证根内新 UUID 范围创建私有 Profile，浏览器确认关闭后才把本次新 Profile 放到首个发现身份的空目标中；已有目标不覆盖、不复制认证材料。其他角色使用各自独立会话，必要时本人另行登录。认证根 onboarding/selected-游戏.json 保存本机 UID/区服选择，私有权限保护、不在终端打印 UID，不证明登录或所有权；后续命令仍从官方 Binding 精确核验后才采集。默认命令复用这些选择；显式 discover 重新发现当前本人登录账号。失败/关闭不确定保留本次临时范围，不探索或清理旧会话。
+
 按 README 安装 Python 3.12、项目和 Playwright Chromium。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
 
 `--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、认证 key/指纹、节流与认证锁按游戏/UID 隔离；不同结果根共用同一认证范围时仍由认证锁互斥。
 
-结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证范围为 `<认证根>/users/<scope>/<game>/<hash>/`。scope/hash 由游戏和 UID 确定，不含明文 UID。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
+结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证元数据范围为 `<认证根>/users/<scope>/<game>/<hash>/`。浏览器 Profile 单独位于较浅的 `<认证根>/profiles/<身份哈希>/browser-profile/`，仍按 user/game/UID 唯一隔离，由同一身份锁保护；不会迁移或复用旧布局的 Profile。scope/hash 由身份确定，不含明文 UID。Windows 文件系统内部使用受检的长路径命名空间，而传给 Chromium 的 user-data-dir 使用普通盘符路径；认证根应尽量短，为浏览器内部数据库留出路径空间。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
 
 POSIX 上，程序逐层把**新建应用目录**设为 0700，不修改已有共享父目录。clone 创建且包含 `.gitkeep` 的顶层 `data/` 可保持属于本人、不可被组/其他人写入的 0755 权限；其下身份目录仍须 0700。其他已存在的结果根、认证根及身份目录必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`。普通结果和元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
 

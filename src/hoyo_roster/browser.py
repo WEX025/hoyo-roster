@@ -16,6 +16,16 @@ from .errors import (
 )
 from .progress import OPTIONS
 
+
+def chromium_profile_path(profile) -> str:
+    # Keep extended paths for protected filesystem I/O, but Chromium's Windows
+    # cookie persistence requires an ordinary drive-letter user-data-dir.
+    value = str(profile)
+    if value.startswith("\\\\?\\") and len(profile.drive) == 6 and profile.drive[5] == ":":
+        return value[4:]
+    return value
+
+
 type BrowserContextAccess = BrowserContext
 
 

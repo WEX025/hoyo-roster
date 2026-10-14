@@ -106,6 +106,8 @@ def direct_configuration(
         raise WorkspaceError("INVALID_STORAGE_ROOT")
     if not auth_root.expanduser().is_absolute():
         raise WorkspaceError("INVALID_AUTH_ROOT")
+    if io.WINDOWS and any(str(path).startswith("\\\\") for path in (storage_root, auth_root)):
+        raise WorkspaceError("UNSUPPORTED_PRIVATE_FILESYSTEM")
     digest = hashlib.sha256(f"direct:v1:{game}:{uid}".encode()).hexdigest()
     alias = f"direct-{game}-{digest[:48]}"
     return UserConfiguration(alias, storage_root, {game: uid}, auth_root)
@@ -207,7 +209,15 @@ class LocalSnapshotStore:
         ):
             raise WorkspaceError("AUTH_STATE_IN_RESULT_DIRECTORY")
         # Authentication is independent of the result destination; never migrate user data.
-        self.browser_profile = self.auth_root / "browser-profile"
+        # Chromium's own Windows databases cannot reliably use deep Profile trees.
+        # Keep authentication metadata in the existing locked identity scope, but
+        # give the browser a shallow, independently hashed identity directory.
+        # Existing layouts are preserved; this is not a migration or fallback.
+        profile_key = hashlib.sha256(
+            f"profile:v1:{config.user}:{game}:{self._uid}".encode()
+        ).hexdigest()
+        self.profile_root = private_directory(auth / "profiles" / profile_key)
+        self.browser_profile = self.profile_root / "browser-profile"
         self.current_file = self.root / "current.json"
         self._locked = False
         self._commit_state = "NOT_COMMITTED"

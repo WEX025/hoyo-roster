@@ -26,6 +26,7 @@ from .user_workspace import (
 
 MODULES = {game: f"hoyo_roster.games.{game}.cli" for game in GAMES}
 OPERATIONS = (
+    "discover",
     "init",
     "sync",
     "login",
@@ -76,10 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--game",
-        choices=tuple(GAMES),
-        help="genshin/zzz; hsr interface retained, temporarily unavailable, do not use hsr",
+        choices=(*GAMES, "all"),
+        help="genshin/zzz/all; omit UID to discover your owned roles after login; hsr is paused",
     )
-    parser.add_argument("--uid", help="your own UID; exact official Binding is required")
+    parser.add_argument(
+        "--uid",
+        help="optional for login/sync: discover owned UIDs when omitted; exact official Binding is required",
+    )
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument(
         "--storage-root",
@@ -157,6 +161,12 @@ def select_configuration(args):
 
 
 async def run(args) -> int:
+    if args.operation == "discover" or (args.uid is None and args.operation in {"login", "sync"}):
+        from .discovery import run_discovery
+
+        return await run_discovery(args)
+    if args.game == "all":
+        raise WorkspaceError("ARGUMENTS_INVALID")
     config, game, operation = select_configuration(args)
     candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
     store = LocalSnapshotStore(
@@ -261,6 +271,7 @@ async def run_locked(args, config, game, operation, store):
         repo_root=workspace,
         browser_profile=store.browser_profile,
         uid=config.uid(game),
+        expected_region=getattr(args, "discovered_region", None),
         headed=not args.headless,
         request_interval=2.0,
         login_check_only=operation == "login",
