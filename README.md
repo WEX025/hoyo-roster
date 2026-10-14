@@ -42,18 +42,18 @@ py -3.12 -m venv .venv
 
 离线 smoke 仅用新临时目录检查权限、锁、保存和恢复，不登录、不发短信，不访问已有结果或认证目录。Windows 安装失败或 smoke 失败时先停止，报告固定错误代码与平台；不要用管理员运行或放宽 ACL 绕过。真实验收顺序见[平台验收](docs/platform-support.md#本人-windows-验收)。
 
-首次使用可以省略 UID：`--game all` 在官方登录后发现本人原神和绝区零的受支持绑定，并逐身份核验、同步；不指定游戏时也执行这两个游戏。`--game genshin` / `--game zzz` 只发现对应游戏。`--operation discover` 只发现并保存本机角色选择，不采集角色数据。再次运行读取私有选择文件，但仍重新验证官方身份，选择文件不能证明会话有效。多个角色逐一处理，不默认挑选其中一个。星铁仍暂停。
+首次使用直接运行 `hoyo-roster`：先在官方页面登录，再自动发现本人原神和绝区零的 UID，并逐身份核验、同步；**无需提前查找、填写或提供 UID，Windows、macOS、Linux 使用同一流程。** `--game all` 与默认相同，`--game genshin` / `--game zzz` 只发现对应游戏。`--operation discover` 只发现并保存本机角色选择，不采集角色数据。再次运行读取私有选择文件，但仍重新验证官方身份，选择文件不能证明会话有效。多个角色逐一处理，不默认挑选其中一个。星铁仍暂停。
 
-也可显式指定 `--uid YOUR_UID`，将 `YOUR_UID` 替换为你自己的游戏 UID。UID 用于选择本机身份范围，是否属于当前登录账号仍须由官方账号绑定信息核验。
+`--uid` 仅是已有明确身份时的可选精确选择，也用于指定身份的离线检查/恢复，不是首次使用前置条件。即使显式提供 UID，是否属于当前登录账号仍须由官方账号绑定信息核验。
 
 `hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。新会话在 Windows 优先使用已安装的 Edge，在 macOS 优先使用已安装的 Chrome，Linux 使用 Playwright Chromium。首选浏览器缺失或首次启动失败时尝试 Chromium；Chromium 未安装则明确停止，请在同一虚拟环境运行 `python -m playwright install chromium`（Windows 用 `.\.venv\Scripts\python.exe -m playwright install chromium`）。程序不自动安装或覆盖系统浏览器，发行包也不包含 Chromium。
 
 每个身份使用工具专用的私有会话，不读取日常浏览器登录态。首次选定浏览器后保存选择，可见登录和无界面采集复用同一浏览器；已有会话启动失败、登录失效、验证码、身份冲突和限流都不自动换浏览器。旧的无选择标记 Profile 保留并停止，不自动迁移；新会话需显式使用新的 `--auth-root`，首次由本人登录。详见[本机使用指南](docs/local-use.md#浏览器选择和会话复用)。
 
 ```bash
-hoyo-roster --game zzz --uid YOUR_UID
-hoyo-roster --game genshin --uid YOUR_UID --operation login --login-method qr
-hoyo-roster --game genshin --uid YOUR_UID --operation inspect
+hoyo-roster
+hoyo-roster --game genshin --operation login --login-method qr
+hoyo-roster --game zzz --operation discover
 ```
 
 默认操作为同步。`--operation login` 只检查登录和精确身份，不采集角色；`--operation inspect` 检查本机数据状态。完整的首次使用、升级与恢复步骤见[本机使用指南](docs/local-use.md)。
@@ -67,7 +67,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation inspect
 可以用 `--login-method qr` 或 `--login-method phone` 选择方式，用 `--login-method cancel` 取消新登录。仅选择方式不等于已经允许登录；交互终端仍会询问。非交互调用需要先取得本人允许，再显式提供 `--non-interactive`、`--allow-login` 和登录方式，例如：
 
 ```bash
-hoyo-roster --game zzz --uid YOUR_UID --non-interactive --allow-login --login-method phone
+hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 ```
 
 `--allow-login` 只允许说明中的本机手动登录与会话复用，不替代本人确认官方协议，也不授予未知新权限。`--headless` 只适用于已登录且身份匹配的会话；需要新登录时会停止。

@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hoyo-roster",
         description=__doc__,
         epilog=(
+            "所有系统默认先登录，再自动发现本人 UID，无需预先填写。省略 --game 时处理原神和绝区零。"
             "崩坏：星穹铁道暂时无法获取，请不要使用；hsr 参数仅保留接口。"
             "原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，角色名单仍须闭合。"
             "绝区零已支持能力保留，详见 docs/data-format.md。"
@@ -78,11 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--game",
         choices=(*GAMES, "all"),
-        help="genshin/zzz/all; omit UID to discover your owned roles after login; hsr is paused",
+        help="选择 genshin/zzz/all；默认 all，登录后自动发现本人 UID；hsr 暂停",
     )
     parser.add_argument(
         "--uid",
-        help="optional for login/sync: discover owned UIDs when omitted; exact official Binding is required",
+        help="可选的精确身份选择；默认登录后自动发现，无需预先填写；仍须官方 Binding 核验",
     )
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument(

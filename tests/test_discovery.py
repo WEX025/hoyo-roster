@@ -16,6 +16,27 @@ from hoyo_roster.user_workspace import WorkspaceError
 from tests.test_login_flow import UID_A, UID_B, binding_payload, provider_for, coordinate
 
 
+@pytest.mark.parametrize("operation", ("sync", "login", "discover"))
+@pytest.mark.parametrize("game", (None, "all", "genshin", "zzz"))
+def test_public_entrypoint_discovers_before_requiring_uid(monkeypatch, operation, game):
+    calls = []
+
+    async def discover(args):
+        calls.append((args.game, args.uid, args.operation))
+        return 0
+
+    def forbidden_identity_selection(args):
+        pytest.fail("Default login/discovery must not require a supplied UID")
+
+    monkeypatch.setattr(discovery, "run_discovery", discover)
+    monkeypatch.setattr(cli, "select_configuration", forbidden_identity_selection)
+    argv = [] if operation == "sync" else ["--operation", operation]
+    if game is not None:
+        argv += ["--game", game]
+    assert cli.main(argv) == 0
+    assert calls == [(game, None, operation)]
+
+
 @pytest.mark.parametrize("game", discovery.SUPPORTED_GAMES)
 def test_discovery_uses_official_binding_after_login_without_uid(game, tmp_path, capsys):
     routine, context, page, gate = provider_for(

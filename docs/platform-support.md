@@ -47,14 +47,12 @@ smoke 只创建新临时根，运行真实 SID/DACL、身份 key、安全打开�
 然后由本人分别对原神与绝区零执行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID --operation init
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID --operation inspect
-.\.venv\Scripts\python.exe -m hoyo_roster --game zzz --uid YOUR_UID
-.\.venv\Scripts\python.exe -m hoyo_roster --game zzz --uid YOUR_UID --operation inspect
+.\.venv\Scripts\python.exe -m hoyo_roster --operation login
+.\.venv\Scripts\python.exe -m hoyo_roster
+.\.venv\Scripts\python.exe -m hoyo_roster --headless
 ```
 
-替换为本人各游戏 UID。需要新登录时应先看到权限说明与二维码/手机号/取消选择；本人完成扫码或手机号、协议确认和图片 CAPTCHA。确认主要阶段提示、准确身份核验、两次采集、SAVED/UNCHANGED、实际 CURRENT_RESULT 内容和字段限制。关闭程序后再次运行，核验会话复用；无变化应保留业务时间戳。不要上传结果、Profile、验证码、截图或完整路径。离线 smoke 通过后仍需这些真实端到端步骤，才讨论正式支持声明。此 PR 保持 draft，本轮不合并。
+首次先登录，由官方 Binding 自动发现本人 UID，不要求事先提供；这与 macOS/Linux 的公共入口一致。需要新登录时应先看到权限说明与二维码/手机号/取消选择；本人完成扫码或手机号、协议确认和图片 CAPTCHA。确认主要阶段提示、准确身份核验、两次采集、SAVED/UNCHANGED、实际 CURRENT_RESULT 内容和字段限制。关闭程序后再次运行，核验会话复用；无变化应保留业务时间戳。不要上传结果、Profile、验证码、截图或完整路径。离线 smoke 通过后仍需这些真实端到端步骤，才讨论正式支持声明。此 PR 保持 draft，本轮不合并。
 
 ## 本轮开发证据
 

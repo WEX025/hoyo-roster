@@ -4,7 +4,7 @@
 
 ## 首次使用
 
-直接运行 `hoyo-roster --game all` 可先在各游戏官方页面由本人登录，再发现该账号所有受支持国服绑定。省略游戏等同 all，原神/绝区零也可分别选择；星铁不登录、不采集。省略 UID 只用于 sync/login/discover，init/inspect/recover 等已有身份操作仍需要明确游戏/UID。`--operation discover` 不采集角色；指定 UID 时维持原有精确身份流程。
+所有 OS 首次使用都直接运行 `hoyo-roster`：先在各游戏官方页面由本人登录，再自动发现该账号所有受支持国服 UID，**不先询问或要求填写 UID**。省略游戏等同 `--game all`，原神/绝区零也可分别选择；星铁不登录、不采集。默认 sync/login/discover 都无需 UID；init/inspect/recover 等指定身份的离线维护仍需要明确游戏/UID。`--operation discover` 不采集角色；本人已有明确身份时可选 `--uid`，维持精确身份流程。
 
 首次发现用认证根内新 UUID 范围创建私有 Profile，浏览器确认关闭后才把本次新 Profile 放到首个发现身份的空目标中；已有目标不覆盖、不复制认证材料。其他角色使用各自独立会话，必要时本人另行登录。认证根 onboarding/selected-游戏.json 保存本机 UID/区服选择，私有权限保护、不在终端打印 UID，不证明登录或所有权；后续命令仍从官方 Binding 精确核验后才采集。默认命令复用这些选择；显式 discover 重新发现当前本人登录账号。失败/关闭不确定保留本次临时范围，不探索或清理旧会话。
 
@@ -19,9 +19,8 @@ POSIX 上，程序逐层把**新建应用目录**设为 0700，不修改已有�
 Windows 使用当前进程用户 SID 与 DACL 校验所有权和私有权限，不把 chmod/0600 当成 Windows 安全证据。新目录和文件创建时就给当前 SID 全权限并阻断其他 SID 的继承访问；Profile 根同样受保护。已有不安全根只拒绝，不修复其 ACL。clone 的公共 `data/` 容器只允许当前用户、SYSTEM、Administrators 写入，身份子目录仍须私有。路径各层的 reparse/junction 均拒绝。普通用户不需提权；详细边界见 [平台支持](platform-support.md)。
 
 ```bash
-hoyo-roster --game genshin --uid YOUR_UID --operation init
-hoyo-roster --game genshin --uid YOUR_UID --operation login
-hoyo-roster --game genshin --uid YOUR_UID
+hoyo-roster --game all --operation login
+hoyo-roster
 ```
 
 `init` 只在没有 current 时建立验证后的空工作区；已有有效 current 经预检后原样复用，不换代、不改文件或时间戳，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
@@ -33,7 +32,7 @@ hoyo-roster --game genshin --uid YOUR_UID
 非交互进程需登录时使用 `--non-interactive --login-method qr|phone --allow-login`；缺失方式报 `AUTHENTICATION_REQUIRED`，缺失允许报 `LOGIN_CONSENT_REQUIRED`，都在打开可执行认证的登录页面前停止。`--login-method cancel` 取消新登录。自动化调用者应先向本人展示本段说明并取得允许，再传入该标志；它不替代官方页面协议确认。
 
 ```bash
-hoyo-roster --game genshin --uid YOUR_UID --non-interactive --login-method qr --allow-login
+hoyo-roster --game genshin --non-interactive --login-method qr --allow-login
 ```
 
 通常直接使用正常同步命令：需登录时在同一浏览器完成登录，随后继续两次采集、验证和保存；不必先跑临时登录脚本。程序在确认需要本人参与且已取得允许后立即输出 `WAITING_FOR_USER`，再打开页面。已识别的官方普通面板/方式控件唯一且可见时自动点击一次：原神头像、米游社“登录”、SDK 模式 SVG 和“短信登录”标签。操作不包含退出账号、切换角色、协议、发码或 CAPTCHA；结构未知或短暂操控故障在入口等待约 15 秒后显示 `LOGIN_PANEL_MANUAL`，请本人在同一窗口打开/切换面板。点击结果不确定时不重复点击。
