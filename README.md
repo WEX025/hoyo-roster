@@ -26,6 +26,7 @@ cd hoyo-roster
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
+# 没有已安装的 Chrome、或需要 Chromium 备用时执行：
 python -m playwright install chromium
 hoyo-roster --game all
 ```
@@ -35,7 +36,6 @@ Windows PowerShell（验收 PR 时先切换到该 PR 分支；无需激活脚本
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
-.\.venv\Scripts\python.exe -m playwright install chromium
 .\.venv\Scripts\python.exe tools\platform_smoke.py
 .\.venv\Scripts\python.exe -m hoyo_roster --game all
 ```
@@ -46,7 +46,9 @@ py -3.12 -m venv .venv
 
 也可显式指定 `--uid YOUR_UID`，将 `YOUR_UID` 替换为你自己的游戏 UID。UID 用于选择本机身份范围，是否属于当前登录账号仍须由官方账号绑定信息核验。
 
-`hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。浏览器由 Playwright 单独安装，本项目发行包不包含 Chromium。
+`hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。新会话在 Windows 优先使用已安装的 Edge，在 macOS 优先使用已安装的 Chrome，Linux 使用 Playwright Chromium。首选浏览器缺失或首次启动失败时尝试 Chromium；Chromium 未安装则明确停止，请在同一虚拟环境运行 `python -m playwright install chromium`（Windows 用 `.\.venv\Scripts\python.exe -m playwright install chromium`）。程序不自动安装或覆盖系统浏览器，发行包也不包含 Chromium。
+
+每个身份使用工具专用的私有会话，不读取日常浏览器登录态。首次选定浏览器后保存选择，可见登录和无界面采集复用同一浏览器；已有会话启动失败、登录失效、验证码、身份冲突和限流都不自动换浏览器。旧的无选择标记 Profile 保留并停止，不自动迁移；新会话需显式使用新的 `--auth-root`，首次由本人登录。详见[本机使用指南](docs/local-use.md#浏览器选择和会话复用)。
 
 ```bash
 hoyo-roster --game zzz --uid YOUR_UID
@@ -122,7 +124,7 @@ hoyo-roster --game zzz --uid YOUR_UID --non-interactive --allow-login --login-me
 
 **页面开始倒计时，但没有收到短信怎么办？** 倒计时不能证明短信已送达。请本人查看官方页面提示；程序不会自动重发短信或代解验证码。
 
-**浏览器打不开，或提示会话目录正在使用怎么办？** 先确认 Chromium 已在同一虚拟环境安装，并检查本工具对应的浏览器是否仍在运行。不要删除正在使用的会话目录、锁或浏览器运行标记来绕过检查。错误代码与处理步骤见[本机使用指南](docs/local-use.md)。
+**浏览器打不开，或提示会话目录正在使用怎么办？** 检查本工具选定的 Edge/Chrome/Chromium 是否可用，若首次回退提示 Chromium 缺失，在同一虚拟环境安装它。检查本工具对应的浏览器是否仍在运行，不删除会话目录、锁或浏览器运行标记来绕过检查。错误代码与处理步骤见[本机使用指南](docs/local-use.md)。
 
 **保存失败或有恢复待办怎么办？** 保留当前数据、恢复日志和相关代际，先检查状态，再按[恢复步骤](docs/local-use.md#检查与恢复)操作。不要按目录名或 UUID 盲删数据，也不要删除身份标记来绕过保护。
 

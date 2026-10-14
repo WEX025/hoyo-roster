@@ -448,10 +448,9 @@ class LocalSnapshotStore:
             if not io.private(self.browser_profile, 0o700):
                 raise WorkspaceError("UNSAFE_BROWSER_PROFILE")
             # Browser must be closed; never remove live or stale singleton authority.
-            if any(
-                (self.browser_profile / name).is_symlink() or (self.browser_profile / name).exists()
-                for name in ("SingletonLock", "SingletonSocket", "SingletonCookie")
-            ):
+            from .browser_runtime import profile_in_use
+
+            if profile_in_use(self.browser_profile):
                 raise WorkspaceError("BROWSER_PROFILE_IN_USE_OR_STALE")
             remove_owned_tree(self.browser_profile)
         for path in (self.auth_root / "identity.key", self.auth_root / "verified-identity.json"):

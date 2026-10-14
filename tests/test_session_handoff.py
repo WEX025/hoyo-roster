@@ -405,6 +405,7 @@ def run_mock_process(storage, operation, headed):
     """
     from hoyo_roster.cli import main
     from hoyo_roster import platform_io as io
+    from hoyo_roster import browser_runtime
     from hoyo_roster.games.genshin import browser
     from hoyo_roster.request_gate import RequestGate
     from tests.test_direct_entrypoint import BusinessPage
@@ -466,6 +467,7 @@ def run_mock_process(storage, operation, headed):
             events.append("runtime-stop")
 
     browser.async_playwright = Runtime
+    browser_runtime.preferred_channel = lambda: "chromium"
 
     async def no_wait(self, **kwargs):
         return None
@@ -525,6 +527,7 @@ def test_persistent_close_finishes_before_runtime_stop(
     tmp_path, monkeypatch, game, close_failure, headed
 ):
     import importlib
+    from hoyo_roster import browser_runtime
 
     browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     events = []
@@ -547,7 +550,7 @@ def test_persistent_close_finishes_before_runtime_stop(
             from hoyo_roster.browser import chromium_profile_path
 
             assert kwargs["user_data_dir"] == chromium_profile_path(
-                io.filesystem_path(tmp_path / "profile")
+                io.filesystem_path(tmp_path / "profile" / "chromium")
             )
             assert kwargs["channel"] == "chromium"
             assert kwargs["headless"] is (not headed)
@@ -563,6 +566,7 @@ def test_persistent_close_finishes_before_runtime_stop(
             events.append("stop")
 
     monkeypatch.setattr(browser, "async_playwright", Runtime)
+    monkeypatch.setattr(browser_runtime, "preferred_channel", lambda: "chromium")
     if game == "zzz":
 
         async def new_page():

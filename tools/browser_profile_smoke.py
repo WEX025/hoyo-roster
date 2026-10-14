@@ -1,12 +1,14 @@
-"""Offline Chromium persistence control in new disposable synthetic Profiles."""
+"""Offline selected-browser persistence in new disposable synthetic Profiles."""
 
 import asyncio
+import argparse
 import importlib
 import hashlib
 import shutil
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from hoyo_roster import platform_io as io
 from hoyo_roster.cli import CONTRACT_ROOT
@@ -90,8 +92,15 @@ async def check():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--channel", choices=("auto", "chromium"), default="auto")
+    options = parser.parse_args()
     try:
-        asyncio.run(check())
+        if options.channel == "chromium":
+            with patch("hoyo_roster.browser_runtime.preferred_channel", return_value="chromium"):
+                asyncio.run(check())
+        else:
+            asyncio.run(check())
     except Exception:
         print("BROWSER_PROFILE_SMOKE=FAIL\nERROR_CODE=BROWSER_PROFILE_SMOKE_FAILED")
         raise SystemExit(1)

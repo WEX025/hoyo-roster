@@ -166,10 +166,9 @@ def adopt_new_profile(profile: Path, store: LocalSnapshotStore) -> bool:
     """Place only a newly created, closed onboarding profile; never overwrite one."""
     if not io.private(profile):
         raise WorkspaceError("UNSAFE_PRIVATE_DIRECTORY")
-    if any(
-        os.path.lexists(profile / name)
-        for name in ("SingletonLock", "SingletonSocket", "SingletonCookie")
-    ):
+    from .browser_runtime import profile_in_use
+
+    if profile_in_use(profile):
         raise WorkspaceError("USER_WORKSPACE_BUSY")
     io.check_components(store.browser_profile)
     if os.path.lexists(store.browser_profile):

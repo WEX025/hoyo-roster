@@ -8,7 +8,7 @@
 
 首次发现用认证根内新 UUID 范围创建私有 Profile，浏览器确认关闭后才把本次新 Profile 放到首个发现身份的空目标中；已有目标不覆盖、不复制认证材料。其他角色使用各自独立会话，必要时本人另行登录。认证根 onboarding/selected-游戏.json 保存本机 UID/区服选择，私有权限保护、不在终端打印 UID，不证明登录或所有权；后续命令仍从官方 Binding 精确核验后才采集。默认命令复用这些选择；显式 discover 重新发现当前本人登录账号。失败/关闭不确定保留本次临时范围，不探索或清理旧会话。
 
-按 README 安装 Python 3.12、项目和 Playwright Chromium。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
+按 README 安装 Python 3.12 和项目；浏览器选择及 Chromium 备用安装见下节。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
 
 `--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、认证 key/指纹、节流与认证锁按游戏/UID 隔离；不同结果根共用同一认证范围时仍由认证锁互斥。
 
@@ -47,6 +47,14 @@ hoyo-roster --game genshin --uid YOUR_UID --non-interactive --login-method qr --
 图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`。星铁暂时无法获取，请不要使用其保留的登录/采集接口。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
 
 面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入本人登录总预算 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
+
+## 浏览器选择和会话复用
+
+新会话按系统自动选择：Windows 优先已安装的 Edge（`msedge`），macOS 优先已安装的 Chrome（`chrome`），Linux 使用 Playwright Chromium（`chromium`）。不跟随默认浏览器设置，不支持系统 Safari。首选浏览器缺失或首次启动失败时，在接触官方页面前尝试 Chromium；未安装它会报 `BROWSER_UNAVAILABLE`，请在同一虚拟环境运行 `python -m playwright install chromium`。程序不自动下载，不安装或覆盖系统 Edge/Chrome。
+
+每个 `browser-profile/` 是私有会话容器，其中 `browser-choice.json` 保存版本和选定 channel，实际浏览器目录为 `browser-profile/<channel>/`。首次启动的失败目录和备用目录分离，不共享浏览器数据库或复制登录材料。启动前落盘选择；取消、启动结果不确定或持久化失败时保留目录并停止。选定后不随系统浏览器安装/默认设置变化而换浏览器，可见与无界面模式都使用同一个完整 channel。终端输出 `BROWSER_CHANNEL`，首次回退输出 `BROWSER_FALLBACK=CHROMIUM`。
+
+已有会话的选定浏览器不可用时停止，请恢复该浏览器后重试；登录失效、验证码、身份不匹配、风控和限流不触发备用浏览器。日常浏览器的 Profile 和登录态不复用。当前会话布局不迁移旧 Profile：无选择标记的非空目录、标记损坏或选定目录缺失报 `BROWSER_PROFILE_INVALID`，保留原目录。需要新会话时显式选择新的仓库外 `--auth-root`，由本人首次登录；不会为了启用系统浏览器探索、覆盖或清理旧认证根。
 
 ## 升级
 
@@ -125,6 +133,8 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 | `WORKSPACE_VALIDATOR_TIMEOUT` / `VALIDATOR_TIMEOUT` | 本机离线验证超时，保留 current 和恢复证据，检查环境后重试 |
 | `RECOVERY_REQUIRED` / 持久化未知 / residue | inspect 后按上节恢复；不随意删 UUID 目录 |
 | Chromium 缺失 | 在相同虚拟环境运行 `python -m playwright install chromium` |
+| `BROWSER_UNAVAILABLE` | 新会话的 Chromium 备用缺失时按上一行安装；已有选择时恢复所选 Edge/Chrome/Chromium，不自动切换 |
+| `BROWSER_PROFILE_INVALID` | 保留原目录，核对所选认证根；旧布局不迁移，新会话显式使用新的仓库外 `--auth-root` |
 
 ## 退出登录与卸载
 
@@ -132,6 +142,6 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 
 卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。
 
-可见登录与 `--headless` 会话复用使用同一个完整 Chromium channel，避免两个浏览器可执行文件混用同一 Profile。本轮 Mac 原生合成交接证据见 [Profile 验证记录](browser-profile-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。
+可见登录与 `--headless` 会话复用使用同一个已选定的完整浏览器 channel，避免两个浏览器混用同一 Profile。历史 Mac Chromium 合成交接证据见 [Profile 验证记录](browser-profile-validation.md)，系统浏览器选择验证见 [浏览器选择验证](browser-selection-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。
 
 本轮登录流程的公开静态证据、合成回归及真实验收边界见 [登录流程验证记录](login-workflow-validation.md)。

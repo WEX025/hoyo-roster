@@ -13,7 +13,7 @@ import re
 import uuid
 from pathlib import Path
 from .config import Settings
-from .errors import OperationError, LoginTimeout
+from .errors import OperationError, LoginTimeout, BrowserUnavailable, BrowserProfileInvalid
 from .progress import OPTIONS, LoginOptions, emit
 from .request_gate import RequestGate
 from .sync import OperationResult
@@ -275,7 +275,6 @@ async def run_locked(args, config, game, operation, store):
         headed=not args.headless,
         request_interval=2.0,
         login_check_only=operation == "login",
-        browser_channel="chromium",
         login_wait_seconds=args.login_timeout,
     )
     token = OPTIONS.set(
@@ -310,9 +309,13 @@ def main(argv: list[str] | None = None) -> int:
     except OperationError as error:
         if isinstance(error, LoginTimeout):
             emit("TIMEOUT")
-        print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示=检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
-        )
+        if isinstance(error, BrowserUnavailable):
+            hint = "恢复会话选定的浏览器；Chromium 缺失时，在同一虚拟环境执行 python -m playwright install chromium。"
+        elif isinstance(error, BrowserProfileInvalid):
+            hint = "保留原会话目录；旧布局不迁移。新会话需显式使用新的仓库外 --auth-root，并由本人首次登录。"
+        else:
+            hint = "检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
+        print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示={hint}")
         return 1
     except (KeyboardInterrupt, asyncio.CancelledError):
         emit("CANCELLED")

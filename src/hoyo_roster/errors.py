@@ -13,6 +13,14 @@ class DiagnosticProfileOverlap(ConfigurationError):
     code = "DIAGNOSTIC_PROFILE_OVERLAP"
 
 
+class BrowserUnavailable(ConfigurationError):
+    code = "BROWSER_UNAVAILABLE"
+
+
+class BrowserProfileInvalid(ConfigurationError):
+    code = "BROWSER_PROFILE_INVALID"
+
+
 class ContextNotReusable(OperationError):
     code = "BROWSER_CONTEXT_UNAVAILABLE"
 
