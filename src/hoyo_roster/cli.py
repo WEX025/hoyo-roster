@@ -126,6 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--run-id", help="owned candidate UUID for explicit cleanup")
     parser.add_argument(
+        "--resume-discovery",
+        help="reuse an explicitly selected owned, confirmed-closed discovery UUID; requires one game",
+    )
+    parser.add_argument(
         "--generation", help="verified generation UUID for recovery or non-current cleanup"
     )
     parser.add_argument("--version", action="version", version="0.1.0rc1")
@@ -172,6 +176,16 @@ def select_configuration(args):
 
 
 async def run(args) -> int:
+    if getattr(args, "resume_discovery", None) is not None and (
+        args.uid is not None
+        or args.game not in {"genshin", "zzz"}
+        or args.operation not in {"discover", "login", "sync"}
+    ):
+        raise WorkspaceError("INVALID_DISCOVERY_RESUME")
+    if getattr(args, "resume_discovery", None) is not None and (
+        getattr(args, "phone_stdin", False) or getattr(args, "allow_sms", False)
+    ):
+        raise WorkspaceError("DISCOVERY_RESUME_SMS_DISABLED")
     phone_stdin, allow_sms = getattr(args, "phone_stdin", False), getattr(args, "allow_sms", False)
     if phone_stdin != allow_sms or (
         phone_stdin
@@ -321,9 +335,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return asyncio.run(run(args))
     except WorkspaceError as error:
-        print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示=执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
-        )
+        hint = "执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
+        if str(error) == "DISCOVERY_PROFILE_CONFLICT":
+            hint = "新发现会话与已有身份会话均保留，未覆盖或继续登录；先核验已有身份会话，参阅 local-use 的发现恢复步骤。"
+        elif str(error) in {"DISCOVERY_RESUME_UNPROVEN", "DISCOVERY_RESUME_SMS_DISABLED"}:
+            hint = "保留发现范围；只能显式复用已获证且确认关闭的会话，不能沿用自动发码或忽略未知关闭状态，参阅 local-use。"
+        print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示={hint}")
         return 1
     except OperationError as error:
         if isinstance(error, LoginTimeout):
@@ -332,6 +349,8 @@ def main(argv: list[str] | None = None) -> int:
             hint = "恢复会话选定的浏览器；Chromium 缺失时，在同一虚拟环境执行 python -m playwright install chromium。"
         elif isinstance(error, BrowserProfileInvalid):
             hint = "保留原会话目录；旧布局不迁移。新会话需显式使用新的仓库外 --auth-root，并由本人首次登录。"
+        elif error.code == "REQUEST_SCHEDULE_INVALID":
+            hint = "持久节流时间超过等待预算；检查系统时钟并保留 request-state.json，不清零或删除来绕过节流。"
         else:
             hint = "检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
         print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示={hint}")

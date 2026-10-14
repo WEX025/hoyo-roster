@@ -2,9 +2,10 @@
 
 import asyncio
 import re
+from time import monotonic
 from urllib.parse import urljoin, urlsplit
 from playwright.async_api import Error as PlaywrightError
-from .errors import PhoneInputInvalid
+from .errors import LoginTimeout, PhoneInputInvalid
 from .login_ui import sdk_frame, visible_frames
 from .progress import emit
 from .terminal import read_terminal
@@ -52,8 +53,11 @@ class PhoneLoginAction:
             self.finished = True
             return
         await captcha_wait.ready(page, deadline)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise LoginTimeout("Official phone action deadline exceeded")
         try:
-            async with asyncio.timeout(2):
+            async with asyncio.timeout(min(2, remaining)):
                 frames = [frame for frame in await visible_frames(page) if sdk_frame(frame)]
                 if len(frames) != 1:
                     self.handoff()

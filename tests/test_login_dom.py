@@ -286,3 +286,36 @@ def test_hidden_sdk_challenge_cannot_pause_visible_window(capsys):
     asyncio.run(isolated(run, '<div class="geetest_panel">SYNTHETIC inactive challenge</div>'))
     output = capsys.readouterr().out
     assert "LOGIN_CONFIRMED" in output and "WAITING_FOR_MANUAL_CAPTCHA" not in output
+
+
+def test_late_sdk_control_stays_manual_after_handoff(monkeypatch):
+    from hoyo_roster import login_ui
+
+    clock = [0.0]
+    monkeypatch.setattr(login_ui, "monotonic", lambda: clock[0])
+
+    async def run(context, page, sent):
+        handed_off = asyncio.Event()
+        emit = login_ui.emit
+
+        def observe(code):
+            emit(code)
+            if code == "LOGIN_PANEL_MANUAL":
+                handed_off.set()
+
+        monkeypatch.setattr(login_ui, "emit", observe)
+        await page.goto(SDK)
+        task = asyncio.create_task(confirm_method_entry(page, "phone", deadline=20))
+        await asyncio.sleep(0.05)  # Establish the entry budget before advancing the clock.
+        clock[0] = 16
+        await asyncio.wait_for(handed_off.wait(), timeout=3)
+        # Entirely synthetic harness adds a late known SDK mode switch.
+        await page.evaluate("""()=>{window.switches=0;document.body.innerHTML=
+            '<div class="qr-login-page">pending</div><div class="qr-login-btn--wrapper">'
+            +'<svg width="32" height="32" onclick="switches++"><rect width="32" height="32"/></svg></div>'}""")
+        await asyncio.sleep(0.3)
+        assert await page.evaluate("switches") == 0 and sent == []
+        await page.evaluate("()=>document.body.insertAdjacentHTML('beforeend','<input id=mobile>')")
+        assert await asyncio.wait_for(task, timeout=3) is True
+
+    asyncio.run(isolated(run, "<div>Loading synthetic SDK</div>"))

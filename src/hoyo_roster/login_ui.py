@@ -205,9 +205,9 @@ async def confirm_method_entry(
     deadline: float | None = None,
     authenticated: Callable[[], Awaitable[bool]] | None = None,
     poll_interval: float = 0.2,
-) -> None:
+) -> bool:
     if method is None:
-        return
+        return False
     emit("WAITING_FOR_ENTRY")
     print(
         "程序打开普通登录面板并选择方式；扫码、手机号、验证码、协议阅读和确认由本人完成。",
@@ -235,7 +235,7 @@ async def confirm_method_entry(
         if authenticated is not None and monotonic() >= next_probe:
             if await authenticated():
                 emit("LOGIN_CONFIRMED")
-                return
+                return handed_off
             next_probe = monotonic() + max(0.2, poll_interval)
         try:
             async with asyncio.timeout(min(2.0, max(0.0, deadline - monotonic()))):
@@ -250,7 +250,7 @@ async def confirm_method_entry(
                     if ready:
                         print(f"LOGIN_METHOD={method.upper()}\nLOGIN_ENTRY=OBSERVED", flush=True)
                         emit("QR_READY" if method == "qr" else "WAITING_FOR_PHONE_AND_TERMS")
-                        return
+                        return handed_off
                     if (
                         method == "qr"
                         and await frame.get_by_text(
@@ -258,14 +258,16 @@ async def confirm_method_entry(
                         ).first.is_visible()
                     ):
                         emit("QR_SCANNED_WAIT_CONFIRM")
-                        return
+                        return handed_off
                     # SDK mode toggle is an SVG; the text is only a hover tooltip.
                     qr_mode = (
                         await frame.locator(".qr-login-page").first.is_visible()
                         or await frame.locator("img.qr-loaded").first.is_visible()
                     )
-                    if not toggled and (
-                        (method == "qr" and not qr_mode) or (method == "phone" and qr_mode)
+                    if (
+                        not handed_off
+                        and not toggled
+                        and ((method == "qr" and not qr_mode) or (method == "phone" and qr_mode))
                     ):
                         control = frame.locator(".qr-login-btn--wrapper svg")
                         if await control.count() == 1 and await control.is_visible():
@@ -273,13 +275,18 @@ async def confirm_method_entry(
                             emit("SELECTING_METHOD")
                             await control.click(timeout=1500)
                             continue
-                    if method == "phone" and not switched and not qr_mode:
+                    if not handed_off and method == "phone" and not switched and not qr_mode:
                         control = frame.get_by_text(re.compile("^短信登录$"))
                         if await control.count() == 1 and await control.is_visible():
                             switched = True
                             emit("SELECTING_METHOD")
                             await control.click(timeout=1500)
-                if not frames and not opened and panel_page(page, captcha_wait.game):
+                if (
+                    not handed_off
+                    and not frames
+                    and not opened
+                    and panel_page(page, captcha_wait.game)
+                ):
                     control = (
                         page.locator(".tw-fixed.tw-top-0 img.tw-cursor-pointer.tw-rounded-full")
                         if captcha_wait.game == "genshin"

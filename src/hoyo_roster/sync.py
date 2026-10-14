@@ -63,7 +63,9 @@ class BrowserCloseFailed(OperationError):
 
 
 @asynccontextmanager
-async def operation_browser[T](manager: AbstractAsyncContextManager[T]) -> AsyncIterator[T]:
+async def operation_browser[T](
+    manager: AbstractAsyncContextManager[T], *, on_closed: Callable[[], None] | None = None
+) -> AsyncIterator[T]:
     session = await manager.__aenter__()
     primary = None
     try:
@@ -91,5 +93,7 @@ async def operation_browser[T](manager: AbstractAsyncContextManager[T]) -> Async
             print("BROWSER_CLOSE=FAILED", flush=True)
             raise BrowserCloseFailed("Browser cleanup did not complete") from None
         print("BROWSER_CLOSE=CLOSED", flush=True)
+        if on_closed is not None:
+            await run_blocking(on_closed)
         if cancelled is not None:
             raise cancelled

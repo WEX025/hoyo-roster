@@ -39,11 +39,22 @@ class SmsReceiptWatch:
         self.context.on("response", self._response)
         self.context.on("requestfailed", self._failed)
 
+    def _record_error(self, error) -> None:
+        def priority(value):
+            if isinstance(value, (RiskControl, RateLimited)):
+                return 3
+            if isinstance(value, SmsRequestRejected):
+                return 2
+            return 1 if value is not None else 0
+
+        if priority(error) > priority(self.error):
+            self.error = error.with_traceback(None)
+
     def _request(self, request) -> None:
         if not sms_request(request):
             return
         if self.request is not None:
-            self.error = SmsRequestRejected("Repeated official SMS request observed")
+            self._record_error(SmsRequestRejected("Repeated official SMS request observed"))
             return
         self.request = request
         self.started = monotonic()
@@ -55,7 +66,7 @@ class SmsReceiptWatch:
 
     def _failed(self, request) -> None:
         if request is self.request:
-            self.error = SmsReceiptUnknown("Official SMS request transport failed")
+            self._record_error(SmsReceiptUnknown("Official SMS request transport failed"))
 
     async def _read_receipt(self, response) -> None:
         try:
@@ -84,16 +95,16 @@ class SmsReceiptWatch:
         except asyncio.CancelledError:
             raise
         except (RateLimited, RiskControl, SmsReceiptUnknown, SmsRequestRejected) as error:
-            self.error = error.with_traceback(None)
+            self._record_error(error)
         except Exception:
-            self.error = SmsReceiptUnknown("Official SMS receipt unavailable")
+            self._record_error(SmsReceiptUnknown("Official SMS receipt unavailable"))
 
     def check_protection(self) -> None:
         if isinstance(self.error, (RiskControl, RateLimited)):
             raise self.error
 
     def check(self) -> None:
-        # Called only after manual CAPTCHA clears and exact Binding has not succeeded.
+        # CAPTCHA disappearance/Binding success never overrides an observed SMS error.
         if self.error is not None:
             if isinstance(self.error, SmsReceiptUnknown):
                 emit("SMS_RECEIPT_UNKNOWN")
@@ -101,6 +112,18 @@ class SmsReceiptWatch:
         if self.started is not None and self.state is None and monotonic() - self.started >= 30:
             emit("SMS_RECEIPT_UNKNOWN")
             raise SmsReceiptUnknown("Official SMS receipt deadline exceeded")
+
+    async def finish(self, *, deadline: float) -> None:
+        """Resolve an observed request before claiming login success; never send/retry."""
+        while True:
+            self.check()
+            if self.request is None or self.state is not None:
+                return
+            remaining = min(deadline, self.started + 30) - monotonic()
+            if remaining <= 0:
+                self._record_error(SmsReceiptUnknown("Official SMS receipt remained unresolved"))
+                self.check()
+            await asyncio.sleep(min(0.05, remaining))
 
     async def close(self) -> None:
         for event, handler in (

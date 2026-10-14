@@ -31,6 +31,57 @@ from .user_workspace import (
 SUPPORTED_GAMES = ("genshin", "zzz")
 
 
+def mark_scope(scope: Path, game: str, state: str) -> None:
+    atomic_write_metadata(
+        scope / "discovery-state.json",
+        {
+            "authority": "hoyo-roster/discovery-v1",
+            "game": game,
+            "state": state,
+            "scope": hashlib.sha256(str(scope).encode()).hexdigest(),
+        },
+    )
+
+
+def resume_scope(parent: Path, game: str, run_id: str) -> Path:
+    """Only an explicit owned, confirmed-closed new scope; never search old profiles."""
+    try:
+        if str(uuid.UUID(run_id)) != run_id:
+            raise ValueError
+        scope = parent / run_id
+        io.check_components(scope)
+        if not scope.is_dir() or not io.private(scope):
+            raise ValueError
+        marker = load_metadata(scope / "discovery-state.json", private=True)
+        expected = {
+            "authority": "hoyo-roster/discovery-v1",
+            "game": game,
+            "state": "CLOSED",
+            "scope": hashlib.sha256(str(scope).encode()).hexdigest(),
+        }
+        if marker != expected:
+            raise ValueError
+        from .browser_runtime import profile_in_use, saved_channel
+
+        profile = scope / "browser-profile"
+        io.check_components(profile)
+        if not profile.is_dir() or not io.private(profile):
+            raise ValueError
+        channel = saved_channel(profile)
+        if channel is None:
+            raise ValueError
+        io.check_components(profile / channel)
+        if not (profile / channel).is_dir() or not io.private(profile / channel):
+            raise ValueError
+        if profile_in_use(profile):
+            raise WorkspaceError("USER_WORKSPACE_BUSY")
+        return scope
+    except WorkspaceError:
+        raise
+    except Exception:
+        raise WorkspaceError("DISCOVERY_RESUME_UNPROVEN") from None
+
+
 @dataclass(frozen=True, repr=False)
 class DiscoveredRole:
     game: str
@@ -206,7 +257,8 @@ async def discover_game(game, args, scope, source):
     async with operation_browser(
         browser.persistent_browser(
             repo_root=source, browser_profile=profile, headed=not args.headless
-        )
+        ),
+        on_closed=lambda: mark_scope(scope, game, "CLOSED"),
     ) as session:
         routine_class = (
             providers.GenshinLoginProvider if game == "genshin" else providers.ZzzLoginProvider
@@ -241,30 +293,49 @@ async def run_discovery(args) -> int:
     if not math.isfinite(args.login_timeout) or not 0 < args.login_timeout <= 3600:
         raise WorkspaceError("INVALID_LOGIN_TIMEOUT")
     games = SUPPORTED_GAMES if args.game in {None, "all"} else (args.game,)
+    resume_id = getattr(args, "resume_discovery", None)
+    if resume_id is not None and args.game not in SUPPORTED_GAMES:
+        raise WorkspaceError("INVALID_DISCOVERY_RESUME")
     parent = discovery_root(args.auth_root, CONTRACT_ROOT)
     failed = False
+    role_count = 0
     token = OPTIONS.set(options_from_args(args))
     try:
         with io.exclusive_lock(parent / "workspace.lock"):
             for game in games:
                 registry = parent / f"selected-{game}.json"
-                if args.operation != "discover" and os.path.lexists(registry):
+                if resume_id is None and args.operation != "discover" and os.path.lexists(registry):
                     roles = cached_roles(game, load_metadata(registry, private=True))
                     print(
                         f"GAME={game}\nDISCOVERY_SOURCE=LOCAL_SELECTION\nDISCOVERED_ROLES={len(roles)}",
                         flush=True,
                     )
-                    if await run_selected_roles(roles, args):
-                        failed = True
-                        break
-                    continue
+                    if roles:
+                        role_count += len(roles)
+                        if await run_selected_roles(roles, args):
+                            failed = True
+                            break
+                        continue
+                    print("DISCOVERY_SELECTION=EMPTY_RECHECK", flush=True)
                 print(f"GAME={game}\nOPERATION=discover", flush=True)
-                scope = private_directory(parent / str(uuid.uuid4()))
-                closed = False
+                scope = (
+                    resume_scope(parent, game, resume_id)
+                    if resume_id is not None
+                    else private_directory(parent / str(uuid.uuid4()))
+                )
+                mark_scope(scope, game, "OPEN")
+                cleanup_allowed = False
                 try:
                     profile, roles = await discover_game(game, args, scope, CONTRACT_ROOT)
-                    closed = True
+                    # discover_game returns only after actual close; also supports
+                    # deterministic test transports without reading profile contents.
+                    mark_scope(scope, game, "CLOSED")
                     print(f"DISCOVERED_ROLES={len(roles)}", flush=True)
+                    role_count += len(roles)
+                    if not roles:
+                        print("GAME_STATUS=NO_ROLES\nCOLLECTION_STATUS=NOT_COLLECTED", flush=True)
+                        cleanup_allowed = True
+                        continue
                     for index, role in enumerate(roles):
                         config = direct_configuration(
                             game, role.uid, storage_root=args.storage_root, auth_root=args.auth_root
@@ -278,7 +349,8 @@ async def run_discovery(args) -> int:
                         )
                         if index == 0:
                             with store.locked():
-                                adopt_new_profile(profile, store)
+                                if not adopt_new_profile(profile, store):
+                                    raise WorkspaceError("DISCOVERY_PROFILE_CONFLICT")
                     atomic_write_metadata(
                         registry,
                         {
@@ -287,21 +359,34 @@ async def run_discovery(args) -> int:
                             "roles": [{"uid": role.uid, "region": role.region} for role in roles],
                         },
                     )
+                    cleanup_allowed = True
                     if args.operation != "discover" and await run_selected_roles(roles, args):
                         failed = True
                 finally:
                     # A failed/uncertain browser close must preserve its new scope.
-                    if closed:
+                    if cleanup_allowed:
                         cleanup_new_scope(scope, parent)
                     else:
-                        print("DISCOVERY_SCOPE=RETAINED", flush=True)
+                        try:
+                            resume_scope(parent, game, scope.name)
+                            resumable = "AVAILABLE"
+                        except WorkspaceError:
+                            resumable = "UNPROVEN"
+                        print(
+                            f"DISCOVERY_SCOPE=RETAINED\nDISCOVERY_RUN_ID={scope.name}\nDISCOVERY_RESUME={resumable}",
+                            flush=True,
+                        )
                 if failed:
                     break
     finally:
         OPTIONS.reset(token)
     if args.game in {None, "all"}:
         print("GAME=hsr\nSTATUS=SKIPPED\nERROR_CODE=GAME_PAUSED", flush=True)
-    print(f"DISCOVERY_STATUS={'FAIL' if failed else 'PASS'}", flush=True)
+    status = "FAIL" if failed else "PASS" if role_count else "NO_ROLES"
+    print(f"DISCOVERY_STATUS={status}", flush=True)
+    if not role_count and args.operation != "discover":
+        print("ERROR_CODE=NO_OWNED_ROLES\nCOLLECTION_STATUS=NOT_COLLECTED", flush=True)
+        return 1
     return 1 if failed else 0
 
 
@@ -345,6 +430,7 @@ async def run_selected_roles(roles, args) -> int:
     for role in roles:
         selected = argparse.Namespace(**vars(args))
         selected.game, selected.uid = role.game, role.uid
+        selected.resume_discovery = None
         selected.discovered_region = role.region
         if await run(selected):
             return 1

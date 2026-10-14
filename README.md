@@ -56,6 +56,8 @@ hoyo-roster --game genshin --operation login --login-method qr
 hoyo-roster --game zzz --operation discover
 ```
 
+没有受支持角色时明确显示 NO_ROLES/NOT_COLLECTED；全部游戏无角色的同步不会报成功。发现中断与已有会话冲突的处理见[发现恢复](docs/local-use.md#发现中断与恢复)。
+
 默认操作为同步。`--operation login` 只检查登录和精确身份，不采集角色；`--operation inspect` 检查本机数据状态。完整的首次使用、升级与恢复步骤见[本机使用指南](docs/local-use.md)。
 
 ## 二维码与短信登录

@@ -293,7 +293,7 @@ async def coordinate_login(
 
         async def authenticated() -> bool:
             for watch in sms_watches:
-                watch.check_protection()
+                watch.check()
             async with asyncio.timeout(max(0.0, deadline - monotonic())):
                 observed = await _probe_coverage(
                     context=context, providers=providers, identities=identities
@@ -303,14 +303,15 @@ async def coordinate_login(
             success = LoginCoordinatorResult(
                 observed, True, waiting_signal_count
             ).available_coverage_success
-            if not success:
-                for watch in sms_watches:
-                    watch.check()
-            elif action is not None:
+            for watch in sms_watches:
+                watch.check()
+                if success:
+                    await watch.finish(deadline=deadline)
+            if success and action is not None:
                 action.authenticated()
             return success
 
-        await confirm_method_entry(
+        manual = await confirm_method_entry(
             login_page,
             method,
             captcha_wait=captcha_wait,
@@ -318,17 +319,22 @@ async def coordinate_login(
             authenticated=authenticated,
             poll_interval=poll_interval,
         )
+        if manual and action is not None:
+            action.handoff()
 
     try:
-        for provider, identity in zip(providers, identities, strict=True):
-            if identity.available:
-                emit("INITIALIZING_SESSION")
-                await provider.initialize_session()
-        coverage = await _probe_coverage(
-            context=context,
-            providers=providers,
-            identities=identities,
-        )
+        # Existing-session bootstrap, its throttle, and the initial Binding share
+        # one bounded budget. Human consent/selection is a separate cancellable wait.
+        async with asyncio.timeout(min(30.0, timeout)):
+            for provider, identity in zip(providers, identities, strict=True):
+                if identity.available:
+                    emit("INITIALIZING_SESSION")
+                    await provider.initialize_session()
+            coverage = await _probe_coverage(
+                context=context,
+                providers=providers,
+                identities=identities,
+            )
         for item in coverage:
             print(f"SESSION_BINDING={item.status.value}", flush=True)
         if initial_coverage_callback is not None:
@@ -357,7 +363,7 @@ async def coordinate_login(
                 for login_page, captcha_wait in login_waits:
                     await captcha_wait.ready(login_page, deadline)
                 for watch in sms_watches:
-                    watch.check_protection()
+                    watch.check()
                 for action in phone_actions:
                     await action.step(
                         action.page, captcha_wait=action.captcha_wait, deadline=deadline
@@ -371,6 +377,10 @@ async def coordinate_login(
                 if any(item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage):
                     raise WrongAccount("login coverage did not match the expected account")
                 observed = LoginCoordinatorResult(coverage, True, waiting_signal_count)
+                for watch in sms_watches:
+                    watch.check()
+                    if observed.available_coverage_success:
+                        await watch.finish(deadline=deadline)
                 if observed.available_coverage_success:
                     emit("VERIFYING_IDENTITY")
                     result = observed
