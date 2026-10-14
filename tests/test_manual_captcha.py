@@ -43,7 +43,10 @@ def install_challenge(page, states, *, on_read=lambda: None):
         on_read()
         return states.popleft() if states else False
 
-    page.locator = lambda selector: VisibleLocator(read)
+    original = page.locator
+    page.locator = lambda selector: (
+        VisibleLocator(read) if "geetest" in selector else original(selector)
+    )
 
 
 @pytest.fixture
@@ -134,7 +137,7 @@ def test_repeated_challenge_pauses_real_binding_and_keeps_exact_identity(
         target = getattr(provider, "_login_page", None) or page
         install_challenge(
             target,
-            [False, True, True, False, True, True, False],
+            [True, True, False, True, True, False],
             on_read=lambda: reads.append(context.request.count),
         )
 
@@ -157,7 +160,7 @@ def test_repeated_challenge_pauses_real_binding_and_keeps_exact_identity(
     finally:
         OPTIONS.reset(token)
         provider_type.prepare_login_or_session = original_class
-    assert reads == [1, 1, 1, 1, 2, 2, 2]
+    assert reads == [1, 1, 1, 2, 2, 2]
     assert context.request.count == 3
     assert tree_digest(root / "data") == before
     output = capsys.readouterr().out

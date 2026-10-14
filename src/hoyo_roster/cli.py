@@ -13,7 +13,7 @@ import re
 import uuid
 from pathlib import Path
 from .config import Settings
-from .errors import OperationError, LoginTimeout
+from .errors import OperationError, LoginTimeout, BrowserUnavailable, BrowserProfileInvalid
 from .progress import OPTIONS, LoginOptions, emit
 from .request_gate import RequestGate
 from .sync import OperationResult
@@ -26,6 +26,7 @@ from .user_workspace import (
 
 MODULES = {game: f"hoyo_roster.games.{game}.cli" for game in GAMES}
 OPERATIONS = (
+    "discover",
     "init",
     "sync",
     "login",
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hoyo-roster",
         description=__doc__,
         epilog=(
+            "所有系统默认先登录，再自动发现本人 UID，无需预先填写。省略 --game 时处理原神和绝区零。"
             "崩坏：星穹铁道暂时无法获取，请不要使用；hsr 参数仅保留接口。"
             "原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，角色名单仍须闭合。"
             "绝区零已支持能力保留，详见 docs/data-format.md。"
@@ -76,10 +78,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--game",
-        choices=tuple(GAMES),
-        help="genshin/zzz; hsr interface retained, temporarily unavailable, do not use hsr",
+        choices=(*GAMES, "all"),
+        help="选择 genshin/zzz/all；默认 all，登录后自动发现本人 UID；hsr 暂停",
     )
-    parser.add_argument("--uid", help="your own UID; exact official Binding is required")
+    parser.add_argument(
+        "--uid",
+        help="可选的精确身份选择；默认登录后自动发现，无需预先填写；仍须官方 Binding 核验",
+    )
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument(
         "--storage-root",
@@ -102,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--login-timeout",
         type=float,
         default=900,
-        help="each login wait phase limit in seconds, including manual CAPTCHA (default: 900)",
+        help="total human login budget in seconds, including panel and manual CAPTCHA (default: 900)",
     )
     parser.add_argument(
         "--headless",
@@ -157,6 +162,12 @@ def select_configuration(args):
 
 
 async def run(args) -> int:
+    if args.operation == "discover" or (args.uid is None and args.operation in {"login", "sync"}):
+        from .discovery import run_discovery
+
+        return await run_discovery(args)
+    if args.game == "all":
+        raise WorkspaceError("ARGUMENTS_INVALID")
     config, game, operation = select_configuration(args)
     candidate = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
     store = LocalSnapshotStore(
@@ -261,10 +272,10 @@ async def run_locked(args, config, game, operation, store):
         repo_root=workspace,
         browser_profile=store.browser_profile,
         uid=config.uid(game),
+        expected_region=getattr(args, "discovered_region", None),
         headed=not args.headless,
         request_interval=2.0,
         login_check_only=operation == "login",
-        browser_channel="chromium",
         login_wait_seconds=args.login_timeout,
     )
     token = OPTIONS.set(
@@ -299,9 +310,13 @@ def main(argv: list[str] | None = None) -> int:
     except OperationError as error:
         if isinstance(error, LoginTimeout):
             emit("TIMEOUT")
-        print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示=检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
-        )
+        if isinstance(error, BrowserUnavailable):
+            hint = "恢复会话选定的浏览器；Chromium 缺失时，在同一虚拟环境执行 python -m playwright install chromium。"
+        elif isinstance(error, BrowserProfileInvalid):
+            hint = "保留原会话目录；旧布局不迁移。新会话需显式使用新的仓库外 --auth-root，并由本人首次登录。"
+        else:
+            hint = "检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
+        print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示={hint}")
         return 1
     except (KeyboardInterrupt, asyncio.CancelledError):
         emit("CANCELLED")

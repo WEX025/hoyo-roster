@@ -20,10 +20,21 @@ from hoyo_roster.user_workspace import LocalSnapshotStore, direct_configuration
 
 
 def check() -> None:
-    with tempfile.TemporaryDirectory(prefix="hoyo-platform-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="hoyo-platform-", dir=io.filesystem_path(Path(tempfile.gettempdir()))
+    ) as temporary:
         root = Path(temporary).resolve()
         result, auth = root / "results", root / "auth"
-        config = direct_configuration("genshin", "123456789", storage_root=result, auth_root=auth)
+
+        # The public selector rejects user-supplied device namespaces; these roots
+        # were generated here and acquire their extended form only inside storage.
+        def ordinary(path):
+            value = str(path)
+            return Path(value[4:]) if os.name == "nt" and value.startswith("\\\\?\\") else path
+
+        config = direct_configuration(
+            "genshin", "123456789", storage_root=ordinary(result), auth_root=ordinary(auth)
+        )
         store = LocalSnapshotStore(
             CONTRACT_ROOT, config, "genshin", candidate_policy=candidate_policy()
         )
@@ -87,9 +98,9 @@ except portalocker.exceptions.LockException:
             "--uid",
             "123456789",
             "--storage-root",
-            str(result),
+            str(ordinary(result)),
             "--auth-root",
-            str(auth),
+            str(ordinary(auth)),
             "--operation",
             "inspect",
         ]

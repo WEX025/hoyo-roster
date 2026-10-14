@@ -16,12 +16,22 @@ from .errors import (
 )
 from .progress import OPTIONS
 
+
+def chromium_profile_path(profile) -> str:
+    # Keep extended paths for protected filesystem I/O, but Chromium's Windows
+    # cookie persistence requires an ordinary drive-letter user-data-dir.
+    value = str(profile)
+    if value.startswith("\\\\?\\") and len(profile.drive) == 6 and profile.drive[5] == ":":
+        return value[4:]
+    return value
+
+
 type BrowserContextAccess = BrowserContext
 
 
 def login_timeout() -> float:
     options = OPTIONS.get()
-    return options.timeout if options else 900
+    return min(30.0, options.timeout) if options else 30.0
 
 
 async def navigate_login_page(page: Page, url: str) -> None:

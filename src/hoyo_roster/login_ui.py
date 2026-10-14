@@ -3,6 +3,8 @@
 import asyncio
 import re
 import sys
+from collections.abc import Awaitable, Callable
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from time import monotonic
 from playwright.async_api import Error as PlaywrightError
@@ -40,6 +42,20 @@ CAPTCHA_INSTRUCTION = re.compile(
 )
 
 
+async def visible_frames(page):
+    """Hidden SDK frames cannot provide visible controls/challenges in the window."""
+    result = []
+    for frame in page.frames:
+        ancestor = frame
+        while ancestor.parent_frame is not None:
+            if not await (await ancestor.frame_element()).is_visible():
+                break
+            ancestor = ancestor.parent_frame
+        else:
+            result.append(frame)
+    return result
+
+
 @dataclass
 class ManualCaptchaWait:
     game: str | None = None
@@ -63,7 +79,7 @@ class ManualCaptchaWait:
             try:
                 visible = False
                 async with asyncio.timeout(min(2.0, remaining)):
-                    for frame in getattr(page, "frames", (page,)):
+                    for frame in await visible_frames(page):
                         if (
                             await frame.locator(CAPTCHA_SELECTOR).first.is_visible()
                             or await frame.get_by_text(CAPTCHA_INSTRUCTION).first.is_visible()
@@ -74,7 +90,10 @@ class ManualCaptchaWait:
             except (TimeoutError, PlaywrightTimeoutError):
                 self._control_retry()
             except PlaywrightError as error:
-                if any(marker in str(error) for marker in ("errAETimeout", "timeoutReached")):
+                if any(
+                    marker in str(error)
+                    for marker in ("errAETimeout", "timeoutReached", "detached", "destroyed")
+                ):
                     self._control_retry()
                 else:
                     raise LoginControlUnavailable("Official CAPTCHA control unavailable") from None
@@ -145,27 +164,61 @@ async def choose_method() -> str | None:
     return options.method
 
 
+def sdk_frame(frame) -> bool:
+    """Only the documented mainland login SDK may supply authentication controls."""
+    parsed = urlparse(frame.url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "user.mihoyo.com"
+        and parsed.port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path.startswith("/login-platform/")
+    )
+
+
+def panel_page(page, game: str | None) -> bool:
+    parsed = urlparse(page.url)
+    expected = {
+        "genshin": ("act.mihoyo.com", "/ys/event/calculator/"),
+        "zzz": ("www.miyoushe.com", "/zzz/"),
+    }.get(game)
+    return (
+        expected is not None
+        and parsed.scheme == "https"
+        and parsed.hostname == expected[0]
+        and parsed.port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path.startswith(expected[1])
+    )
+
+
 async def confirm_method_entry(
-    page, method: str | None, *, captcha_wait: ManualCaptchaWait | None = None
+    page,
+    method: str | None,
+    *,
+    captcha_wait: ManualCaptchaWait | None = None,
+    deadline: float | None = None,
+    authenticated: Callable[[], Awaitable[bool]] | None = None,
+    poll_interval: float = 0.2,
 ) -> None:
     if method is None:
         return
     emit("WAITING_FOR_ENTRY")
     print(
-        "请本人打开官方登录面板，并选择"
-        + ("二维码" if method == "qr" else "手机号/短信验证码")
-        + "；手机号、验证码、扫码、协议阅读和确认均在官方页面完成。",
+        "程序打开普通登录面板并选择方式；扫码、手机号、验证码、协议阅读和确认由本人完成。",
         flush=True,
     )
-    pattern = re.compile(
-        "扫码登录|二维码登录|扫描二维码|扫码进行登录"
-        if method == "qr"
-        else "手机号|手机验证码|短信登录|验证码登录"
-    )
     options = OPTIONS.get()
-    deadline = monotonic() + (options.timeout if options else 900)
+    if deadline is None:
+        deadline = monotonic() + (options.timeout if options else 900)
     captcha_wait = captcha_wait or ManualCaptchaWait()
     control_failed = False
+    opened = switched = toggled = handed_off = False
+    next_probe = 0.0
+    # An unknown UI gets a timely human handoff, never repeated blind clicks.
+    handoff_at = monotonic() + min(15.0, max(0.0, deadline - monotonic()))
     while True:
         if page.is_closed():
             raise LoginControlUnavailable("Official login page closed; reopen the command")
@@ -175,24 +228,84 @@ async def confirm_method_entry(
                 raise LoginControlUnavailable("Official login entry control timed out")
             raise LoginTimeout("Selected official entry was not observed before deadline")
         await captcha_wait.ready(page, deadline)
-        remaining = deadline - monotonic()
+        # Binding outranks disappeared/replaced UI after login, but never runs during CAPTCHA.
+        if authenticated is not None and monotonic() >= next_probe:
+            if await authenticated():
+                emit("LOGIN_CONFIRMED")
+                return
+            next_probe = monotonic() + max(0.2, poll_interval)
         try:
-            # Read visibility only; never inspect credentials or automate authentication.
-            async with asyncio.timeout(min(2.0, remaining)):
-                for frame in getattr(page, "frames", (page,)):
-                    if await frame.get_by_text(pattern).first.is_visible():
+            async with asyncio.timeout(min(2.0, max(0.0, deadline - monotonic()))):
+                frames = [frame for frame in await visible_frames(page) if sdk_frame(frame)]
+                for frame in frames:
+                    ready = (
+                        await frame.locator("img.qr-loaded").first.is_visible()
+                        and not await frame.locator(".qr-expired").first.is_visible()
+                        if method == "qr"
+                        else await frame.locator("input#mobile").first.is_visible()
+                    )
+                    if ready:
                         print(f"LOGIN_METHOD={method.upper()}\nLOGIN_ENTRY=OBSERVED", flush=True)
+                        emit("QR_READY" if method == "qr" else "WAITING_FOR_PHONE_AND_TERMS")
                         return
+                    if (
+                        method == "qr"
+                        and await frame.get_by_text(
+                            re.compile("扫码成功|请在手机上点击")
+                        ).first.is_visible()
+                    ):
+                        emit("QR_SCANNED_WAIT_CONFIRM")
+                        return
+                    # SDK mode toggle is an SVG; the text is only a hover tooltip.
+                    qr_mode = (
+                        await frame.locator(".qr-login-page").first.is_visible()
+                        or await frame.locator("img.qr-loaded").first.is_visible()
+                    )
+                    if not toggled and (
+                        (method == "qr" and not qr_mode) or (method == "phone" and qr_mode)
+                    ):
+                        control = frame.locator(".qr-login-btn--wrapper svg")
+                        if await control.count() == 1 and await control.is_visible():
+                            toggled = True  # uncertain click is never automatically repeated
+                            emit("SELECTING_METHOD")
+                            await control.click(timeout=1500)
+                            continue
+                    if method == "phone" and not switched and not qr_mode:
+                        control = frame.get_by_text(re.compile("^短信登录$"))
+                        if await control.count() == 1 and await control.is_visible():
+                            switched = True
+                            emit("SELECTING_METHOD")
+                            await control.click(timeout=1500)
+                if not frames and not opened and panel_page(page, captcha_wait.game):
+                    control = (
+                        page.locator(".tw-fixed.tw-top-0 img.tw-cursor-pointer.tw-rounded-full")
+                        if captcha_wait.game == "genshin"
+                        else page.get_by_text(re.compile("^登录$"))
+                    )
+                    if await control.count() == 1 and await control.is_visible():
+                        opened = True
+                        emit("OPENING_LOGIN_PANEL")
+                        await control.click(timeout=1500)
             control_failed = False
         except (TimeoutError, PlaywrightTimeoutError):
             if not control_failed:
                 emit("CONTROL_RETRY")
             control_failed = True
         except PlaywrightError as error:
-            if any(marker in str(error) for marker in ("errAETimeout", "timeoutReached")):
-                if not control_failed:
-                    emit("CONTROL_RETRY")
-                control_failed = True
-            else:
+            if page.is_closed():
+                raise LoginControlUnavailable(
+                    "Official login page closed; reopen the command"
+                ) from None
+            # Navigation may detach the old SDK frame after successful login.
+            if not any(
+                marker in str(error)
+                for marker in ("errAETimeout", "timeoutReached", "detached", "destroyed")
+            ):
                 raise LoginControlUnavailable("Official login entry control unavailable") from None
+            if not control_failed:
+                emit("CONTROL_RETRY")
+            control_failed = True
+        if not handed_off and monotonic() >= handoff_at:
+            emit("LOGIN_PANEL_MANUAL")
+            handed_off = True
         await asyncio.sleep(min(0.2, max(0, deadline - monotonic())))

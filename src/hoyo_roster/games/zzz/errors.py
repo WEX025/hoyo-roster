@@ -13,10 +13,6 @@ class ConfigurationError(SyncError):
     code = "CONFIGURATION_ERROR"
 
 
-class UidRequiredError(ConfigurationError):
-    code = "UID_REQUIRED"
-
-
 class LoginRequired(SyncError):
     code = "LOGIN_REQUIRED"
 

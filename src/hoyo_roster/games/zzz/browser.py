@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hoyo_roster.browser import navigate_login_page
+from hoyo_roster.browser_runtime import launch_profile
 from hoyo_roster.config import (
     resolve_private_profile_path,
 )
@@ -24,14 +25,10 @@ from playwright.async_api import (
     Request,
     async_playwright,
 )
-from playwright.async_api import (
-    Error as PlaywrightError,
-)
 
 from .errors import ConfigurationError, LoginRequired, RiskControlError
 
 MIYOUSHE_ZZZ_URL = "https://www.miyoushe.com/zzz/"
-CHROMIUM_INSTALL_COMMAND = "python -m playwright install chromium"
 _CAPTURED_RPC_HEADERS = (
     "x-rpc-device_id",
     "x-rpc-device_fp",
@@ -52,8 +49,8 @@ def _assert_diagnostic_profile_authority(candidate: Path) -> Path:
 def resolve_browser_profile(repo_root: Path, browser_profile: Path) -> Path:
     """Create a private real directory outside the repository."""
 
-    root = repo_root.expanduser().resolve()
-    profile = browser_profile.expanduser().absolute()
+    root = io.filesystem_path(repo_root).resolve()
+    profile = io.filesystem_path(browser_profile)
     _assert_diagnostic_profile_authority(profile)
     if os.path.lexists(profile):
         try:
@@ -115,23 +112,7 @@ async def persistent_browser(
     playwright = await async_playwright().start()
     context: BrowserContext | None = None
     try:
-        if not Path(playwright.chromium.executable_path).is_file():
-            raise ConfigurationError(
-                f"Playwright Chromium is not installed; run: {CHROMIUM_INSTALL_COMMAND}"
-            )
-        try:
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                headless=not headed,
-                accept_downloads=False,
-            )
-        except PlaywrightError as exc:
-            message = str(exc).lower()
-            if "executable doesn't exist" in message or "executable does not exist" in message:
-                raise ConfigurationError(
-                    f"Playwright Chromium is not installed; run: {CHROMIUM_INSTALL_COMMAND}"
-                ) from None
-            raise ConfigurationError("Playwright Chromium failed to start") from None
+        context = await launch_profile(playwright, profile, headed=headed)
         page = context.pages[0] if context.pages else await context.new_page()
         session = BrowserSession(
             playwright=playwright,

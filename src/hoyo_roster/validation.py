@@ -27,7 +27,11 @@ def run_validator(
         command = [sys.executable, str(validator), "--root", str(root)]
         if scope_game is not None:
             command.extend(("--scope-game", scope_game))
-        result = subprocess.run(command, cwd=root, capture_output=True, check=False, timeout=90)
+        # Windows CreateProcess rejects a long extended-path working directory.
+        # All validator paths are absolute; use the known interpreter directory.
+        result = subprocess.run(
+            command, cwd=Path(sys.executable).parent, capture_output=True, check=False, timeout=90
+        )
     except subprocess.TimeoutExpired:
         raise ValidationFailure(
             "VALIDATOR_TIMEOUT", hashlib.sha256(b"validator-timeout").hexdigest()

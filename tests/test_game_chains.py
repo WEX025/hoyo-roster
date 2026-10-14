@@ -296,6 +296,10 @@ def test_actual_game_chain_twice_and_noop(
         (repo / ".git").mkdir(parents=True)
         root = repo / "data"
         root.mkdir(mode=0o755)
+        from hoyo_roster import platform_io as io
+
+        if io.WINDOWS:
+            io.set_private(root)
         (root / ".gitkeep").touch()
         monkeypatch.setattr(paths, "project_repository", lambda: repo)
     argv = [

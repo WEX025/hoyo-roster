@@ -21,7 +21,6 @@ from .errors import (
     AuthenticationError,
     ConfigurationError,
     SnapshotConsistencyError,
-    UidRequiredError,
 )
 from .ids import parse_api_character_id, parse_bangboo_id, parse_character_id, parse_role_uid
 from .pagination import (
@@ -147,9 +146,10 @@ class CollectedState:
     completeness: CompletenessEvidence
 
 
-def select_role(binding: Mapping[str, Any], uid: str | None) -> Role:
-    """Select one nap_cn role, never defaulting among multiple accounts."""
+def select_role(binding: Mapping[str, Any], uid: str) -> Role:
+    """Verify one resolved identity; onboarding discovers all owned roles separately."""
 
+    selected_uid = parse_role_uid(uid, error_type=ConfigurationError)
     raw_roles = _sequence(binding.get("list"), label="binding list")
     roles: list[Role] = []
     for raw_role in raw_roles:
@@ -174,15 +174,10 @@ def select_role(binding: Mapping[str, Any], uid: str | None) -> Role:
         roles.append(Role(role_uid, server, nickname, level))
     if not roles:
         raise ConfigurationError("no nap_cn role is available for the logged-in account")
-    if uid is None and len(roles) > 1:
-        raise UidRequiredError("--uid is required when multiple nap_cn roles are present")
-    if uid is not None:
-        selected_uid = parse_role_uid(uid, error_type=ConfigurationError)
-        matches = [role for role in roles if role.uid == selected_uid]
-        if len(matches) != 1:
-            raise ConfigurationError("--uid did not match exactly one nap_cn role")
-        return matches[0]
-    return roles[0]
+    matches = [role for role in roles if role.uid == selected_uid]
+    if len(matches) != 1:
+        raise ConfigurationError("resolved identity did not match exactly one nap_cn role")
+    return matches[0]
 
 
 class EndpointClient:
@@ -295,7 +290,7 @@ class EndpointClient:
         self,
         binding: Mapping[str, Any],
         *,
-        uid: str | None,
+        uid: str,
     ) -> CollectedState:
         """Run one complete serial business pass from its own binding response."""
 

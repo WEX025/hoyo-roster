@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from hoyo_roster.browser import navigate_login_page
+from hoyo_roster.browser_runtime import launch_profile
 from hoyo_roster.config import (
     resolve_private_profile_path,
 )
@@ -29,7 +30,6 @@ from playwright.async_api import (
     Response,
     async_playwright,
 )
-from playwright.async_api import Error as PlaywrightError
 
 from .endpoint_specs import BINDING, CULTIVATION_LIST
 from .errors import (
@@ -45,7 +45,6 @@ from .errors import (
 )
 
 CALCULATOR_URL = "https://act.mihoyo.com/ys/event/calculator/index.html#/character"
-CHROMIUM_INSTALL_COMMAND = "python -m playwright install chromium"
 RISK_RETCODES = {1034, 10035}
 AUTH_RETCODES = {-100, -101, 10001}
 _RISK_CONTROL_MARKERS = ("验证码", "设备验证", "风险验证", "captcha", "geetest")
@@ -64,8 +63,8 @@ def _assert_diagnostic_profile_authority(candidate: Path) -> Path:
 
 
 def resolve_browser_profile(repo_root: Path, value: Path) -> Path:
-    root = repo_root.expanduser().resolve()
-    profile = value.expanduser().absolute()
+    root = io.filesystem_path(repo_root).resolve()
+    profile = io.filesystem_path(value)
     _assert_diagnostic_profile_authority(profile)
     if os.path.lexists(profile):
         metadata = profile.lstat()
@@ -104,24 +103,9 @@ async def persistent_browser(
     playwright = await async_playwright().start()
     context: BrowserContext | None = None
     try:
-        if not Path(playwright.chromium.executable_path).is_file():
-            raise ConfigurationError(
-                f"Playwright Chromium is not installed; run: {CHROMIUM_INSTALL_COMMAND}"
-            )
-        try:
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                headless=not headed,
-                accept_downloads=False,
-                args=["--restore-last-session"],
-            )
-        except PlaywrightError as error:
-            lowered = str(error).lower()
-            if "executable doesn't exist" in lowered or "executable does not exist" in lowered:
-                raise ConfigurationError(
-                    f"Playwright Chromium is not installed; run: {CHROMIUM_INSTALL_COMMAND}"
-                ) from None
-            raise ConfigurationError("Playwright Chromium failed to start") from None
+        context = await launch_profile(
+            playwright, profile, headed=headed, args=("--restore-last-session",)
+        )
         page = context.pages[0] if context.pages else await context.new_page()
         yield BrowserSession(playwright, context, page, headed)
     finally:

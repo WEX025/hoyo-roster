@@ -1,6 +1,8 @@
 # 平台适配与验收边界
 
-本分支基线为 main `0c2a3a7a39474ef80ecc07cec911e9d8c04f1832`。一套游戏采集、验证与代际恢复状态机，平台分支只在薄 I/O 层。**Windows 尚待本人实机端到端验收；不要宣布跨平台正式可用。** 星铁仍暂停；原神仍不含圣遗物与完整面板。
+下文保留此前平台适配验收记录；当前系统浏览器策略及 Windows Edge/Chromium 原生离线证据见[浏览器选择验证](browser-selection-validation.md)。系统浏览器真实账号验收仍需另行完成，不能由历史 Chromium 结果推断。
+
+以下平台适配阶段快照的基线为 main `0c2a3a7a39474ef80ecc07cec911e9d8c04f1832`，当时 Windows 本人实机端到端仍待验收。当前 Windows Chromium 的本人真实流程曾通过，Edge 仅有原生离线证据，默认系统浏览器真实流程仍待验收，不能宣布跨平台正式可用。一套游戏采集、验证与代际恢复状态机保留，平台 I/O 与共享浏览器选择各有独立边界。星铁仍暂停；原神仍不含圣遗物与完整面板。
 
 ## 目录与权限
 
@@ -10,7 +12,7 @@ POSIX 仍检查当前 UID、0700/0600、无符号链接；安全打开检查常�
 
 Windows 安全打开采用 CreateFile `FILE_FLAG_OPEN_REPARSE_POINT`，随后按句柄核验属性、链接数和 SID/DACL；不共享 DELETE，避免锁文件在持锁期间被替换。路径按未 resolve 的逐层 lstat 拒绝所有 reparse（含 junction、symlink 和云占位符）。私有文件打开后才交 portalocker 做 EXCLUSIVE|NON_BLOCKING 锁；所有锁获取/释放错误均上报，不能当成获得锁。
 
-Windows 当前目标范围为 Windows 11 x64 普通用户、Python 3.12、Playwright Chromium、**本地固定 NTFS 盘**；不支持 UNC、网络/映射盘、FAT/exFAT、可移动盘、云同步目录、目录重定向及设备路径。克隆代码和私人根都应放在本人普通本地目录。系统管理员和持有同一 SID 的恶意进程不属于此应用的隔离边界；路径检查并不承诺抵抗同一身份持续改换父目录的攻击。不提权，不修改系统策略。清点了当前原神/ZZZ 调用链：getuid/O_NOFOLLOW/chmod/fsync 均隔离在平台后端；旧且无调用者的 Git 进程组命令 helper 已删除。唯一 ps 进程诊断在暂停的 HSR 流程，未作为 Windows 可用功能验收。
+Windows 当前目标范围为 Windows 11 x64 普通用户、Python 3.12、已安装的 Edge（Playwright Chromium 备用）、**本地固定 NTFS 盘**；不支持 UNC、网络/映射盘、FAT/exFAT、可移动盘、云同步目录、目录重定向及设备路径。克隆代码和私人根都应放在本人普通本地目录。系统管理员和持有同一 SID 的恶意进程不属于此应用的隔离边界；路径检查并不承诺抵抗同一身份持续改换父目录的攻击。不提权，不修改系统策略。清点了当前原神/ZZZ 调用链：getuid/O_NOFOLLOW/chmod/fsync 均隔离在平台后端；旧且无调用者的 Git 进程组命令 helper 已删除。唯一 ps 进程诊断在暂停的 HSR 流程，未作为 Windows 可用功能验收。
 
 ## 保存语义
 
@@ -35,6 +37,7 @@ Windows 没有在本项目普通用户范围可用的 POSIX 目录 fsync 等价�
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
+# Edge 不可用时，为备用路径安装 Chromium：
 .\.venv\Scripts\python.exe -m playwright install chromium
 .\.venv\Scripts\python.exe -m hoyo_roster --help
 .\.venv\Scripts\python.exe tools\platform_smoke.py
@@ -45,14 +48,12 @@ smoke 只创建新临时根，运行真实 SID/DACL、身份 key、安全打开�
 然后由本人分别对原神与绝区零执行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID --operation init
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID --operation inspect
-.\.venv\Scripts\python.exe -m hoyo_roster --game zzz --uid YOUR_UID
-.\.venv\Scripts\python.exe -m hoyo_roster --game zzz --uid YOUR_UID --operation inspect
+.\.venv\Scripts\python.exe -m hoyo_roster --operation login
+.\.venv\Scripts\python.exe -m hoyo_roster
+.\.venv\Scripts\python.exe -m hoyo_roster --headless
 ```
 
-替换为本人各游戏 UID。需要新登录时应先看到权限说明与二维码/手机号/取消选择；本人完成扫码或手机号、协议确认和图片 CAPTCHA。确认主要阶段提示、准确身份核验、两次采集、SAVED/UNCHANGED、实际 CURRENT_RESULT 内容和字段限制。关闭程序后再次运行，核验会话复用；无变化应保留业务时间戳。不要上传结果、Profile、验证码、截图或完整路径。离线 smoke 通过后仍需这些真实端到端步骤，才讨论正式支持声明。此 PR 保持 draft，本轮不合并。
+首次先登录，由官方 Binding 自动发现本人 UID，不要求事先提供；这与 macOS/Linux 的公共入口一致。需要新登录时应先看到权限说明与二维码/手机号/取消选择；本人完成扫码或手机号、协议确认和图片 CAPTCHA。确认主要阶段提示、准确身份核验、两次采集、SAVED/UNCHANGED、实际 CURRENT_RESULT 内容和字段限制。关闭程序后再次运行，核验会话复用；无变化应保留业务时间戳。不要上传结果、Profile、验证码、截图或完整路径。离线 smoke 通过后仍需这些真实端到端步骤，才讨论正式支持声明。此 PR 保持 draft，本轮不合并。
 
 ## 本轮开发证据
 

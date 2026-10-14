@@ -35,3 +35,7 @@ python tools/verify_distribution.py
 本项目采用 MIT；新增依赖先核实实际版本许可证并更新 THIRD_PARTY_NOTICES，不引入未授权游戏素材。不添加 CI/Actions、部署、合并或后台服务作为常规修改的一部分。
 
 本轮架构整理、引用清理和定向自测证据见 [架构验证记录](docs/architecture-validation.md)；Windows 实机边界仍见平台支持文档。
+
+涉及浏览器可见/无头切换或 Profile 复用时，运行 `python tools/browser_profile_smoke.py` 检查该系统的默认浏览器选择（Windows Edge、macOS Chrome，缺失时 Chromium）；安装 Playwright Chromium 后另运行 `python tools/browser_profile_smoke.py --channel chromium` 检查备用路径。它们仅创建新临时合成 Profile，测试页面请求拦截为虚构响应，不登录、不访问官方服务，不读取真实认证。
+
+登录流程修改的定向 Chromium 合成测试：`HOYO_NATIVE_LOGIN_SMOKE=1 python -m pytest -q tests/test_login_dom.py`。所有页面/请求均由测试拦截，未知请求直接阻止；不访问官方服务、不使用真实认证。回执、超时与精确身份回归见 `tests/test_sms_receipt.py`、`tests/test_login_ux.py`、`tests/test_manual_captcha.py` 和 `tests/test_session_handoff.py`。实际证据见 [登录流程验证记录](docs/login-workflow-validation.md)。

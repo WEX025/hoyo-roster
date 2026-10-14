@@ -42,6 +42,7 @@ class GenshinLoginProvider:
     headed: bool = True
     collector: OfficialCollector | None = field(default=None, repr=False)
     expected_uid_override: str | None = field(default=None, repr=False)
+    expected_region_override: str | None = field(default=None, repr=False)
     game: str = field(default=GAME, init=False)
     binding_data: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _expected_uid: str | None = field(default=None, init=False, repr=False)
@@ -78,6 +79,10 @@ class GenshinLoginProvider:
                 return ExpectedIdentity(game=self.game, digest=None)
             uid = positive_id(self.expected_uid_override, label="requested Genshin UID")
             self._expected_uid = uid
+            if self.expected_region_override is not None:
+                if self.expected_region_override not in SUPPORTED_REGIONS:
+                    raise ConfigurationError("requested Genshin region was unsupported")
+                self._expected_region = self.expected_region_override
             # First use knows the requested UID, not its official region. This digest is
             # a domain-separated selector; probe still proves exact game/UID and a
             # supported region from Binding before it can report PASS.
@@ -91,6 +96,8 @@ class GenshinLoginProvider:
         region = nonempty_string(raw_region, label="formal Genshin region")
         if region not in SUPPORTED_REGIONS:
             raise ConfigurationError("formal Genshin region was unsupported")
+        if self.expected_region_override is not None and region != self.expected_region_override:
+            raise ConfigurationError("discovered Genshin region did not match formal Profile")
         if self.expected_uid_override is not None and uid != self.expected_uid_override:
             raise ConfigurationError("requested Genshin UID did not match formal Profile")
         self._expected_uid = uid
@@ -191,6 +198,7 @@ def create_routine_login_provider(
     headed: bool,
     request_gate: RequestGate | None,
     request_interval: float,
+    expected_region: str | None = None,
 ) -> GenshinLoginProvider:
     return GenshinLoginProvider(
         context=context,
@@ -200,4 +208,5 @@ def create_routine_login_provider(
         headed=headed,
         collector=collector,
         expected_uid_override=uid,
+        expected_region_override=expected_region,
     )

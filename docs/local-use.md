@@ -4,20 +4,23 @@
 
 ## 首次使用
 
-按 README 安装 Python 3.12、项目和 Playwright Chromium。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
+所有 OS 首次使用都直接运行 `hoyo-roster`：先在各游戏官方页面由本人登录，再自动发现该账号所有受支持国服 UID，**不先询问或要求填写 UID**。省略游戏等同 `--game all`，原神/绝区零也可分别选择；星铁不登录、不采集。默认 sync/login/discover 都无需 UID；init/inspect/recover 等指定身份的离线维护仍需要明确游戏/UID。`--operation discover` 不采集角色；本人已有明确身份时可选 `--uid`，维持精确身份流程。
+
+首次发现用认证根内新 UUID 范围创建私有 Profile，浏览器确认关闭后才把本次新 Profile 放到首个发现身份的空目标中；已有目标不覆盖、不复制认证材料。其他角色使用各自独立会话，必要时本人另行登录。认证根 onboarding/selected-游戏.json 保存本机 UID/区服选择，私有权限保护、不在终端打印 UID，不证明登录或所有权；后续命令仍从官方 Binding 精确核验后才采集。默认命令复用这些选择；显式 discover 重新发现当前本人登录账号。失败/关闭不确定保留本次临时范围，不探索或清理旧会话。
+
+按 README 安装 Python 3.12 和项目；浏览器选择及 Chromium 备用安装见下节。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
 
 `--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、认证 key/指纹、节流与认证锁按游戏/UID 隔离；不同结果根共用同一认证范围时仍由认证锁互斥。
 
-结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证范围为 `<认证根>/users/<scope>/<game>/<hash>/`。scope/hash 由游戏和 UID 确定，不含明文 UID。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
+结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证元数据范围为 `<认证根>/users/<scope>/<game>/<hash>/`。浏览器 Profile 单独位于较浅的 `<认证根>/profiles/<身份哈希>/browser-profile/`，仍按 user/game/UID 唯一隔离，由同一身份锁保护；不会迁移或复用旧布局的 Profile。scope/hash 由身份确定，不含明文 UID。Windows 文件系统内部使用受检的长路径命名空间，而传给 Chromium 的 user-data-dir 使用普通盘符路径；认证根应尽量短，为浏览器内部数据库留出路径空间。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
 
 POSIX 上，程序逐层把**新建应用目录**设为 0700，不修改已有共享父目录。clone 创建且包含 `.gitkeep` 的顶层 `data/` 可保持属于本人、不可被组/其他人写入的 0755 权限；其下身份目录仍须 0700。其他已存在的结果根、认证根及身份目录必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`。普通结果和元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
 
 Windows 使用当前进程用户 SID 与 DACL 校验所有权和私有权限，不把 chmod/0600 当成 Windows 安全证据。新目录和文件创建时就给当前 SID 全权限并阻断其他 SID 的继承访问；Profile 根同样受保护。已有不安全根只拒绝，不修复其 ACL。clone 的公共 `data/` 容器只允许当前用户、SYSTEM、Administrators 写入，身份子目录仍须私有。路径各层的 reparse/junction 均拒绝。普通用户不需提权；详细边界见 [平台支持](platform-support.md)。
 
 ```bash
-hoyo-roster --game genshin --uid YOUR_UID --operation init
-hoyo-roster --game genshin --uid YOUR_UID --operation login
-hoyo-roster --game genshin --uid YOUR_UID
+hoyo-roster --game all --operation login
+hoyo-roster
 ```
 
 `init` 只在没有 current 时建立验证后的空工作区；已有有效 current 经预检后原样复用，不换代、不改文件或时间戳，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
@@ -29,14 +32,28 @@ hoyo-roster --game genshin --uid YOUR_UID
 非交互进程需登录时使用 `--non-interactive --login-method qr|phone --allow-login`；缺失方式报 `AUTHENTICATION_REQUIRED`，缺失允许报 `LOGIN_CONSENT_REQUIRED`，都在打开可执行认证的登录页面前停止。`--login-method cancel` 取消新登录。自动化调用者应先向本人展示本段说明并取得允许，再传入该标志；它不替代官方页面协议确认。
 
 ```bash
-hoyo-roster --game genshin --uid YOUR_UID --operation login --non-interactive --login-method phone --allow-login
+hoyo-roster --game genshin --non-interactive --login-method qr --allow-login
 ```
 
-`--login-timeout 900` 是默认各登录等待阶段的上限，范围 0 < 秒数 ≤ 3600；入口加载使用该上限，不再固定 30 秒。等待显示 `WAITING_FOR_ENTRY`；浏览器操控暂时超时显示 `CONTROL_RETRY`，在上限内等待恢复。一直未看到入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`，可以检查浏览器后重新运行。不把这些状态报告为不支持登录。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消等待，释放锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
+通常直接使用正常同步命令：需登录时在同一浏览器完成登录，随后继续两次采集、验证和保存；不必先跑临时登录脚本。程序在确认需要本人参与且已取得允许后立即输出 `WAITING_FOR_USER`，再打开页面。已识别的官方普通面板/方式控件唯一且可见时自动点击一次：原神头像、米游社“登录”、SDK 模式 SVG 和“短信登录”标签。操作不包含退出账号、切换角色、协议、发码或 CAPTCHA；结构未知或短暂操控故障在入口等待约 15 秒后显示 `LOGIN_PANEL_MANUAL`，请本人在同一窗口打开/切换面板。点击结果不确定时不重复点击。
+
+`--login-timeout 900` 是默认本人登录总等待预算，范围 0 < 秒数 ≤ 3600；页面打开、入口等待、CAPTCHA 和身份轮询共用期限，不逐阶段重新计时。此前已有会话的初始化、页面导航和前台控制各最多 30 秒（用户设置更短时取更短）。等待显示 `WAITING_FOR_ENTRY`；短暂操控超时显示 `CONTROL_RETRY`，在期限内等待恢复。一直未见入口报 `LOGIN_TIMEOUT`；持续操控超时、页面关闭或操控不可用报 `LOGIN_CONTROL_UNAVAILABLE`。`--headless` 只复用精确已验证会话，需新登录时停止。Ctrl-C 随时取消，排空后台回执任务、释放监听和锁并关闭本次浏览器；正在进行的本机写入先结束再释放锁。
+
+`QR_READY` 表示 SDK 二维码图片已加载且未显示过期；`QR_SCANNED_WAIT_CONFIRM` 只表示页面提示扫码，仍需本人在手机确认。入口等待同时检查精确 Binding；扫码成功后面板消失或跳转不再因找不到旧入口而判失败。`LOGIN_CONFIRMED` 仅说明身份通过，公共最终 PASS 仍须等完整操作、清理和浏览器关闭结束；关闭失败不会报最终成功。
+
+手机号方式显示 `WAITING_FOR_PHONE_AND_TERMS`，请本人在官方窗口输入手机号、阅读并确认协议、点击一次发送并输入验证码。程序不读取输入值或自动发送。只有观察到实际官方 POST 才输出 `SMS_REQUESTING`；回执须为 HTTP 200、整数 retcode=0、布尔 `data.sent_new` 和非负整数 `data.countdown`。`SMS_ACCEPTED` 表示官方接受新发码，不证明手机送达；`SMS_COOLDOWN` 表示已有验证码/倒计时，未新发短信。点击、倒计时或单独 retcode=0 都不能证明发码。网络失败、畸形回执或请求后 30 秒仍无回执报 `SMS_RECEIPT_UNKNOWN`，读取单次回执最多 5 秒；不重试。官方拒绝或同一命令又观察到发码请求报 `SMS_REQUEST_REJECTED`，风险/限流保留原错误码。手动 CAPTCHA 期间不推进身份探测，清除后再检查已观察的回执。回执未知时停止本次流程并做既有关闭/清理，不以再次点击试探；固定状态不能替代手机送达确认。
 
 图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`。星铁暂时无法获取，请不要使用其保留的登录/采集接口。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
 
-面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入该阶段 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
+面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入本人登录总预算 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
+
+## 浏览器选择和会话复用
+
+新会话按系统自动选择：Windows 优先已安装的 Edge（`msedge`），macOS 优先已安装的 Chrome（`chrome`），Linux 使用 Playwright Chromium（`chromium`）。不跟随默认浏览器设置，不支持系统 Safari。首选浏览器缺失或首次启动失败时，在接触官方页面前尝试 Chromium；未安装它会报 `BROWSER_UNAVAILABLE`，请在同一虚拟环境运行 `python -m playwright install chromium`。程序不自动下载，不安装或覆盖系统 Edge/Chrome。
+
+每个 `browser-profile/` 是私有会话容器，其中 `browser-choice.json` 保存版本和选定 channel，实际浏览器目录为 `browser-profile/<channel>/`。首次启动的失败目录和备用目录分离，不共享浏览器数据库或复制登录材料。启动前落盘选择；取消、启动结果不确定或持久化失败时保留目录并停止。选定后不随系统浏览器安装/默认设置变化而换浏览器，可见与无界面模式都使用同一个完整 channel。终端输出 `BROWSER_CHANNEL`，首次回退输出 `BROWSER_FALLBACK=CHROMIUM`。
+
+已有会话的选定浏览器不可用时停止，请恢复该浏览器后重试；登录失效、验证码、身份不匹配、风控和限流不触发备用浏览器。日常浏览器的 Profile 和登录态不复用。当前会话布局不迁移旧 Profile：无选择标记的非空目录、标记损坏或选定目录缺失报 `BROWSER_PROFILE_INVALID`，保留原目录。需要新会话时显式选择新的仓库外 `--auth-root`，由本人首次登录；不会为了启用系统浏览器探索、覆盖或清理旧认证根。
 
 ## 升级
 
@@ -115,9 +132,15 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 | `WORKSPACE_VALIDATOR_TIMEOUT` / `VALIDATOR_TIMEOUT` | 本机离线验证超时，保留 current 和恢复证据，检查环境后重试 |
 | `RECOVERY_REQUIRED` / 持久化未知 / residue | inspect 后按上节恢复；不随意删 UUID 目录 |
 | Chromium 缺失 | 在相同虚拟环境运行 `python -m playwright install chromium` |
+| `BROWSER_UNAVAILABLE` | 新会话的 Chromium 备用缺失时按上一行安装；已有选择时恢复所选 Edge/Chrome/Chromium，不自动切换 |
+| `BROWSER_PROFILE_INVALID` | 保留原目录，核对所选认证根；旧布局不迁移，新会话显式使用新的仓库外 `--auth-root` |
 
 ## 退出登录与卸载
 
 浏览器关闭后执行 `--operation logout`：只删除该身份 Profile 和已验证身份指纹；角色数据保留。发现 Singleton 标识时停止，要求先检查是否仍有浏览器进程。退出登录不会退出其他应用的米游社会话。
 
 卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。
+
+可见登录与 `--headless` 会话复用使用同一个已选定的完整浏览器 channel，避免两个浏览器混用同一 Profile。历史 Mac Chromium 合成交接证据见 [Profile 验证记录](browser-profile-validation.md)，系统浏览器选择验证见 [浏览器选择验证](browser-selection-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。
+
+本轮登录流程的公开静态证据、合成回归及真实验收边界见 [登录流程验证记录](login-workflow-validation.md)。

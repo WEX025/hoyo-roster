@@ -18,11 +18,32 @@ import win32file
 import win32security
 
 
+def _native_path(path: Path) -> str:
+    # pywin32 APIs do not inherit Python's long-path handling. Keep the validated
+    # lexical path (never resolve through a reparse point) and extend local paths.
+    value = str(path)
+    if len(value) < 240:
+        return value
+    return str(extended_path(path))
+
+
+def extended_path(path: Path) -> Path:
+    value = str(path)
+    if value.startswith("\\\\?\\") and len(path.drive) == 6 and path.drive[5] == ":":
+        return path
+    if not path.is_absolute() or len(path.drive) != 2 or path.drive[1] != ":":
+        raise OSError("UNSUPPORTED_PRIVATE_FILESYSTEM")
+    if any(part.endswith((" ", ".")) or ":" in part for part in path.parts[1:]):
+        raise OSError("UNSUPPORTED_PRIVATE_FILESYSTEM")
+    return Path("\\\\?\\" + value)
+
+
 def _sid():
-    with win32security.OpenProcessToken(
-        win32api.GetCurrentProcess(), win32con.TOKEN_QUERY
-    ) as token:
+    token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+    try:
         return win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+    finally:
+        token.Close()
 
 
 def _security():
@@ -49,6 +70,8 @@ def check_volume(path: Path) -> None:
     # UNC, removable/FAT/exFAT/network/cloud redirected trees are deliberately out
     # of scope; DACL and rename assumptions require a local fixed NTFS volume.
     drive = path.drive
+    if drive.startswith("\\\\?\\") and len(drive) == 6 and drive[5] == ":":
+        drive = drive[4:]
     if not drive or drive.startswith("\\\\"):
         raise OSError("UNSUPPORTED_PRIVATE_FILESYSTEM")
     root = drive + "\\"
@@ -60,7 +83,7 @@ def check_volume(path: Path) -> None:
 
 def _descriptor(path: Path):
     return win32security.GetNamedSecurityInfo(
-        str(path),
+        _native_path(path),
         win32security.SE_FILE_OBJECT,
         win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION,
     )
@@ -128,7 +151,7 @@ def container_safe(path: Path) -> bool:
 
 
 def mkdir_private(path: Path) -> None:
-    win32file.CreateDirectory(str(path), _security())
+    win32file.CreateDirectory(_native_path(path), _security())
     if not private(path):
         raise OSError("PRIVATE_PERMISSIONS_FAILED")
 
@@ -136,7 +159,7 @@ def mkdir_private(path: Path) -> None:
 def set_private(path: Path) -> None:
     descriptor = _security().SECURITY_DESCRIPTOR
     win32security.SetNamedSecurityInfo(
-        str(path),
+        _native_path(path),
         win32security.SE_FILE_OBJECT,
         win32security.DACL_SECURITY_INFORMATION | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
         None,
@@ -147,7 +170,7 @@ def set_private(path: Path) -> None:
 
 
 def check_directory(path: Path) -> None:
-    attributes = win32file.GetFileAttributes(str(path))
+    attributes = win32file.GetFileAttributes(_native_path(path))
     if (
         attributes & win32con.FILE_ATTRIBUTE_REPARSE_POINT
         or not attributes & win32con.FILE_ATTRIBUTE_DIRECTORY
@@ -166,7 +189,7 @@ def open_private(path: Path, flags: int, *, require_private: bool = True) -> int
     )
     try:
         handle = win32file.CreateFile(
-            str(path),
+            _native_path(path),
             access,
             win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
             _security(),
@@ -205,7 +228,7 @@ def open_private(path: Path, flags: int, *, require_private: bool = True) -> int
 
 def replace(source: Path, destination: Path) -> None:
     win32file.MoveFileEx(
-        str(source),
-        str(destination),
+        _native_path(source),
+        _native_path(destination),
         win32con.MOVEFILE_REPLACE_EXISTING | win32file.MOVEFILE_WRITE_THROUGH,
     )

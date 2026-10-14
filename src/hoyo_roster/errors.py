@@ -13,6 +13,14 @@ class DiagnosticProfileOverlap(ConfigurationError):
     code = "DIAGNOSTIC_PROFILE_OVERLAP"
 
 
+class BrowserUnavailable(ConfigurationError):
+    code = "BROWSER_UNAVAILABLE"
+
+
+class BrowserProfileInvalid(ConfigurationError):
+    code = "BROWSER_PROFILE_INVALID"
+
+
 class ContextNotReusable(OperationError):
     code = "BROWSER_CONTEXT_UNAVAILABLE"
 
@@ -75,3 +83,11 @@ class LoginControlUnavailable(OperationError):
 
 class LoginMethodUnavailable(OperationError):
     code = "LOGIN_METHOD_UNAVAILABLE"
+
+
+class SmsReceiptUnknown(OperationError):
+    code = "SMS_RECEIPT_UNKNOWN"
+
+
+class SmsRequestRejected(OperationError):
+    code = "SMS_REQUEST_REJECTED"

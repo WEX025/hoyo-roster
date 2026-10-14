@@ -80,9 +80,9 @@ def test_game_uid_isolates_data_browser_and_upgrade_preserves_it(tmp_path, sourc
 @pytest.mark.parametrize(
     "arguments,code",
     [
-        (["--game", "genshin"], "UID_REQUIRED"),
+        (["--game", "genshin", "--operation", "init"], "UID_REQUIRED"),
         (["--uid", UID_A], "GAME_REQUIRED"),
-        ([], "GAME_REQUIRED"),
+        (["--operation", "init"], "GAME_REQUIRED"),
         (["--game", "genshin", "--uid", "0"], "INVALID_UID"),
         (["--game", "genshin", "--uid", "0123"], "INVALID_UID"),
         (["--game", "genshin", "--uid", "-1"], "INVALID_UID"),
@@ -207,11 +207,14 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     async def simulated_browser(**kwargs):
         yield BrowserSession(None, context, page, kwargs["headed"])
 
-    async def simulated_network_pacing(self):
+    async def simulated_network_pacing(self, **kwargs):
         return None
 
     monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
     monkeypatch.setattr(OfficialCollector, "_throttle", simulated_network_pacing)
+    from hoyo_roster.request_gate import RequestGate
+
+    monkeypatch.setattr(RequestGate, "reserve", simulated_network_pacing)
     root = tmp_path / "private"
     if repository_output:
         from hoyo_roster import paths
@@ -220,6 +223,10 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
         (repo / ".git").mkdir(parents=True)
         root = repo / "data"
         root.mkdir(mode=0o755)
+        from hoyo_roster import platform_io as io
+
+        if io.WINDOWS:
+            io.set_private(root)
         (root / ".gitkeep").touch()
         monkeypatch.setattr(paths, "project_repository", lambda: repo)
     args = [
@@ -236,7 +243,9 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     output = capsys.readouterr().out
     assert "WAITING_FOR_USER_LOGIN=YES" in output
     assert "DATA_MODIFIED=YES" in output and uid not in output
-    assert context.request.count == 3 and page.business_requests == 2
+    # PR9 checks Binding during entry readiness, then verifies it in the waiting
+    # loop; the second business pass has its own fresh Binding.
+    assert context.request.count == 4 and page.business_requests == 2
     config = direct_configuration("genshin", uid, storage_root=root)
     store = LocalSnapshotStore(
         source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
@@ -258,7 +267,7 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     output = capsys.readouterr().out
     assert "NO_OP=YES" in output and "DATA_MODIFIED=NO" in output
     assert tree_digest(store.current() / "data") == before
-    assert context.request.count == 5 and page.business_requests == 4
+    assert context.request.count == 6 and page.business_requests == 4
     assert all(not callbacks for callbacks in page.callbacks.values())
     context.request.payloads = [binding_payload("genshin", UID_B if uid == UID_A else UID_A)]
     assert local_tool.main([*args, "--headless"]) == 1
@@ -293,10 +302,13 @@ def test_direct_login_entrypoint_runs_real_game_binding_control_flow(
     async def simulated_browser(**kwargs):
         yield session
 
-    async def simulated_network_pacing(self):
+    async def simulated_network_pacing(self, **kwargs):
         return None
 
     monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
+    from hoyo_roster.request_gate import RequestGate
+
+    monkeypatch.setattr(RequestGate, "reserve", simulated_network_pacing)
     if game == "zzz":
         monkeypatch.setattr(domain.BrowserTransport, "_wait_for_slot", simulated_network_pacing)
     else:
@@ -322,7 +334,7 @@ def test_direct_login_entrypoint_runs_real_game_binding_control_flow(
     output = capsys.readouterr().out
     assert output.count("WAITING_FOR_USER_LOGIN=YES") == 1
     assert "STATUS=PASS" in output and UID_A not in output
-    assert context.request.count == 2
+    assert context.request.count == 3
 
 
 def test_cli_interruption_is_explicit_and_private(local_tool, tmp_path, monkeypatch, capsys):

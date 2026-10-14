@@ -2,11 +2,13 @@
 
 工具保存本人角色状态到本机。浏览器 Profile 包含敏感 Cookie/登录状态，绝不属于正式结果；另有 scope-local HMAC key、身份指纹、持久工作区身份边界（游戏/UID 摘要/区服）、节流时间、候选、代际和恢复日志。隔离目录使用游戏/UID 派生哈希，哈希不是加密匿名化，不能公开分享整个目录。
 
+省略 UID 的发现入口仅处理本人登录账号的官方受支持绑定。认证根 onboarding/ 下的 selected-游戏.json 是含 UID/区服的私有本机选择文件，不是认证证据，不公开输出或提交。首次登录的临时 Profile 仅在确认关闭后放入一个空的身份目标；不复制凭据、不覆盖既有 Profile，其他身份各自登录。清理只检查本次新 UUID 范围的文件类型和重定向元数据，不读取认证文件；关闭失败保留范围。
+
 正常同步不 fetch/commit/push，不上传给项目作者、GitHub 或任何其他数据仓库；浏览器仍与官方服务及官方页面引用的服务通信。本项目不规避官方风险控制。结果默认 `<已核验的本项目仓库>/data/users/<scope>/<game>/<hash>/`；克隆后普通 `pip install .` 也适用。无法核验源码的独立安装回退到 `<系统用户数据根>/results/users/<scope>/<game>/<hash>/`，不写包安装目录，不依赖 cwd。`--storage-root` 仅覆盖结果。
 
-认证默认 `<系统用户数据根>/users/<scope>/<game>/<hash>/`（platformdirs 各平台位置见 README），`--auth-root` 只选择仓库外的私有认证根。Profile、HMAC key、已验证指纹、认证锁和节流属于认证范围；候选、工作区身份、代际、当前指针及恢复日志属于结果范围。不自动迁移或删除旧范围，不能将旧 storage-root 连同 Profile 整体搬到源码 `data/`。本项目尚未发布，不提供历史逻辑兼容或迁移；已有数据保留原处。
+认证元数据默认 `<系统用户数据根>/users/<scope>/<game>/<hash>/`（platformdirs 各平台位置见 README），浏览器会话容器为 `<认证根>/profiles/<身份哈希>/browser-profile/` 的较浅私有路径；两者由相同身份锁保护。容器中 `browser-choice.json` 只保存版本和浏览器 channel，实际 Profile 位于 `<channel>/`，首选启动失败与 Chromium 备用不共用目录。首次选择后固定复用，不读日常 Edge/Chrome 的 Profile 或登录态。`--auth-root` 只选择仓库外的私有认证根。Profile、HMAC key、已验证指纹、认证锁和节流属于认证范围；候选、工作区身份、代际、当前指针及恢复日志属于结果范围。不自动迁移或删除旧范围，不能将旧 storage-root 连同 Profile 整体搬到源码 `data/`。本项目尚未发布，不提供历史逻辑兼容或迁移；已有数据保留原处。
 
-POSIX 新建应用目录每层 0700，普通数据/元数据 0600；clone 的顶层 data/ 可保持属于本人且不可被其他人写入的 0755，身份子目录为 0700。不会 chmod 用户已有共享父目录或安全配置。Chromium 自己创建的内部文件可能有不同权限，但 Profile 根为 0700。Windows 新对象采用当前用户 SID 的受保护 DACL；已有根须校验而不修复，不以 chmod 作为凭据保护。拒绝 reparse/junction 和不支持的文件系统，参见 [平台边界](platform-support.md)。持有相同用户身份或系统管理权限的人仍可能读取数据，文件权限不替代系统账户安全。
+POSIX 新建应用目录每层 0700，普通数据/元数据 0600；clone 的顶层 data/ 可保持属于本人且不可被其他人写入的 0755，身份子目录为 0700。不会 chmod 用户已有共享父目录或安全配置。所选 Edge/Chrome/Chromium 自己创建的内部文件可能有不同权限，但会话容器和实际 Profile 根均为 0700。Windows 新对象采用当前用户 SID 的受保护 DACL；已有根须校验而不修复，不以 chmod 作为凭据保护。拒绝 reparse/junction 和不支持的文件系统，参见 [平台边界](platform-support.md)。持有相同用户身份或系统管理权限的人仍可能读取数据，文件权限不替代系统账户安全。
 
 输出为固定进度标签、错误代码、少量数量/本机恢复标识及准确结果路径（RESULT_SCOPE、CURRENT_POINTER、CURRENT_RESULT）；公开反馈时路径也应脱敏。程序不输出手机号、验证码、Cookie、token、设备头值、原始响应、昵称或 UID。你在 shell 中输入 UID 可能被 shell 历史和进程参数记录；如需反馈，手动脱敏命令。程序禁用下载接受和视频录制，不建立 HAR、trace 或截图；不要用浏览器调试导出登录材料。
 

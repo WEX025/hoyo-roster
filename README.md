@@ -14,7 +14,7 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 | 绝区零 | 代理人等级、晋阶、影画、技能、音擎、驱动盘、面板和邦布 | 只有名单、养成名单、逐角色详情、批量详情和邦布的覆盖条件全部满足，才输出 `complete`；不表示账号的所有信息 |
 | 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的接口和历史测试不是使用建议 |
 
-已验证的开发与安装平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配，**尚待本人 Windows 实机端到端验收，不宣称跨平台正式可用**；Linux/WSL 尚未完成平台验收。Windows 当前目标为 Windows 11 x64、Python 3.12、Playwright Chromium、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
+开发与安装的历史验收平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配；Windows 11 x64 上 Chromium 的本人真实流程曾通过，系统 Edge 的原生离线复用通过，**当前默认 Edge 的真实端到端、macOS 系统 Chrome 及 Linux/WSL 实机验收仍未完成，不宣称跨平台正式可用**。Windows 当前目标为 Python 3.12、已安装的 Edge（Chromium 备用）、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)及[系统浏览器验证](docs/browser-selection-validation.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
 
 更详细的字段、数据格式和完整度说明见[数据格式和完整度](docs/data-format.md)。
 
@@ -26,8 +26,9 @@ cd hoyo-roster
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
+# macOS 未安装 Chrome 时需要；Linux 必须安装；也可作为备用：
 python -m playwright install chromium
-hoyo-roster --game genshin --uid YOUR_UID
+hoyo-roster --game all
 ```
 
 Windows PowerShell（验收 PR 时先切换到该 PR 分支；无需激活脚本或修改系统执行策略）：
@@ -35,21 +36,24 @@ Windows PowerShell（验收 PR 时先切换到该 PR 分支；无需激活脚本
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
-.\.venv\Scripts\python.exe -m playwright install chromium
 .\.venv\Scripts\python.exe tools\platform_smoke.py
-.\.venv\Scripts\python.exe -m hoyo_roster --game genshin --uid YOUR_UID
+.\.venv\Scripts\python.exe -m hoyo_roster --game all
 ```
 
 离线 smoke 仅用新临时目录检查权限、锁、保存和恢复，不登录、不发短信，不访问已有结果或认证目录。Windows 安装失败或 smoke 失败时先停止，报告固定错误代码与平台；不要用管理员运行或放宽 ACL 绕过。真实验收顺序见[平台验收](docs/platform-support.md#本人-windows-验收)。
 
-将 `YOUR_UID` 替换为你自己的游戏 UID。当前请仅使用 `--game genshin`（原神）或 `--game zzz`（绝区零）；不要使用保留的 `hsr` 参数。UID 用于选择本机身份范围，是否属于当前登录账号仍须由官方账号绑定信息核验。
+首次使用直接运行 `hoyo-roster`：先在官方页面登录，再自动发现本人原神和绝区零的 UID，并逐身份核验、同步；**无需提前查找、填写或提供 UID，Windows、macOS、Linux 使用同一流程。** `--game all` 与默认相同，`--game genshin` / `--game zzz` 只发现对应游戏。`--operation discover` 只发现并保存本机角色选择，不采集角色数据。再次运行读取私有选择文件，但仍重新验证官方身份，选择文件不能证明会话有效。多个角色逐一处理，不默认挑选其中一个。星铁仍暂停。
 
-`hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。浏览器由 Playwright 单独安装，本项目发行包不包含 Chromium。
+`--uid` 仅是已有明确身份时的可选精确选择，也用于指定身份的离线检查/恢复，不是首次使用前置条件。即使显式提供 UID，是否属于当前登录账号仍须由官方账号绑定信息核验。
+
+`hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。新会话在 Windows 优先使用已安装的 Edge，在 macOS 优先使用已安装的 Chrome，Linux 使用 Playwright Chromium。首选浏览器缺失或首次启动失败时尝试 Chromium；Chromium 未安装则明确停止，请在同一虚拟环境运行 `python -m playwright install chromium`（Windows 用 `.\.venv\Scripts\python.exe -m playwright install chromium`）。程序不自动安装或覆盖系统浏览器，发行包也不包含 Chromium。
+
+每个身份使用工具专用的私有会话，不读取日常浏览器登录态。首次选定浏览器后保存选择，可见登录和无界面采集复用同一浏览器；已有会话启动失败、登录失效、验证码、身份冲突和限流都不自动换浏览器。旧的无选择标记 Profile 保留并停止，不自动迁移；新会话需显式使用新的 `--auth-root`，首次由本人登录。详见[本机使用指南](docs/local-use.md#浏览器选择和会话复用)。
 
 ```bash
-hoyo-roster --game zzz --uid YOUR_UID
-hoyo-roster --game genshin --uid YOUR_UID --operation login --login-method qr
-hoyo-roster --game genshin --uid YOUR_UID --operation inspect
+hoyo-roster
+hoyo-roster --game genshin --operation login --login-method qr
+hoyo-roster --game zzz --operation discover
 ```
 
 默认操作为同步。`--operation login` 只检查登录和精确身份，不采集角色；`--operation inspect` 检查本机数据状态。完整的首次使用、升级与恢复步骤见[本机使用指南](docs/local-use.md)。
@@ -63,7 +67,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation inspect
 可以用 `--login-method qr` 或 `--login-method phone` 选择方式，用 `--login-method cancel` 取消新登录。仅选择方式不等于已经允许登录；交互终端仍会询问。非交互调用需要先取得本人允许，再显式提供 `--non-interactive`、`--allow-login` 和登录方式，例如：
 
 ```bash
-hoyo-roster --game zzz --uid YOUR_UID --non-interactive --allow-login --login-method phone
+hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 ```
 
 `--allow-login` 只允许说明中的本机手动登录与会话复用，不替代本人确认官方协议，也不授予未知新权限。`--headless` 只适用于已登录且身份匹配的会话；需要新登录时会停止。
@@ -120,7 +124,7 @@ hoyo-roster --game zzz --uid YOUR_UID --non-interactive --allow-login --login-me
 
 **页面开始倒计时，但没有收到短信怎么办？** 倒计时不能证明短信已送达。请本人查看官方页面提示；程序不会自动重发短信或代解验证码。
 
-**浏览器打不开，或提示会话目录正在使用怎么办？** 先确认 Chromium 已在同一虚拟环境安装，并检查本工具对应的浏览器是否仍在运行。不要删除正在使用的会话目录、锁或浏览器运行标记来绕过检查。错误代码与处理步骤见[本机使用指南](docs/local-use.md)。
+**浏览器打不开，或提示会话目录正在使用怎么办？** 检查本工具选定的 Edge/Chrome/Chromium 是否可用，若首次回退提示 Chromium 缺失，在同一虚拟环境安装它。检查本工具对应的浏览器是否仍在运行，不删除会话目录、锁或浏览器运行标记来绕过检查。错误代码与处理步骤见[本机使用指南](docs/local-use.md)。
 
 **保存失败或有恢复待办怎么办？** 保留当前数据、恢复日志和相关代际，先检查状态，再按[恢复步骤](docs/local-use.md#检查与恢复)操作。不要按目录名或 UUID 盲删数据，也不要删除身份标记来绕过保护。
 

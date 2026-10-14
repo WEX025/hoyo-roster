@@ -30,6 +30,7 @@ from .errors import (
 from .login_ui import ManualCaptchaWait, choose_method, confirm_method_entry
 from .progress import OPTIONS, emit
 from .models import LoginProbeResult, LoginProbeStatus
+from .sms import SmsReceiptWatch
 from .request_gate import RequestGate
 
 LOGIN_GAMES = ("genshin", "zzz", "hsr")
@@ -246,6 +247,8 @@ async def coordinate_login(
     result: LoginCoordinatorResult | None = None
     waiting_signal_count = 0
     interaction_required = False
+    deadline = None
+    sms_watches: list[SmsReceiptWatch] = []
 
     def notify_waiting() -> None:
         nonlocal waiting_signal_count, interaction_required
@@ -255,14 +258,49 @@ async def coordinate_login(
             waiting_signal_count = 1
 
     async def prepare(provider: LoginProvider) -> None:
-        # A provider may create a Page or route before navigation fails.
+        nonlocal deadline
+        # Consent precedes navigation. One human-login budget includes panel readiness.
         method = await choose_method()
+        if deadline is None:
+            deadline = monotonic() + timeout
+        notify_waiting()
+        emit("WAITING_FOR_USER")
+        if method == "phone":
+            watch = SmsReceiptWatch(context)
+            watch.start()
+            sms_watches.append(watch)
         prepared.append(provider)
-        await provider.prepare_login_or_session(context, page, request_gate)
+        async with asyncio.timeout(max(0.0, deadline - monotonic())):
+            await provider.prepare_login_or_session(context, page, request_gate)
         login_page = provider.login_page(page)
         captcha_wait = ManualCaptchaWait(game=provider.game)
         login_waits.append((login_page, captcha_wait))
-        await confirm_method_entry(login_page, method, captcha_wait=captcha_wait)
+
+        async def authenticated() -> bool:
+            for watch in sms_watches:
+                watch.check_protection()
+            async with asyncio.timeout(max(0.0, deadline - monotonic())):
+                observed = await _probe_coverage(
+                    context=context, providers=providers, identities=identities
+                )
+            if any(item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in observed):
+                raise WrongAccount("login coverage did not match the expected account")
+            success = LoginCoordinatorResult(
+                observed, True, waiting_signal_count
+            ).available_coverage_success
+            if not success:
+                for watch in sms_watches:
+                    watch.check()
+            return success
+
+        await confirm_method_entry(
+            login_page,
+            method,
+            captcha_wait=captcha_wait,
+            deadline=deadline,
+            authenticated=authenticated,
+            poll_interval=poll_interval,
+        )
         emit("VERIFYING_IDENTITY")
 
     try:
@@ -297,32 +335,47 @@ async def coordinate_login(
                 }:
                     continue
                 await prepare(provider)
-                notify_waiting()
 
-            deadline = monotonic() + timeout
+            assert deadline is not None
             while True:
                 for login_page, captcha_wait in login_waits:
                     await captcha_wait.ready(login_page, deadline)
-                coverage = await _probe_coverage(
-                    context=context,
-                    providers=providers,
-                    identities=identities,
-                )
+                for watch in sms_watches:
+                    watch.check_protection()
+                async with asyncio.timeout(max(0.0, deadline - monotonic())):
+                    coverage = await _probe_coverage(
+                        context=context,
+                        providers=providers,
+                        identities=identities,
+                    )
                 if any(item.status is LoginCoverageStatus.WRONG_ACCOUNT for item in coverage):
                     raise WrongAccount("login coverage did not match the expected account")
                 observed = LoginCoordinatorResult(coverage, True, waiting_signal_count)
                 if observed.available_coverage_success:
                     result = observed
                     break
+                for watch in sms_watches:
+                    watch.check()
                 if monotonic() >= deadline:
                     raise LoginTimeout("login coverage probe timed out")
                 await asyncio.sleep(min(poll_interval, max(0.0, deadline - monotonic())))
+    except TimeoutError:
+        primary_error = LoginTimeout("Official login workflow timed out")
+        raise primary_error from None
     except BaseException as error:
         primary_error = error
         raise
     finally:
         cleanup_failed = False
         cleanup_cancelled: asyncio.CancelledError | None = None
+        for watch in reversed(sms_watches):
+            try:
+                await watch.close()
+            except asyncio.CancelledError as error:
+                cleanup_failed = True
+                cleanup_cancelled = error
+            except BaseException:
+                cleanup_failed = True
         for provider in reversed(prepared):
             try:
                 await provider.finish_login_or_session(context, page)
