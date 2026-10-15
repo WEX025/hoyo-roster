@@ -6,7 +6,7 @@ from .auth import AuthService
 from .errors import OperationError
 from .progress import OPTIONS, options_from_args
 from .user_workspace import WorkspaceError, direct_configuration
-from .game_runtime import ACCOUNT_STOP_CODES, GameResult
+from .game_runtime import ACCOUNT_STOP_CODES, GameResult, stops_account
 
 SUPPORTED_GAMES = ("genshin", "zzz")
 
@@ -43,8 +43,13 @@ async def run_task(args):
                     try:
                         result = await module.run(args, auth)
                     except OperationError as error:
-                        # Shared authentication exceptions stop all dependent games.
-                        result = GameResult(game, "FAIL", error_code=error.code, stop_account=True)
+                        # Identity/protection/login-interaction failures stop dependent games.
+                        result = GameResult(
+                            game,
+                            "FAIL",
+                            error_code=error.code,
+                            stop_account=stops_account(error, error.code),
+                        )
                     except WorkspaceError as error:
                         result = GameResult(
                             game,

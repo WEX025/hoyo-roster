@@ -227,6 +227,8 @@ def test_zzz_boolean_retcode_is_not_success():
 
 
 def test_late_control_is_not_clicked_after_manual_handoff(monkeypatch, capsys):
+    from hoyo_roster.games.genshin.login_provider import LOGIN_UI
+
     clock = [0.0]
     clicks = []
 
@@ -267,7 +269,7 @@ def test_late_control_is_not_clicked_after_manual_handoff(monkeypatch, capsys):
                 Page(),
                 "phone",
                 deadline=20,
-                captcha_wait=SimpleNamespace(game="genshin", ready=ready),
+                captcha_wait=SimpleNamespace(game="genshin", target=LOGIN_UI, ready=ready),
                 authenticated=authenticated,
             )
         )

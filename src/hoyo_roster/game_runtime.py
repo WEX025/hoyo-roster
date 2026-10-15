@@ -8,7 +8,13 @@ from pathlib import Path
 
 from .validation import CONTRACT_ROOT
 from .models import OwnedRole
-from .errors import OperationError, WrongAccount
+from .errors import (
+    OperationError,
+    WrongAccount,
+    LoginBindingFailed,
+    LoginNetworkError,
+    LoginSessionInitializationFailed,
+)
 from .progress import emit
 from .sync import OperationResult
 from .user_workspace import LocalSnapshotStore, WorkspaceError, direct_configuration
@@ -32,6 +38,17 @@ ACCOUNT_STOP_CODES = frozenset(
         "REQUEST_SCHEDULE_INVALID",
     }
 )
+
+
+def stops_account(error, code):
+    # A target game's service/Binding contract failure does not invalidate the
+    # shared browser. Other games still perform their own official session check.
+    game_service_failure = isinstance(
+        error, (LoginBindingFailed, LoginNetworkError, LoginSessionInitializationFailed)
+    )
+    return code in ACCOUNT_STOP_CODES or (
+        isinstance(error, OperationError) and not game_service_failure
+    )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -151,7 +168,7 @@ async def execute_roles(args, auth, roles, *, game, candidate_policy, sync, sync
                 cleanup_pending=store.cleanup_pending if store else False,
             )
             results.append(result)
-            if isinstance(error, OperationError) or code in ACCOUNT_STOP_CODES:
+            if stops_account(error, code):
                 return GameResult(game, "FAIL", tuple(results), code, True)
             continue
         results.append(result)

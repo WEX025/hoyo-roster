@@ -355,3 +355,27 @@ def test_auth_import_does_not_load_business_store_or_games():
         capture_output=True,
     )
     assert result.returncode == 0
+
+
+@pytest.mark.parametrize("kind", ("binding", "network", "bootstrap"))
+def test_game_binding_service_failure_keeps_other_game_independent(tmp_path, monkeypatch, kind):
+    from hoyo_roster.errors import (
+        LoginBindingFailed,
+        LoginNetworkError,
+        LoginSessionInitializationFailed,
+    )
+    from hoyo_roster.games.genshin.login_provider import GenshinLoginProvider
+
+    error = {
+        "binding": LoginBindingFailed,
+        "network": LoginNetworkError,
+        "bootstrap": LoginSessionInitializationFailed,
+    }[kind]
+
+    async def fail(self, context):
+        raise error("synthetic game-specific service failure")
+
+    install_context(monkeypatch, SharedContext(existing=True))
+    monkeypatch.setattr(GenshinLoginProvider, "owned_roles", fail)
+    assert cli.main(argv(tmp_path)) == 1
+    assert store_for(tmp_path, "zzz").current() is not None
