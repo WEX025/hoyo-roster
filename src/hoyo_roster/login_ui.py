@@ -281,7 +281,7 @@ async def confirm_method_entry(
                         await frame.locator("img.qr-loaded").first.is_visible()
                         and not await frame.locator(".qr-expired").first.is_visible()
                         if method == "qr"
-                        else await frame.locator("input#mobile").first.is_visible()
+                        else await frame.locator("input#mobile:visible").first.is_visible()
                     )
                     if ready:
                         print(f"LOGIN_METHOD={method.upper()}\nLOGIN_ENTRY=OBSERVED", flush=True)

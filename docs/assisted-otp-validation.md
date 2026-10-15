@@ -16,3 +16,11 @@
 - Ruff F、全目录 format check、空基线验证、validator self-test、Git 索引隐私检查：PASS。
 
 官方公开前端源码证据见 [login-contract.md](login-contract.md)，不包含真实验证码或私有响应。当前变更的真实短信验证码端到端、真实账号采集、Windows/Linux 实机：NOT_RUN。后续真实流程应另行记录，不得用合成验证代替。
+
+## 普通登录控件适配简化（2026-10-15）
+
+按用户确认的自动手机号/验证码工作流，移除整段协议文字逐字相等、原生 checkbox 必须可见及全页面只能一个 SDK frame 的要求。只匹配相关可见表单，验证码输入定位不再同时依赖 type、maxlength、placeholder 三个展示属性；仍要求本次输入 6 位 ASCII 数字。已授权协议支持展示文字、空白/标点、二维码缺少自动注册说明、hideBack 参数的合理差异；同一自定义复选框使用可见 SDK 指示控件勾选并读回状态。
+
+普通控件暂缺、按钮暂不可用先自动等待最多 15 秒，不立即要求用户手动填号/验证码或重复授权。固定 CONTROL_STAGE/CONTROL_REASON 区分手机号控件、协议容器、协议链接/名称、额外文本及按钮状态，不输出页面文字或输入值。未知结构持续不恢复、实际副作用结果不确定仍明确停下，官方 Binding、来源闭合、双采集、风控/限流、一次发码及敏感输入保护未移除。
+
+最终定向回归 **298 passed, 1 skipped**；Chrome 全拦截合成 DOM **18 passed**，新增隐藏原生 checkbox + 可见样式控件、协议区延迟挂载、文案/展示参数差异、多个 SDK frame 和验证码表单延迟就绪。Ruff F、format check、Git diff check、空基线验证、validator self-test、索引隐私检查均 PASS。本轮真实页面适配与真实短信端到端仍需单独记录，不能以合成测试代替。

@@ -33,7 +33,7 @@ class Form(Control):
         self.submit = Control(text="登录")
 
     def locator(self, selector):
-        assert selector in {CODE_INPUT, 'button[type="submit"]'}
+        assert selector in {CODE_INPUT, 'button[type="submit"]:visible'}
         return self.field if selector == CODE_INPUT else self.submit
 
 
@@ -104,6 +104,7 @@ def test_only_confirmed_new_sms_prompts(state, monkeypatch, capsys):
 @pytest.mark.parametrize("invalid", ("origin", "duplicate", "terms", "submit", "form"))
 def test_unknown_form_hands_off_without_prompt_or_fill(invalid, capsys):
     action, page = fixture_action()
+    action.readiness.grace = 0
     if invalid == "origin":
         page.url = "https://user.mihoyo.com.evil.invalid/"
     elif invalid == "duplicate":
@@ -124,6 +125,7 @@ def test_unknown_form_hands_off_without_prompt_or_fill(invalid, capsys):
 def test_uncertain_action_or_changed_context_never_retried(failure, monkeypatch):
     monkeypatch.setattr("hoyo_roster.otp_login.read_otp", input_code)
     action, page = fixture_action()
+    action.readiness.grace = 0
 
     async def run():
         try:
@@ -284,3 +286,24 @@ def test_coordinator_runs_assisted_code_and_finishes_binding(tmp_path, monkeypat
             OPTIONS.reset(token)
 
     asyncio.run(run())
+
+
+def test_late_form_mount_resumes_code_prompt_without_manual_handoff(monkeypatch, capsys):
+    monkeypatch.setattr("hoyo_roster.otp_login.read_otp", input_code)
+    action, page = fixture_action()
+    page.form.amount = 0
+
+    async def run():
+        await step(action, page)
+        assert not action.finished and action.task is None
+        page.form.amount = 1
+        for _ in range(5):
+            await step(action, page)
+            await asyncio.sleep(0)
+        assert page.form.field.fills == [SYNTHETIC_CODE] and page.form.submit.clicks == 1
+        await action.close()
+
+    asyncio.run(run())
+    output = capsys.readouterr().out
+    assert "OTP_AUTOMATION_MANUAL" not in output
+    assert output.count("OTP_INPUT_REQUIRED") == 1

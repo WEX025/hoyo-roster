@@ -24,3 +24,5 @@
 ## 辅助验证码控件证据（2026-10-15）
 
 重新读取上述官方公开桌面登录 chunk，SHA-256 仍为 `afe0e060f2d1b7f456f4f2d2453ad33648923920811c587e8e17db4b27453d97`。`CaptchaLoginPage` 使用 `form.captcha-login-page`；`cmnCaptchaInput` 根类 `.mhy-cmn-captcha-input` 内为 `type="tel"`、`maxlength=6`、placeholder“验证码”的输入；表单登录按钮 `native-type="submit"`、文本“登录”。代码只在唯一可见官方 SDK frame、已核验协议和上述唯一控件内操作；填写后下一轮重新检查再提交一次。静态源码与合成 DOM 不能证明当前真实账号登录已通过。
+
+普通登录控件适配更新：上述前端属性是定位线索，不要求其全部逐字相等。验证码框在可见官方短信表单内按专用输入组件或 one-time-code 语义定位；协议按已授权名称/官方文档目标及有无额外义务识别，支持 SDK 自定义 checkbox 的可见指示控件。页面渲染暂缺先有界等待，具体固定诊断不含原始 DOM。

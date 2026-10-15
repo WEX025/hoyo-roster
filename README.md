@@ -78,7 +78,7 @@ hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 
 `--allow-login` 只允许说明中的本机手动登录与会话复用，不替代本人确认官方协议，也不授予未知新权限。`--headless` 只适用于已登录且身份匹配的会话；需要新登录时会停止。
 
-若希望由代码填写手机号并请求一次短信，使用 `hoyo-roster --game genshin --login-method phone --phone-stdin --allow-sms`（绝区零改为 `--game zzz`）。需要登录时，号码从终端临时隐藏输入，或由非交互调用者提供一行 stdin；不放在命令行、不记录或输出。本人须阅读官方协议（未注册号码验证通过可能自动注册）；未单独允许代勾时，在**本工具打开的原神养成计算器或绝区零米游社窗口**手动勾选。明确允许代勾时可加 `--allow-terms`。程序只在控件/协议唯一核对且已勾选后点一次“获取验证码”；图片 CAPTCHA 仍由本人操作；确认新发码后显示 `OTP_INPUT_REQUIRED`，再从隐藏输入读取本次 6 位短信验证码，代填同一官方登录页并提交一次。验证码不写命令行、文件或日志；输入或控件未知时交还本人，不自动重试。一次自动发码授权在整条命令的发现/逐身份阶段共享，不会为第二个身份自动再发；页面未知或点击不确定交接，不重试。
+若希望由代码填写手机号并请求一次短信，使用 `hoyo-roster --game genshin --login-method phone --phone-stdin --allow-sms`（绝区零改为 `--game zzz`）。需要登录时，号码从终端临时隐藏输入，或由非交互调用者提供一行 stdin；不放在命令行、不记录或输出。本人须阅读官方协议（未注册号码验证通过可能自动注册）；未单独允许代勾时，在**本工具打开的原神养成计算器或绝区零米游社窗口**手动勾选。明确允许代勾时可加 `--allow-terms`。程序自动等待相关登录控件和已授权协议就绪，支持自定义复选框，不要求整段文案或展示参数逐字一致；就绪后点一次“获取验证码”；图片 CAPTCHA 仍由本人操作；确认新发码后显示 `OTP_INPUT_REQUIRED`，再从隐藏输入读取本次 6 位短信验证码，代填同一官方登录页并提交一次。验证码不写命令行、文件或日志；输入或控件未知时交还本人，不自动重试。一次自动发码授权在整条命令的发现/逐身份阶段共享，不会为第二个身份自动再发；页面未知或点击不确定交接，不重试。
 
 `SMS_SUBMITTING` 仅表示一次点击，`SMS_REQUESTING` 才表示观察到实际官方 POST，`SMS_ACCEPTED` 表示严格回执接受新发码，仍不证明手机送达。不要因点击或倒计时再次发码。Codex 内置浏览器的独立登录不能替代本工具窗口的会话。
 
@@ -105,6 +105,7 @@ hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 | `SAVING` / `SAVED` | 正在保存 / 数据已保存 |
 | `UNCHANGED` | 数据无变化，保留原业务时间戳 |
 | `CLEANUP_PENDING` | 保存已成功，清理尚未完成；按指南检查并执行恢复 |
+| `WAITING_FOR_LOGIN_CONTROLS` | 登录控件加载中，自动等待继续；阶段和原因见 CONTROL_STAGE / CONTROL_REASON，无需重复授权或手动填号 |
 | `OTP_INPUT_REQUIRED` / `OTP_FILLED` / `LOGIN_SUBMITTING` | 询问本次短信验证码 / 已临时代填 / 提交一次登录；这些状态不表示登录成功 |
 | `OTP_AUTOMATION_MANUAL` / `OTP_INPUT_INVALID` | 控件或提交结果未知时本人接管；输入无效时停止，不回显或重试 |
 | `LOGIN_TIMEOUT` / `LOGIN_CONTROL_UNAVAILABLE` | 等待超时或浏览器操控不可用，检查官方窗口后重新运行 |

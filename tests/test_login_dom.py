@@ -406,3 +406,52 @@ def test_assisted_sms_code_prompt_fill_and_single_submit(monkeypatch, capsys, ga
     assert output.index("SMS_ACCEPTED") < output.index("OTP_INPUT_REQUIRED")
     assert output.index("OTP_FILLED") < output.index("LOGIN_SUBMITTING")
     assert "135790" not in output and "19900000000" not in output
+
+
+def test_styled_hidden_checkbox_and_late_terms_mount_are_automatic(capsys):
+    from hoyo_roster.terms_login import TERMS_TEXT
+
+    # Element-style checkbox: the native input has zero size; its label indicator
+    # is visible. Terms are mounted after the phone field, as on an SDK render.
+    agreement = (
+        '<label class="agree-checkbox">'
+        '<span class="el-checkbox__inner" style="display:inline-block;width:16px;height:16px;background:#ddd"></span>'
+        '<input type="checkbox" style="position:absolute;opacity:0;width:0;height:0">'
+        '我已阅读并同意<a href="https://user.mihoyo.com/#/agreement">《米哈游用户协议》</a>'
+        '<a href="https://user.mihoyo.com/#/privacyAgreement">《米哈游隐私政策》</a>。'
+        "</label>"
+    )
+    html = (
+        '<input id="mobile"><div id="terms"></div>'
+        '<button onclick="fetch(' + repr(SMS) + ",{method:'POST'})\">获取验证码</button>"
+        '<script>window.mountTerms=()=>document.querySelector("#terms").innerHTML='
+        + json.dumps(agreement)
+        + "</script>"
+    )
+
+    async def run(context, page, sent):
+        watch = SmsReceiptWatch(context)
+        watch.start()
+        action = PhoneLoginAction("19900000000", watch, allow_terms=True)
+        captcha = ManualCaptchaWait("genshin")
+        deadline = monotonic() + 5
+        try:
+            await page.goto(SDK)
+            await action.step(page, captcha_wait=captcha, deadline=deadline)
+            assert not action.finished and not action.filled
+            await page.evaluate("mountTerms()")
+            assert not await page.get_by_role("checkbox").is_visible()
+            while watch.state is None and monotonic() < deadline:
+                await action.step(page, captcha_wait=captcha, deadline=deadline)
+                await asyncio.sleep(0.02)
+            assert await page.get_by_role("checkbox").is_checked()
+            assert not action.manual and sent == [SMS] and watch.state == "SMS_ACCEPTED"
+        finally:
+            action.close()
+            await watch.close()
+
+    asyncio.run(isolated(run, html))
+    output = capsys.readouterr().out
+    assert "WAITING_FOR_LOGIN_CONTROLS" in output
+    assert "PHONE_AUTOMATION_MANUAL" not in output
+    assert TERMS_TEXT not in output

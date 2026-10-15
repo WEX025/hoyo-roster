@@ -120,7 +120,11 @@ class Page:
         )
 
     def locator(self, selector):
-        return self if selector in {"img.qr-loaded", "input#mobile"} else InvisibleLocator()
+        return (
+            self
+            if selector in {"img.qr-loaded", "input#mobile", "input#mobile:visible"}
+            else InvisibleLocator()
+        )
 
     @property
     def first(self):

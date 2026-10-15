@@ -91,7 +91,9 @@ class Page:
         return [self]
 
     def locator(self, selector):
-        return self.mobile if selector == "input#mobile" else self.agreement
+        return (
+            self.mobile if selector in {"input#mobile", "input#mobile:visible"} else self.agreement
+        )
 
     def get_by_text(self, text, **kwargs):
         assert text == "获取验证码"
@@ -149,6 +151,7 @@ def test_unknown_controls_or_terms_handoff_without_sending(invalid, allow_terms)
     if invalid == "cooldown":
         page.send.amount = 0
     action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=allow_terms)
+    action.readiness.grace = 0  # This test covers terminal unknown controls, not loading waits.
     asyncio.run(step(action, page))
     asyncio.run(step(action, page))
     assert action.finished and page.send.clicks == 0 and action._number is None
@@ -199,6 +202,7 @@ def test_qr_terms_action_rejects_unknown_agreements():
     page = Page()
     page.agreement.text += "unknown permission"
     action = TermsLoginAction()
+    action.readiness.grace = 0
     asyncio.run(step(action, page))
     assert action.failed and page.agreement.checkbox.clicks == 0
 
@@ -329,3 +333,69 @@ def test_no_phone_read_without_consent_or_when_session_valid(
 def test_invalid_phone_options_stop_before_storage_or_browser(arguments, capsys):
     assert main(arguments) == 1
     assert "ERROR_CODE=INVALID_PHONE_LOGIN_OPTIONS" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "我已阅读并同意《米哈游用户协议》《米哈游隐私政策》。",
+        "已阅读并同意 《米哈游用户协议》 《米哈游隐私政策》 ，未注册的手机号验证通过将自动注册。",
+        "已阅读并同意《米哈游用户协议》《米哈游隐私政策》",
+    ),
+)
+def test_known_agreements_accept_cosmetic_wording_and_optional_presentation_flags(text):
+    page = Page()
+    page.agreement.text = text
+    page.agreement.links[0].href = "https://user.mihoyo.com/#/agreement"
+    page.agreement.links[1].href = "https://user.mihoyo.com/#/privacyAgreement?hideBack=false"
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=True)
+    asyncio.run(step(action, page))
+    assert page.agreement.checkbox.checked and page.mobile.fills == [NUMBER]
+    assert page.send.clicks == 1 and not action.manual
+
+
+def test_missing_terms_waits_for_mount_without_reasking_or_handoff(capsys):
+    page = Page()
+    page.agreement.amount = 0
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=True)
+    asyncio.run(step(action, page))
+    assert not action.finished and page.mobile.fills == []
+    page.agreement.amount = 1
+    asyncio.run(step(action, page))
+    assert page.send.clicks == 1 and page.mobile.fills == [NUMBER] and not action.manual
+    output = capsys.readouterr().out
+    assert "CONTROL_REASON=TERMS_CONTAINER_NOT_READY" in output
+    assert "PHONE_AUTOMATION_MANUAL" not in output
+
+
+def test_another_sdk_frame_without_a_phone_field_does_not_block():
+    class WithExtraFrame(Page):
+        @property
+        def frames(self):
+            return [self, extra]
+
+    extra = Page()
+    extra.mobile.amount = 0
+    page = WithExtraFrame()
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=True)
+    asyncio.run(step(action, page))
+    assert page.mobile.fills == [NUMBER] and page.send.clicks == 1
+    assert extra.mobile.fills == [] and extra.send.clicks == 0
+
+
+def test_unknown_terms_eventually_handoff_with_fixed_diagnostic(monkeypatch, capsys):
+    import hoyo_roster.login_controls as controls
+
+    now = [100.0]
+    monkeypatch.setattr(controls, "monotonic", lambda: now[0])
+    page = Page()
+    page.agreement.text += "并预约游戏消息通知"
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=True)
+    asyncio.run(step(action, page))
+    assert not action.finished and page.agreement.checkbox.clicks == 0
+    now[0] += 16
+    asyncio.run(step(action, page))
+    assert action.manual and page.mobile.fills == [] and page.send.clicks == 0
+    output = capsys.readouterr().out
+    assert output.count("CONTROL_REASON=TERMS_EXTRA_TEXT") == 1
+    assert NUMBER not in output

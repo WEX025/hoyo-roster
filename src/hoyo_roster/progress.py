@@ -13,6 +13,7 @@ LABELS = {
     "QR_READY": "二维码已加载；请本人扫码并在手机确认，扫码成功仍须核验身份",
     "QR_SCANNED_WAIT_CONFIRM": "官方页面提示已扫码；请本人在手机确认，尚未证明登录成功",
     "WAITING_FOR_PHONE_AND_TERMS": "请本人在官方窗口输入手机号、阅读并确认协议、点击一次发送；程序不读输入值或自动发送",
+    "WAITING_FOR_LOGIN_CONTROLS": "等待登录控件就绪；自动继续，具体阶段和原因见 CONTROL_STAGE / CONTROL_REASON",
     "PHONE_ENTERED": "已在本工具的官方手机号窗口填写临时号码；未发短信，不输出或保存号码",
     "WAITING_FOR_TERMS": "请本人在本工具打开的官方窗口阅读并勾选协议；程序不自动接受，勾选后至多点击一次已授权发码",
     "LOGIN_CHOICE_REQUIRED": "会话缺失；请选择并允许二维码或手机号登录，可取消",

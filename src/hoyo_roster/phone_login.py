@@ -7,6 +7,7 @@ from playwright.async_api import Error as PlaywrightError
 from .errors import LoginTimeout, PhoneInputInvalid
 from .login_ui import sdk_frame, visible_frames
 from .progress import emit
+from .login_controls import ControlReadiness
 from .terminal import read_terminal
 from .terms_login import TERMS_TEXT as TERMS_TEXT, TermsLoginAction, known_terms_checkbox
 
@@ -32,6 +33,7 @@ class PhoneLoginAction:
         self.attempted = False
         self.waiting_for_terms = False
         self.manual = False
+        self.readiness = ControlReadiness("PHONE")
         self.terms = TermsLoginAction() if allow_terms else None
 
     def handoff(self, code="PHONE_AUTOMATION_MANUAL"):
@@ -59,16 +61,24 @@ class PhoneLoginAction:
         try:
             async with asyncio.timeout(min(2, remaining)):
                 frames = [frame for frame in await visible_frames(page) if sdk_frame(frame)]
-                if len(frames) != 1:
-                    self.handoff()
+                matches = []
+                for frame in frames:
+                    mobile = frame.locator("input#mobile:visible")
+                    if await mobile.count() == 1 and await mobile.is_visible():
+                        matches.append((frame, mobile))
+                if len(matches) != 1:
+                    if self.readiness.waiting("PHONE_INPUT_NOT_READY_OR_AMBIGUOUS"):
+                        self.handoff()
                     return
-                frame = frames[0]
-                mobile = frame.locator("input#mobile")
-                checkbox = await known_terms_checkbox(frame)
-                if await mobile.count() != 1 or not await mobile.is_visible() or checkbox is None:
-                    self.handoff()
+                frame, mobile = matches[0]
+                reasons = []
+                checkbox = await known_terms_checkbox(frame, on_missing=reasons.append)
+                if checkbox is None:
+                    if self.readiness.waiting(reasons[0]):
+                        self.handoff()
                     return
                 if not self.filled:
+                    self.readiness.ready()
                     self.filled = True  # uncertain fill is never automatically repeated
                     number, self._number = self._number, None
                     await mobile.fill(number, timeout=1500)
@@ -90,8 +100,10 @@ class PhoneLoginAction:
                     or not await send.is_visible()
                     or not await send.is_enabled()
                 ):
-                    self.handoff()
+                    if self.readiness.waiting("SMS_BUTTON_NOT_READY_OR_AMBIGUOUS"):
+                        self.handoff()
                     return
+                self.readiness.ready()
                 if self.watch.request is not None:
                     self.finished = True
                     return
@@ -101,7 +113,10 @@ class PhoneLoginAction:
         except (TimeoutError, PlaywrightError, ValueError):
             if self.terms is not None and self.terms.attempted and not self.terms.finished:
                 self.terms.handoff()
-            self.handoff("SMS_ACTION_UNCERTAIN" if self.attempted else "PHONE_AUTOMATION_MANUAL")
+            if self.filled or self.attempted or self.readiness.waiting("PHONE_CONTROL_UNAVAILABLE"):
+                self.handoff(
+                    "SMS_ACTION_UNCERTAIN" if self.attempted else "PHONE_AUTOMATION_MANUAL"
+                )
 
     def close(self):
         self._number = None
