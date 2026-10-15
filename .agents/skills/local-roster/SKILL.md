@@ -1,12 +1,22 @@
 ---
 name: local-roster
-description: Use when collecting the user's own Genshin or ZZZ data with this installed project. Log in first and discover owned UIDs automatically on every OS. HSR is temporarily unavailable; do not use it. Do not use for other people's accounts or public publication.
+description: Check the user's Genshin/ZZZ session, coordinate QR or assisted phone login when needed, discover owned UIDs and collect private local character data. HSR is paused. Not for other people's accounts or public publication.
 ---
 
 Read the repository's AGENTS.md and docs/local-use.md as the authoritative workflow.
 Start with `hoyo-roster` (both supported games), or `hoyo-roster --game <genshin|zzz>` if the user selected one game. Use `python -m hoyo_roster` if the script is not on PATH.
 Do not ask the user to supply a UID before login. On Windows, macOS and Linux, the same public entrypoint obtains the user's allowed manual login, discovers owned roles from official Binding, then verifies each exact game/UID/region before collection. Reuse an existing valid session and saved selection when available. Browser choice does not change this workflow.
 Use `--uid` only when the user already supplied an explicit identity or for an explicitly scoped offline maintenance operation; it is not a prerequisite for collecting the user's data.
+
+## Session-first login workflow
+
+Start the public CLI in an interactive terminal/PTY with stdin kept open, without a guessed login method or prior login permission. Let the program open its dedicated browser, initialize the official session and check Binding. A valid session proceeds directly to discovery/verification and collection; do not ask login questions before this check. Keep that process and window alive while obtaining answers. Do not run a headless probe that closes the browser and forces a new discovery session just to ask the question.
+
+On `LOGIN_CHOICE_REQUIRED`, explain official communication and local private Profile reuse, then ask the person to choose QR, phone or cancel. Selecting assisted phone login includes temporary number transmission/fill and one SMS request; say so in the question. Separately ask whether they permit checking the known official 《米哈游用户协议》 and 《米哈游隐私政策》 checkbox. Present the links printed in the CLI notice and the unregistered-number automatic-registration notice. A login/phone choice alone does not authorize terms acceptance. Preserve explicit answers already given for this task and scope; do not ask for the same authorization again.
+
+Once answered, send the method (`1` QR / `2` assisted phone / `3` cancel) to the waiting CLI. At `TERMS_CHOICE_REQUIRED`, send `y` only with explicit terms permission; otherwise send `n`. Phone selection activates ephemeral hidden stdin input and one guarded send, so do not fall back to manual number entry merely because the person supplied the number in chat. Deliver the supplied number only when the hidden phone prompt is ready; never place it in argv, shell commands, files or logs. QR requires the person to scan/confirm; phone requires the person to enter the received OTP in the same official window. Without terms permission, hand off the known checkbox to the person, then the program sends once. The default sync command continues through exact identity verification, both collection passes, validation, save and actual browser close; do not stop after login.
+
+For an already authorized noninteractive invocation, pass the chosen `--login-method`, `--non-interactive`, `--allow-login`, and for assisted phone `--phone-stdin --allow-sms`, transporting the number through ephemeral stdin. Add `--allow-terms` only with separate explicit permission for the known agreements. Without a usable interactive stdin or an explicit prior choice, report the limitation instead of inventing consent or restarting an unknown retained session. Later identities/games with missing sessions get their own prompt; a used one-send authorization is never renewed implicitly.
 Honkai: Star Rail is temporarily unavailable; please do not use it. The retained `hsr` interface is not a supported collection workflow. Genshin currently excludes artifacts and full stat panels; its character roster must still satisfy closure checks. See AGENTS.md and docs/data-format.md for the authoritative scope.
 Missing tools in an agent host do not imply their presence in a normal terminal. Report installation or user-interaction blockers accurately.
 
@@ -14,7 +24,7 @@ For acceptance testing, freeze the checkout and use the chosen environment's Pyt
 
 Use code for official navigation, request observation, identity checks, collection and persistence. Agent browser tools only locate the current CLI-owned official window and deliver the user handoff. If the known window cannot be selected or one control call fails/times out, report the exact pending stage and stop agent UI attempts for this run. Do not cycle app switching, scan unrelated windows, guess coordinates, or log into another browser as a substitute.
 
-On `LOGIN_PANEL_MANUAL` / `PHONE_AUTOMATION_MANUAL`, leave the same CLI/window running and hand control to the person; do not add agent clicks. On `WAITING_FOR_MANUAL_CAPTCHA`, name the corresponding official window and wait for the person. On `WAITING_FOR_TERMS`, the person reviews/checks the official terms. OTPs and QR confirmation remain in the official UI. Preserve earlier authorization, but an uncertain SMS request is never permission to repeat it.
+On `LOGIN_PANEL_MANUAL` / `PHONE_AUTOMATION_MANUAL` / `TERMS_AUTOMATION_MANUAL`, leave the same CLI/window running and hand control to the person; do not add agent clicks. On `WAITING_FOR_MANUAL_CAPTCHA`, name the corresponding official window and wait for the person. On `WAITING_FOR_TERMS`, the person reviews/checks the official terms because delegated acceptance was not granted. `TERMS_ACCEPTED` means only that the explicitly authorized known checkbox was checked. OTPs and QR confirmation remain in the official UI. Preserve earlier authorization, but an uncertain SMS request is never permission to repeat it.
 
 Treat `SMS_SUBMITTING`, `SMS_REQUESTING`, strict `SMS_ACCEPTED` and authenticated Binding as separate evidence. Unknown/rejected receipts stop the run; never retry Send or use an old code. For no roles, report `NO_ROLES` / `NOT_COLLECTED`, not completed collection. Use fixed terminal states and the user's own action as evidence; do not inspect form values, cookies or screenshots.
 

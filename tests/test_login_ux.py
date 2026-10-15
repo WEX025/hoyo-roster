@@ -46,6 +46,38 @@ def test_noninteractive_missing_choice_stops():
         OPTIONS.reset(token)
 
 
+@pytest.mark.parametrize("method_answer,method", (("1", "qr"), ("2", "phone")))
+@pytest.mark.parametrize("terms_answer,allowed", (("y", True), ("n", False), ("", False)))
+def test_interactive_terms_permission_is_separate(
+    monkeypatch, method_answer, method, terms_answer, allowed
+):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter((method_answer, terms_answer))
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    options = LoginOptions()
+    token = OPTIONS.set(options)
+    try:
+        assert asyncio.run(choose_method()) == method
+        assert options.allow_terms == allowed
+        assert (options.phone_input is not None) == (method == "phone")
+        assert asyncio.run(choose_method()) == method  # Same login never asks again.
+    finally:
+        OPTIONS.reset(token)
+
+
+def test_interactive_resume_does_not_enable_automatic_sms(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter(("2", "n"))
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    options = LoginOptions(phone_assistance_available=False)
+    token = OPTIONS.set(options)
+    try:
+        assert asyncio.run(choose_method()) == "phone"
+        assert options.phone_input is None
+    finally:
+        OPTIONS.reset(token)
+
+
 @pytest.mark.parametrize("game", ("genshin", "zzz", "hsr"))
 def test_cancel_does_not_open_official_login(tmp_path, source, game, capsys):
     root = tmp_path / "workspace"

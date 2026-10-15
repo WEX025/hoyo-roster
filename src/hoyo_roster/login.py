@@ -250,6 +250,7 @@ async def coordinate_login(
     deadline = None
     sms_watches: list[SmsReceiptWatch] = []
     phone_actions = []
+    terms_actions = []
 
     def notify_waiting() -> None:
         nonlocal waiting_signal_count, interaction_required
@@ -279,7 +280,9 @@ async def coordinate_login(
 
                 options.phone_input.used = True
                 async with asyncio.timeout(max(0.0, deadline - monotonic())):
-                    action = PhoneLoginAction(await read_phone(), watch)
+                    action = PhoneLoginAction(
+                        await read_phone(), watch, allow_terms=options.allow_terms
+                    )
                 phone_actions.append(action)
         prepared.append(provider)
         async with asyncio.timeout(max(0.0, deadline - monotonic())):
@@ -311,6 +314,11 @@ async def coordinate_login(
                 action.authenticated()
             return success
 
+        terms_action = None
+        if action is None and options is not None and options.allow_terms:
+            from .terms_login import TermsLoginAction
+
+            terms_action = TermsLoginAction()
         manual = await confirm_method_entry(
             login_page,
             method,
@@ -318,9 +326,15 @@ async def coordinate_login(
             deadline=deadline,
             authenticated=authenticated,
             poll_interval=poll_interval,
+            terms_action=terms_action,
         )
         if manual and action is not None:
             action.handoff()
+        if terms_action is not None:
+            if manual:
+                terms_action.handoff()
+            else:
+                terms_actions.append((terms_action, login_page, captcha_wait))
 
     try:
         # Existing-session bootstrap, its throttle, and the initial Binding share
@@ -364,6 +378,8 @@ async def coordinate_login(
                     await captcha_wait.ready(login_page, deadline)
                 for watch in sms_watches:
                     watch.check()
+                for terms, terms_page, terms_captcha in terms_actions:
+                    await terms.step(terms_page, captcha_wait=terms_captcha, deadline=deadline)
                 for action in phone_actions:
                     await action.step(
                         action.page, captcha_wait=action.captcha_wait, deadline=deadline

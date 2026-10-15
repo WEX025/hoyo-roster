@@ -303,6 +303,9 @@ async def run_discovery(args) -> int:
     try:
         with io.exclusive_lock(parent / "workspace.lock"):
             for game in games:
+                # Ask only if this game's session needs login. Interactive choices
+                # are local to that login; explicit CLI SMS permission stays shared.
+                OPTIONS.set(options_from_args(args))
                 registry = parent / f"selected-{game}.json"
                 if resume_id is None and args.operation != "discover" and os.path.lexists(registry):
                     roles = cached_roles(game, load_metadata(registry, private=True))

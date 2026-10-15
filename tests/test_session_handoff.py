@@ -308,23 +308,25 @@ def test_initialization_guard(url, method, resource, allowed):
     assert route.accepted == allowed
 
 
-def test_notice_precedes_single_interactive_consent(monkeypatch, capsys):
+def test_notice_precedes_method_and_separate_terms_consent(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     prompts = []
 
     def answer(prompt):
-        assert "登录前说明" in capsys.readouterr().out
+        if not prompts:
+            assert "登录前说明" in capsys.readouterr().out
         prompts.append(prompt)
-        return "2"
+        return "2" if len(prompts) == 1 else "y"
 
     monkeypatch.setattr("builtins.input", answer)
     token = OPTIONS.set(LoginOptions())
     try:
         assert asyncio.run(choose_method()) == "phone"
         assert asyncio.run(choose_method()) == "phone"
+        assert OPTIONS.get().allow_terms and OPTIONS.get().phone_input is not None
     finally:
         OPTIONS.reset(token)
-    assert len(prompts) == 1 and "允许" in prompts[0]
+    assert len(prompts) == 2 and all("允许" in prompt for prompt in prompts)
 
 
 def test_noninteractive_method_does_not_imply_consent(capsys):

@@ -27,7 +27,9 @@ async def isolated(run, html, *, root=ROOT, game="genshin"):
     unexpected = []
     sent = []
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(channel="chromium", headless=True)
+        browser = await playwright.chromium.launch(
+            channel=os.environ.get("HOYO_TEST_BROWSER_CHANNEL", "chromium"), headless=True
+        )
         context = await browser.new_context(service_workers="block")
         context.set_default_timeout(3000)
 
@@ -129,7 +131,8 @@ def test_phone_terms_and_one_manual_request(capsys):
     assert "SMS_ACCEPTED" in capsys.readouterr().out
 
 
-def test_authorized_phone_fill_waits_for_terms_and_one_real_dom_click(capsys):
+@pytest.mark.parametrize("allow_terms", (False, True))
+def test_authorized_phone_fill_terms_and_one_real_dom_click(capsys, allow_terms):
     html = (
         '<input id="mobile"><label class="agree-checkbox"><input type="checkbox">'
         '已阅读并同意<a href="https://user.mihoyo.com/#/agreement?hideBack=true">《米哈游用户协议》</a>'
@@ -142,7 +145,7 @@ def test_authorized_phone_fill_waits_for_terms_and_one_real_dom_click(capsys):
     async def run(context, page, sent):
         watch = SmsReceiptWatch(context)
         watch.start()
-        action = PhoneLoginAction("19900000000", watch)
+        action = PhoneLoginAction("19900000000", watch, allow_terms=allow_terms)
         captcha = ManualCaptchaWait("genshin")
         deadline = monotonic() + 4
         try:
@@ -150,9 +153,11 @@ def test_authorized_phone_fill_waits_for_terms_and_one_real_dom_click(capsys):
             await action.step(page, captcha_wait=captcha, deadline=deadline)
             await action.step(page, captcha_wait=captcha, deadline=deadline)
             assert await page.locator("#mobile").input_value() == "19900000000"
-            assert not await page.get_by_role("checkbox").is_checked() and sent == []
-            await page.get_by_role("checkbox").check()  # synthetic person confirms terms
-            await action.step(page, captcha_wait=captcha, deadline=deadline)
+            if not allow_terms:
+                assert not await page.get_by_role("checkbox").is_checked() and sent == []
+                await page.get_by_role("checkbox").check()  # synthetic person confirms terms
+                await action.step(page, captcha_wait=captcha, deadline=deadline)
+            assert await page.get_by_role("checkbox").is_checked()
             while watch.state is None and monotonic() < deadline:
                 watch.check()
                 await asyncio.sleep(0.02)
@@ -166,12 +171,38 @@ def test_authorized_phone_fill_waits_for_terms_and_one_real_dom_click(capsys):
     asyncio.run(isolated(run, html))
     output = capsys.readouterr().out
     assert "19900000000" not in output
-    assert output.index("WAITING_FOR_TERMS") < output.index("SMS_SUBMITTING")
+    assert output.index("TERMS_ACCEPTED" if allow_terms else "WAITING_FOR_TERMS") < output.index(
+        "SMS_SUBMITTING"
+    )
     assert (
         output.index("SMS_SUBMITTING")
         < output.index("SMS_REQUESTING")
         < output.index("SMS_ACCEPTED")
     )
+
+
+def test_authorized_qr_terms_can_unlock_entry_before_qr_is_ready(capsys):
+    from hoyo_roster.terms_login import TermsLoginAction
+
+    html = (
+        '<label class="agree-checkbox"><input type="checkbox" onchange="checks++;'
+        "document.querySelector('#qr').innerHTML=qr\">"
+        '已阅读并同意<a href="https://user.mihoyo.com/#/agreement?hideBack=true">《米哈游用户协议》</a>'
+        '<a href="https://user.mihoyo.com/#/privacyAgreement?hideBack=true">《米哈游隐私政策》</a>'
+        '，未注册的手机号验证通过将自动注册。</label><div id="qr"></div>'
+        "<script>window.checks=0;window.qr=" + json.dumps(QR) + "</script>"
+    )
+
+    async def run(context, page, sent):
+        await page.goto(SDK)
+        action = TermsLoginAction()
+        await confirm_method_entry(page, "qr", deadline=monotonic() + 4, terms_action=action)
+        assert await page.get_by_role("checkbox").is_checked()
+        assert await page.evaluate("checks") == 1 and sent == []
+
+    asyncio.run(isolated(run, html))
+    output = capsys.readouterr().out
+    assert output.index("TERMS_ACCEPTED") < output.index("QR_READY")
 
 
 def test_captcha_pauses_probes_and_disappeared_panel_accepts_binding(capsys):
