@@ -31,9 +31,11 @@ class PhoneLoginAction:
         self.finished = False
         self.attempted = False
         self.waiting_for_terms = False
+        self.manual = False
         self.terms = TermsLoginAction() if allow_terms else None
 
     def handoff(self, code="PHONE_AUTOMATION_MANUAL"):
+        self.manual = True
         self._number = None
         self.finished = True
         emit(code)

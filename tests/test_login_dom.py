@@ -350,3 +350,59 @@ def test_late_sdk_control_stays_manual_after_handoff(monkeypatch):
         assert await asyncio.wait_for(task, timeout=3) is True
 
     asyncio.run(isolated(run, "<div>Loading synthetic SDK</div>"))
+
+
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
+def test_assisted_sms_code_prompt_fill_and_single_submit(monkeypatch, capsys, game):
+    from hoyo_roster.otp_login import OtpLoginAction
+
+    html = (
+        '<form class="captcha-login-page" onsubmit="event.preventDefault();submissions++">'
+        '<input id="mobile"><div class="mhy-cmn-captcha-input">'
+        '<input type="tel" maxlength="6" placeholder="验证码" '
+        "oninput=\"document.querySelector('button[type=submit]').disabled=this.value.length!==6\">"
+        '</div><label class="agree-checkbox"><input type="checkbox">'
+        '已阅读并同意<a href="https://user.mihoyo.com/#/agreement?hideBack=true">《米哈游用户协议》</a>'
+        '<a href="https://user.mihoyo.com/#/privacyAgreement?hideBack=true">《米哈游隐私政策》</a>'
+        "，未注册的手机号验证通过将自动注册。</label>"
+        '<span onclick="fetch(' + repr(SMS) + ",{method:'POST'})\">获取验证码</span>"
+        '<button type="submit" disabled>登录 </button></form><script>window.submissions=0</script>'
+    )
+    reads = []
+
+    async def read(prompt, *, hidden):
+        reads.append(hidden)
+        return "135790"  # Synthetic code, never a real authentication challenge.
+
+    monkeypatch.setattr("hoyo_roster.otp_login.read_terminal", read)
+
+    async def run(context, page, sent):
+        watch = SmsReceiptWatch(context)
+        watch.start()
+        phone = PhoneLoginAction("19900000000", watch, allow_terms=True)
+        otp = OtpLoginAction(phone)
+        captcha = ManualCaptchaWait(game)
+        deadline = monotonic() + 8
+        try:
+            await page.goto(SDK)
+            while not otp.finished and monotonic() < deadline:
+                await phone.step(page, captcha_wait=captcha, deadline=deadline)
+                await otp.step(page, captcha_wait=captcha, deadline=deadline)
+                await asyncio.sleep(0.02)
+            for _ in range(2):
+                await otp.step(page, captcha_wait=captcha, deadline=deadline)
+            assert watch.state == "SMS_ACCEPTED" and sent == [SMS]
+            assert reads == [True]
+            assert await page.locator('input[placeholder="验证码"]').input_value() == "135790"
+            assert await page.evaluate("submissions") == 1
+            assert otp.finished and otp.task is None
+        finally:
+            await otp.close()
+            phone.close()
+            await watch.close()
+
+    asyncio.run(isolated(run, html))
+    output = capsys.readouterr().out
+    assert output.index("SMS_ACCEPTED") < output.index("OTP_INPUT_REQUIRED")
+    assert output.index("OTP_FILLED") < output.index("LOGIN_SUBMITTING")
+    assert "135790" not in output and "19900000000" not in output

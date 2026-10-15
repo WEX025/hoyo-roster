@@ -97,5 +97,9 @@ class PhoneInputInvalid(OperationError):
     code = "PHONE_INPUT_INVALID"
 
 
+class OtpInputInvalid(OperationError):
+    code = "OTP_INPUT_INVALID"
+
+
 class RequestScheduleInvalid(ConfigurationError):
     code = "REQUEST_SCHEDULE_INVALID"

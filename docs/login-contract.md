@@ -17,6 +17,10 @@
 - `https://passport-api.mihoyo.com/account/ma-cn-passport/web/createQRLogin`
 - `https://passport-api.mihoyo.com/account/ma-cn-passport/web/queryQRLoginStatus`
 
-旧 `/account/loginByMobileCaptcha` 已不在当前登录允许列表。保留精确官方会话 verifyCookieToken 和设备初始化 getFp 契约；只有官方页面自然发出这些请求。业务写入、其他 POST、伪造 host、路径后缀、非 HTTPS 和无关方法继续拒绝；登录阶段禁止 rpgcultivate 业务请求，完成登录后封闭页面并切换业务 guard。代码不直接代调这四条认证 API，也不自动填写手机号/验证码或扫码。
+旧 `/account/loginByMobileCaptcha` 已不在当前登录允许列表。保留精确官方会话 verifyCookieToken 和设备初始化 getFp 契约；只有官方页面自然发出这些请求。业务写入、其他 POST、伪造 host、路径后缀、非 HTTPS 和无关方法继续拒绝；登录阶段禁止 rpgcultivate 业务请求，完成登录后封闭页面并切换业务 guard。代码不直接代调这四条认证 API。经本人允许的辅助流程可临时填写手机号、请求一次短信，并在严格确认新发码后隐藏接收本次验证码，在唯一受检官方表单代填并提交一次；不扫码、不处理图片 CAPTCHA，不扩大请求白名单。
 
 三个游戏的官方网页是否在当前账号环境提供二维码/手机号入口仍是 **NOT_RUN**。命令选择方式后只读取入口可见性，未观察到就明确停止；没有把静态源码推断说成实际网页能力。
+
+## 辅助验证码控件证据（2026-10-15）
+
+重新读取上述官方公开桌面登录 chunk，SHA-256 仍为 `afe0e060f2d1b7f456f4f2d2453ad33648923920811c587e8e17db4b27453d97`。`CaptchaLoginPage` 使用 `form.captcha-login-page`；`cmnCaptchaInput` 根类 `.mhy-cmn-captcha-input` 内为 `type="tel"`、`maxlength=6`、placeholder“验证码”的输入；表单登录按钮 `native-type="submit"`、文本“登录”。代码只在唯一可见官方 SDK frame、已核验协议和上述唯一控件内操作；填写后下一轮重新检查再提交一次。静态源码与合成 DOM 不能证明当前真实账号登录已通过。

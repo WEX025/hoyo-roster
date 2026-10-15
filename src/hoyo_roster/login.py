@@ -250,6 +250,7 @@ async def coordinate_login(
     deadline = None
     sms_watches: list[SmsReceiptWatch] = []
     phone_actions = []
+    otp_actions = []
     terms_actions = []
 
     def notify_waiting() -> None:
@@ -284,6 +285,9 @@ async def coordinate_login(
                         await read_phone(), watch, allow_terms=options.allow_terms
                     )
                 phone_actions.append(action)
+                from .otp_login import OtpLoginAction
+
+                otp_actions.append((OtpLoginAction(action), action))
         prepared.append(provider)
         async with asyncio.timeout(max(0.0, deadline - monotonic())):
             await provider.prepare_login_or_session(context, page, request_gate)
@@ -384,6 +388,8 @@ async def coordinate_login(
                     await action.step(
                         action.page, captcha_wait=action.captcha_wait, deadline=deadline
                     )
+                for otp, phone in otp_actions:
+                    await otp.step(phone.page, captcha_wait=phone.captcha_wait, deadline=deadline)
                 async with asyncio.timeout(max(0.0, deadline - monotonic())):
                     coverage = await _probe_coverage(
                         context=context,
@@ -415,6 +421,14 @@ async def coordinate_login(
     finally:
         cleanup_failed = False
         cleanup_cancelled: asyncio.CancelledError | None = None
+        for otp, _ in otp_actions:
+            try:
+                await otp.close()
+            except asyncio.CancelledError as error:
+                cleanup_failed = True
+                cleanup_cancelled = error
+            except BaseException:
+                cleanup_failed = True
         for action in phone_actions:
             action.close()
         for watch in reversed(sms_watches):

@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-sms",
         action="store_true",
-        help="authorize one automatic SMS click per command after the user checks official terms; requires --phone-stdin",
+        help="authorize one SMS click, then hidden code input and one official login submit; requires --phone-stdin; terms need separate permission",
     )
     parser.add_argument(
         "--allow-terms",
