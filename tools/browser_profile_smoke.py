@@ -6,23 +6,23 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch
+
+from native_browser import BrowserNotInstalled, choose_channel, prepare_profile
 
 from hoyo_roster import platform_io as io
 from hoyo_roster.auth import account_browser
-from hoyo_roster.storage.common import secure_private_directory
 
 URL = "https://hoyo-profile.invalid/"
 
 
-async def check():
+async def check(channel):
     temporary = io.temporary_root()
     root = io.filesystem_path(Path(tempfile.mkdtemp(prefix="hoyo-browser-profile-", dir=temporary)))
     completed = False
     try:
         for first, second in ((True, True), (True, False), (False, True)):
             mode = f"{'headed' if first else 'headless'}_to_{'headed' if second else 'headless'}"
-            profile = secure_private_directory(root / mode)
+            profile = prepare_profile(root / mode, channel)
             async with account_browser(profile, headed=first) as context:
                 await context.route(
                     "**/*", lambda route: route.fulfill(body="<!doctype html>offline")
@@ -74,14 +74,15 @@ async def check():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--channel", choices=("auto", "chromium"), default="auto")
+    parser.add_argument("--channel", choices=("auto", "chrome", "msedge", "chromium"), default=None)
     options = parser.parse_args()
     try:
-        if options.channel == "chromium":
-            with patch("hoyo_roster.browser_runtime.preferred_channel", return_value="chromium"):
-                asyncio.run(check())
-        else:
-            asyncio.run(check())
+        channel = choose_channel(options.channel)
+        print(f"NATIVE_BROWSER_CHANNEL={channel}", flush=True)
+        asyncio.run(check(channel))
+    except BrowserNotInstalled as error:
+        print(f"BROWSER_PROFILE_SMOKE=BLOCKED\nERROR_CODE={error}")
+        raise SystemExit(2)
     except Exception:
         print("BROWSER_PROFILE_SMOKE=FAIL\nERROR_CODE=BROWSER_PROFILE_SMOKE_FAILED")
         raise SystemExit(1)

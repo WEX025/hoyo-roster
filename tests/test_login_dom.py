@@ -1,4 +1,4 @@
-"""Opt-in real Chromium, fully intercepted synthetic pages; no official traffic/auth."""
+"""Opt-in installed browser, intercepted synthetic pages; no official traffic/auth."""
 
 import asyncio
 import json
@@ -13,9 +13,13 @@ from hoyo_roster.login_ui import ManualCaptchaWait, confirm_method_entry
 from hoyo_roster.sms import SMS_PATH, SmsReceiptWatch
 from hoyo_roster.phone_login import PhoneLoginAction
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("HOYO_NATIVE_LOGIN_SMOKE") != "1", reason="explicit isolated browser smoke only"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.environ.get("HOYO_NATIVE_LOGIN_SMOKE") != "1",
+        reason="explicit isolated browser smoke only",
+    ),
+    pytest.mark.usefixtures("native_browser_channel"),
+]
 
 ROOT = "https://act.mihoyo.com/ys/event/calculator/index.html"
 SDK = "https://user.mihoyo.com/login-platform/index.html"
@@ -35,7 +39,7 @@ async def isolated(run, html, *, root=ROOT, game="genshin"):
     sent = []
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            channel=os.environ.get("HOYO_TEST_BROWSER_CHANNEL", "chromium"), headless=True
+            channel=os.environ["HOYO_TEST_BROWSER_CHANNEL"], headless=True
         )
         context = await browser.new_context(service_workers="block")
         context.set_default_timeout(3000)

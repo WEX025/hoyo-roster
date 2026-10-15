@@ -23,6 +23,19 @@ def local_tool():
     return cli
 
 
+@pytest.fixture(scope="session")
+def native_browser_channel():
+    from tools.native_browser import BrowserNotInstalled, choose_channel
+
+    try:
+        channel = choose_channel()
+    except BrowserNotInstalled as error:
+        raise pytest.UsageError(str(error)) from None
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv("HOYO_TEST_BROWSER_CHANNEL", channel)
+        yield channel
+
+
 @pytest.fixture(autouse=True)
 def no_live_account_browser(monkeypatch):
     from hoyo_roster import auth

@@ -108,19 +108,20 @@ except KeyboardInterrupt:
     os.name == "nt" or os.environ.get("HOYO_NATIVE_LOGIN_SMOKE") != "1",
     reason="opt-in POSIX native browser cancellation smoke",
 )
-def test_process_group_ctrl_c_closes_browser_without_second_input(tmp_path):
-    code = """import asyncio, sys
+def test_process_group_ctrl_c_closes_browser_without_second_input(tmp_path, native_browser_channel):
+    code = """import asyncio, os, sys
 from pathlib import Path
-from hoyo_roster.cli import CONTRACT_ROOT
 from hoyo_roster.auth import account_browser
 from hoyo_roster.login_ui import choose_method
 from hoyo_roster.progress import OPTIONS, LoginOptions
 from hoyo_roster.sync import operation_browser
+from tools.native_browser import prepare_profile
 sys.stdin.isatty = lambda: True
+profile = prepare_profile(Path(sys.argv[1]), os.environ['HOYO_TEST_BROWSER_CHANNEL'])
 async def run():
     token = OPTIONS.set(LoginOptions())
     try:
-        async with operation_browser(account_browser(Path(sys.argv[1]), headed=False)) as context:
+        async with operation_browser(account_browser(profile, headed=False)) as context:
             await context.route('**/*', lambda route: route.abort())
             await choose_method()
     finally:
