@@ -399,3 +399,46 @@ def test_unknown_terms_eventually_handoff_with_fixed_diagnostic(monkeypatch, cap
     output = capsys.readouterr().out
     assert output.count("CONTROL_REASON=TERMS_EXTRA_TEXT") == 1
     assert NUMBER not in output
+
+
+@pytest.mark.parametrize("answer,allowed", [("y", True), ("n", False)])
+def test_additional_sms_requires_new_explicit_answer(monkeypatch, answer, allowed):
+    from hoyo_roster.login_ui import renew_sms_authorization
+    from hoyo_roster.progress import LoginOptions, PhoneInput
+    from hoyo_roster.errors import LoginCancelled
+    import sys
+
+    options = LoginOptions(
+        "phone", consent_given=True, allow_terms=True, phone_input=PhoneInput(True)
+    )
+    original = options.phone_input
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    async def read(*args, **kwargs):
+        return answer
+
+    monkeypatch.setattr("hoyo_roster.login_ui.read_terminal", read)
+    if allowed:
+        asyncio.run(renew_sms_authorization(options))
+        assert options.phone_input is not original and not options.phone_input.used
+    else:
+        with pytest.raises(LoginCancelled):
+            asyncio.run(renew_sms_authorization(options))
+        assert options.phone_input is original and options.phone_input.used
+    assert original.used and options.consent_given and options.allow_terms
+
+
+def test_noninteractive_sms_grant_is_not_silently_renewed(monkeypatch):
+    from hoyo_roster.login_ui import renew_sms_authorization
+    from hoyo_roster.progress import LoginOptions, PhoneInput
+    from hoyo_roster.errors import SmsAuthorizationRequired
+
+    options = LoginOptions("phone", non_interactive=True, phone_input=PhoneInput(True))
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("noninteractive runs cannot infer new SMS consent")
+
+    monkeypatch.setattr("hoyo_roster.login_ui.read_terminal", forbidden)
+    with pytest.raises(SmsAuthorizationRequired):
+        asyncio.run(renew_sms_authorization(options))
+    assert options.phone_input.used

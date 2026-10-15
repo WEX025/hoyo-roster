@@ -267,7 +267,6 @@ def test_actual_game_chain_twice_and_noop(
 ):
     import importlib
 
-    domain = importlib.import_module(f"hoyo_roster.games.{game}.cli")
     browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     if game == "hsr":
         monkeypatch.setattr(browser, "_profile_has_active_browser_root", lambda profile: False)
@@ -287,7 +286,9 @@ def test_actual_game_chain_twice_and_noop(
             if game == "hsr" and session.business_guard_installed:
                 await browser.remove_business_guard(session)
 
-    monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
+    from tests.shared_browser import install
+
+    install(monkeypatch, simulated_browser)
     root = tmp_path / "private"
     if repository_output:
         from hoyo_roster import paths

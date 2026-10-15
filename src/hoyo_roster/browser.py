@@ -1,6 +1,10 @@
 """Official page initialization without exporting credentials or recording."""
 
 import asyncio
+from contextlib import asynccontextmanager, AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable
+from .blocking import run_blocking
+from .errors import OperationError
 from urllib.parse import urlparse
 from playwright.async_api import BrowserContext, Page
 from playwright.async_api import Error as PlaywrightError
@@ -188,3 +192,44 @@ async def initialize_session_page(context: BrowserContextAccess, url: str) -> No
             except PlaywrightError:
                 if primary_error is None:
                     raise ContextNotReusable("Session initialization cleanup failed") from None
+
+
+class BrowserCloseFailed(OperationError):
+    code = "BROWSER_CLOSE_FAILED"
+
+
+@asynccontextmanager
+async def operation_browser[T](
+    manager: AbstractAsyncContextManager[T], *, on_closed: Callable[[], None] | None = None
+) -> AsyncIterator[T]:
+    session = await manager.__aenter__()
+    primary = None
+    try:
+        yield session
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        cancelled = None
+        closing = asyncio.create_task(
+            manager.__aexit__(
+                type(primary) if primary else None,
+                primary,
+                primary.__traceback__ if primary else None,
+            )
+        )
+        try:
+            while not closing.done():
+                try:
+                    await asyncio.shield(closing)
+                except asyncio.CancelledError as error:
+                    cancelled = error
+            closing.result()
+        except BaseException:
+            print("BROWSER_CLOSE=FAILED", flush=True)
+            raise BrowserCloseFailed("Browser cleanup did not complete") from None
+        print("BROWSER_CLOSE=CLOSED", flush=True)
+        if on_closed is not None:
+            await run_blocking(on_closed)
+        if cancelled is not None:
+            raise cancelled

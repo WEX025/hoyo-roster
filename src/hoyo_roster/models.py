@@ -24,3 +24,10 @@ class LoginProbeResult:
             raise ValueError("a successful login probe requires an identity")
         if self.status is not LoginProbeStatus.PASS and self.identity is not None:
             raise ValueError("only a successful login probe may carry an identity")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class OwnedRole:
+    game: str
+    uid: str = field(repr=False)
+    region: str

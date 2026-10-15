@@ -53,28 +53,26 @@ def test_no_config_direct_init_is_safe_and_stable(
     assert uid not in str(store.root)
 
 
-def test_game_uid_isolates_data_browser_and_upgrade_preserves_it(tmp_path, source):
+def test_game_uid_isolates_results_without_initializing_auth(tmp_path, source):
     stores = [
         LocalSnapshotStore(
             source,
-            direct_configuration(g, uid, storage_root=tmp_path / "private"),
-            g,
-            candidate_policy=candidate_policy_for(g),
+            direct_configuration(
+                game, uid, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
+            ),
+            game,
+            candidate_policy=candidate_policy_for(game),
         )
-        for g in GAMES
+        for game in GAMES
         for uid in (UID_A, UID_B)
     ]
-    assert len({s.root for s in stores}) == 6
-    assert len({s.browser_profile for s in stores}) == 6
+    assert len({store.root for store in stores}) == 6
     for store in stores:
         with store.locked():
             current = store.prepare()
             before = tree_digest(current / "data")
-            store.browser_profile.mkdir(mode=0o700)
-            sentinel = store.browser_profile / "synthetic-state"
-            sentinel.write_text("synthetic persistent browser state")
             assert tree_digest(store.prepare() / "data") == before
-            assert sentinel.read_text() == "synthetic persistent browser state"
+    assert not (tmp_path / "auth").exists()
 
 
 @pytest.mark.parametrize(
@@ -140,7 +138,7 @@ class BusinessPage(Page):
         from hoyo_roster.games.genshin.endpoint_specs import CULTIVATION_LIST
 
         await super().goto(url, **kwargs)
-        if url != CALCULATOR_URL or not self.callbacks.get("response"):
+        if url != CALCULATOR_URL or self.routes or not self.callbacks.get("response"):
             return
         self.business_requests += 1
         request = SimpleNamespace(
@@ -192,7 +190,6 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     uid,
     repository_output,
 ):
-    import hoyo_roster.games.genshin.cli as domain
     from hoyo_roster.games.genshin.browser import BrowserSession, OfficialCollector
 
     context = Context(
@@ -210,7 +207,9 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     async def simulated_network_pacing(self, **kwargs):
         return None
 
-    monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
+    from tests.shared_browser import install
+
+    install(monkeypatch, simulated_browser)
     monkeypatch.setattr(OfficialCollector, "_throttle", simulated_network_pacing)
     from hoyo_roster.request_gate import RequestGate
 
@@ -241,11 +240,12 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     ]
     assert local_tool.main(args) == 0
     output = capsys.readouterr().out
-    assert "WAITING_FOR_USER_LOGIN=YES" in output
+    assert "PROGRESS=WAITING_FOR_USER" in output
     assert "DATA_MODIFIED=YES" in output and uid not in output
     # PR9 checks Binding during entry readiness, then verifies it in the waiting
     # loop; the second business pass has its own fresh Binding.
-    assert context.request.count == 4 and page.business_requests == 2
+    assert context.request.count == 5
+    assert sum(getattr(p, "business_requests", 0) for p in context.pages) == 2
     config = direct_configuration("genshin", uid, storage_root=root)
     store = LocalSnapshotStore(
         source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
@@ -267,14 +267,15 @@ def test_direct_genshin_fresh_login_and_two_pass_sync_without_auth_stubs(
     output = capsys.readouterr().out
     assert "NO_OP=YES" in output and "DATA_MODIFIED=NO" in output
     assert tree_digest(store.current() / "data") == before
-    assert context.request.count == 6 and page.business_requests == 4
+    assert context.request.count == 8
+    assert sum(getattr(p, "business_requests", 0) for p in context.pages) == 4
     assert all(not callbacks for callbacks in page.callbacks.values())
     context.request.payloads = [binding_payload("genshin", UID_B if uid == UID_A else UID_A)]
     assert local_tool.main([*args, "--headless"]) == 1
     output = capsys.readouterr().out
     assert "ERROR_CODE=WRONG_ACCOUNT" in output and uid not in output
     assert tree_digest(store.current() / "data") == before
-    assert page.business_requests == 4
+    assert sum(getattr(p, "business_requests", 0) for p in context.pages) == 4
 
 
 @pytest.mark.parametrize("game", ("genshin", "zzz"))
@@ -305,7 +306,9 @@ def test_direct_login_entrypoint_runs_real_game_binding_control_flow(
     async def simulated_network_pacing(self, **kwargs):
         return None
 
-    monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
+    from tests.shared_browser import install
+
+    install(monkeypatch, simulated_browser)
     from hoyo_roster.request_gate import RequestGate
 
     monkeypatch.setattr(RequestGate, "reserve", simulated_network_pacing)
@@ -332,7 +335,7 @@ def test_direct_login_entrypoint_runs_real_game_binding_control_flow(
         == 0
     )
     output = capsys.readouterr().out
-    assert output.count("WAITING_FOR_USER_LOGIN=YES") == 1
+    assert output.count("PROGRESS=WAITING_FOR_USER") == 1
     assert "STATUS=PASS" in output and UID_A not in output
     assert context.request.count == 3
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from hoyo_roster import platform_io as io
 from hoyo_roster.cli import CONTRACT_ROOT
 from hoyo_roster.config import Settings
+from hoyo_roster.auth import account_scope, AuthService
 from hoyo_roster.login_identity import LoginIdentityStore
 from hoyo_roster.storage.common import tree_digest
 from hoyo_roster.games.genshin.candidate import candidate_policy
@@ -45,7 +47,7 @@ try:
 except portalocker.exceptions.LockException:
     sys.exit(23)
 """
-        lock = store.auth_user_root / "workspace.lock"
+        lock = store.user_root / "workspace.lock"
         with store.locked():
             assert (
                 subprocess.run(
@@ -80,13 +82,31 @@ except portalocker.exceptions.LockException:
             assert not store.cleanup_pending
             for item in (new, *new.rglob("*")):
                 assert io.private(item)
-            identity = LoginIdentityStore(Settings(external_root=store.auth_root))
+            identity = LoginIdentityStore(Settings(external_root=account_scope(ordinary(auth))))
             assert len(identity._key()) == 32
             assert identity._key() == identity._key()
         assert (
             subprocess.run([sys.executable, "-c", code, str(lock)], capture_output=True).returncode
             == 0
         )
+
+        async def check_account_lock():
+            async with AuthService(ordinary(auth), headed=False, timeout=1) as service:
+                auth_lock = service.scope / "account.lock"
+                assert (
+                    subprocess.run(
+                        [sys.executable, "-c", code, str(auth_lock)], capture_output=True
+                    ).returncode
+                    == 23
+                )
+            assert (
+                subprocess.run(
+                    [sys.executable, "-c", code, str(auth_lock)], capture_output=True
+                ).returncode
+                == 0
+            )
+
+        asyncio.run(check_account_lock())
         args = [
             sys.executable,
             "-m",
@@ -113,7 +133,7 @@ except portalocker.exceptions.LockException:
         )
     print(f"NATIVE_PLATFORM={sys.platform}")
     print(
-        "PRIVATE_PERMISSIONS=PASS\nPROCESS_LOCK=PASS\nSAVE_RECOVER=PASS\nIDENTITY_KEY=PASS\nCLI=PASS"
+        "PRIVATE_PERMISSIONS=PASS\nPROCESS_LOCK=PASS\nACCOUNT_PROFILE_LOCK=PASS\nSAVE_RECOVER=PASS\nIDENTITY_KEY=PASS\nCLI=PASS"
     )
     if os.name == "nt":
         print("WINDOWS_DIRECTORY_FSYNC=NOT_AVAILABLE\nPOWER_LOSS_ACCEPTANCE=NOT_RUN")

@@ -32,7 +32,6 @@ def sync_setup(request, tmp_path, monkeypatch):
     from hoyo_roster.request_gate import RequestGate
 
     game = request.param
-    domain = importlib.import_module(f"hoyo_roster.games.{game}.cli")
     browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     context = Context([binding_payload(game)]) if game == "genshin" else OfficialContext(game)
     if game == "zzz":
@@ -55,7 +54,9 @@ def sync_setup(request, tmp_path, monkeypatch):
     async def reserve(self, **kwargs):
         return 0
 
-    monkeypatch.setattr(domain, "persistent_browser", session)
+    from tests.shared_browser import install
+
+    install(monkeypatch, session)
     monkeypatch.setattr(RequestGate, "reserve", reserve)
     argv = [
         "--game",
@@ -82,7 +83,7 @@ def test_saved_and_noop_report_once_after_close(sync_setup, capsys):
     argv, store, control = sync_setup
     assert cli.main(argv) == 0
     text = capsys.readouterr().out
-    assert text.count("STATUS=PASS") == 1
+    assert text.splitlines().count("STATUS=PASS") == 1
     assert (
         text.index("PROGRESS=SAVED")
         < text.index("BROWSER_CLOSE=CLOSED")
@@ -92,7 +93,7 @@ def test_saved_and_noop_report_once_after_close(sync_setup, capsys):
     assert cli.main(argv) == 0
     text = capsys.readouterr().out
     assert "PROGRESS=UNCHANGED" in text and "PROGRESS=SAVED" not in text
-    assert text.count("STATUS=PASS") == 1
+    assert text.splitlines().count("STATUS=PASS") == 1
     assert store.current() == before and tree_digest(store.root) == digest
     assert control.closes == 2
 
@@ -301,19 +302,26 @@ def test_hsr_decimal_offline_commit_inspect_recover(tmp_path):
         )
         validator = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(validator)
-        documents, _, errors = validator._load_documents(current, scope_game=None)
+        documents, _, errors = validator._load_documents(current, scope_game="honkai-star-rail")
         assert (
             not errors
             and documents["data/honkai-star-rail/builds/1001.json"]["panel"]["crit_rate"]
             == expected
         )
-        assert validator.validate_repository(current, enforce_empty=False) == []
+        assert (
+            validator.validate_repository(
+                current, enforce_empty=False, scope_game="honkai-star-rail"
+            )
+            == []
+        )
         build.write_bytes(
             build.read_bytes().replace(str(expected).encode(), (str(expected) + "0").encode())
         )
         assert any(
             "not canonical" in e
-            for e in validator.validate_repository(current, enforce_empty=False)
+            for e in validator.validate_repository(
+                current, enforce_empty=False, scope_game="honkai-star-rail"
+            )
         )
 
 

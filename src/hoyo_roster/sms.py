@@ -4,7 +4,13 @@ import asyncio
 from time import monotonic
 from urllib.parse import urlparse
 
-from .errors import RateLimited, RiskControl, SmsReceiptUnknown, SmsRequestRejected
+from .errors import (
+    RateLimited,
+    RiskControl,
+    SmsReceiptUnknown,
+    SmsRequestRejected,
+    SmsDuplicateRequest,
+)
 from .progress import emit
 
 SMS_PATH = "/account/ma-cn-verifier/verifier/createLoginCaptcha"
@@ -54,7 +60,7 @@ class SmsReceiptWatch:
         if not sms_request(request):
             return
         if self.request is not None:
-            self._record_error(SmsRequestRejected("Repeated official SMS request observed"))
+            self._record_error(SmsDuplicateRequest("Repeated official SMS request observed"))
             return
         self.request = request
         self.started = monotonic()
@@ -94,7 +100,13 @@ class SmsReceiptWatch:
                 emit(self.state)
         except asyncio.CancelledError:
             raise
-        except (RateLimited, RiskControl, SmsReceiptUnknown, SmsRequestRejected) as error:
+        except (
+            RateLimited,
+            RiskControl,
+            SmsReceiptUnknown,
+            SmsRequestRejected,
+            SmsDuplicateRequest,
+        ) as error:
             self._record_error(error)
         except Exception:
             self._record_error(SmsReceiptUnknown("Official SMS receipt unavailable"))

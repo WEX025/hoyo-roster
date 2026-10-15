@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from hoyo_roster import cli, discovery, login_ui, request_gate
+from hoyo_roster.storage.common import tree_digest
+from hoyo_roster import cli, login_ui, request_gate
 from hoyo_roster.config import Settings
 from hoyo_roster.errors import (
     LoginTimeout,
@@ -15,7 +16,6 @@ from hoyo_roster.errors import (
     SmsReceiptUnknown,
     SmsRequestRejected,
 )
-from hoyo_roster.games.genshin.candidate import candidate_policy
 from hoyo_roster.games.zzz.endpoints import EndpointClient
 from hoyo_roster.games.zzz.errors import ApiResponseError
 from hoyo_roster.games.zzz.transport import BrowserTransport
@@ -28,9 +28,6 @@ from hoyo_roster.storage.common import (
     secure_private_directory,
 )
 from hoyo_roster.user_workspace import (
-    LocalSnapshotStore,
-    WorkspaceError,
-    direct_configuration,
     empty_workspace,
 )
 from tests.test_login_flow import Context, UID_A, binding_payload, coordinate, provider_for
@@ -121,50 +118,17 @@ def test_sms_state_cannot_be_overridden_by_simultaneous_binding_pass(
         assert "PROGRESS=VERIFYING_IDENTITY" not in output
 
 
-def test_discovery_existing_target_retains_new_profile_and_stops_before_exact(
-    tmp_path, monkeypatch, capsys
-):
-    auth, results = tmp_path / "auth", tmp_path / "results"
-    config = direct_configuration("genshin", UID_A, storage_root=results, auth_root=auth)
-    store = LocalSnapshotStore(
-        cli.CONTRACT_ROOT, config, "genshin", candidate_policy=candidate_policy()
-    )
-    target = secure_private_directory(store.browser_profile)
+def test_shared_discovery_never_moves_legacy_profile(tmp_path, monkeypatch):
+    from tests.test_account_workflow import SharedContext, install_context, argv
+
+    target = secure_private_directory(tmp_path / "auth/users/legacy/browser-profile")
     marker = target / "synthetic-existing.txt"
     marker.write_text("unchanged")
-    created = []
-
-    async def fake(game, args, scope, source):
-        profile = secure_private_directory(scope / "browser-profile")
-        (profile / "synthetic-new-login.txt").write_text("synthetic")
-        created.append(profile)
-        return profile, discovery.binding_roles(game, binding_payload(game)["data"])
-
-    async def forbidden(*args):
-        pytest.fail("Conflict must stop before starting another identity login")
-
-    monkeypatch.setattr(discovery, "discover_game", fake)
-    monkeypatch.setattr(discovery, "run_selected_roles", forbidden)
-    assert (
-        cli.main(
-            [
-                "--game",
-                "genshin",
-                "--operation",
-                "discover",
-                "--auth-root",
-                str(auth),
-                "--storage-root",
-                str(results),
-            ]
-        )
-        == 1
-    )
-    assert marker.read_text() == "unchanged" and created[0].exists()
-    assert not (auth / "onboarding/selected-genshin.json").exists()
-    output = capsys.readouterr().out
-    assert "DISCOVERY_PROFILE_CONFLICT" in output and "DISCOVERY_SCOPE=RETAINED" in output
-    assert "DISCOVERY_STATUS=PASS" not in output and UID_A not in output
+    before = tree_digest(target)
+    install_context(monkeypatch, SharedContext(existing=True))
+    assert cli.main(argv(tmp_path, "--operation", "discover")) == 0
+    assert tree_digest(target) == before and marker.read_text() == "unchanged"
+    assert not (tmp_path / "results").exists()
 
 
 @pytest.mark.parametrize("operation", ("sync", "login", "discover"))
@@ -172,29 +136,20 @@ def test_discovery_existing_target_retains_new_profile_and_stops_before_exact(
 def test_zero_role_flow_reports_not_collected_without_cache(
     tmp_path, monkeypatch, capsys, operation, game
 ):
-    async def fake(game, args, scope, source):
-        return secure_private_directory(scope / "browser-profile"), discovery.binding_roles(
-            game, {"list": []}
-        )
+    from tests.test_account_workflow import SharedContext, install_context, argv
+    from hoyo_roster.games.genshin.login_provider import GenshinLoginProvider
+    from hoyo_roster.games.zzz.login_provider import ZzzLoginProvider
 
-    monkeypatch.setattr(discovery, "discover_game", fake)
-    auth = tmp_path / "auth"
-    assert cli.main(
-        [
-            "--game",
-            game,
-            "--operation",
-            operation,
-            "--auth-root",
-            str(auth),
-            "--storage-root",
-            str(tmp_path / "results"),
-        ]
-    ) == (0 if operation == "discover" else 1)
+    async def no_roles(self, context):
+        return ()
+
+    monkeypatch.setattr(GenshinLoginProvider, "owned_roles", no_roles)
+    monkeypatch.setattr(ZzzLoginProvider, "owned_roles", no_roles)
+    install_context(monkeypatch, SharedContext(existing=True))
+    assert cli.main(argv(tmp_path, "--game", game, "--operation", operation)) == 1
     output = capsys.readouterr().out
-    assert "DISCOVERY_STATUS=NO_ROLES" in output and "COLLECTION_STATUS=NOT_COLLECTED" in output
-    assert "DISCOVERY_STATUS=PASS" not in output
-    assert not (auth / "onboarding" / f"selected-{game}.json").exists()
+    assert "GAME_STATUS=NO_ROLES" in output and "COLLECTION_STATUS=NOT_COLLECTED" in output
+    assert not (tmp_path / "results").exists()
 
 
 def test_future_request_schedule_rejects_without_wait_or_mutation(tmp_path, monkeypatch):
@@ -354,104 +309,58 @@ def test_manual_panel_handoff_also_disables_pending_phone_action(tmp_path, monke
     assert "SMS_SUBMITTING" not in output
 
 
-@pytest.mark.parametrize(
-    "damage", ("open", "foreign-game", "copied", "missing", "busy", "missing-engine")
-)
-def test_discovery_resume_requires_owned_closed_scope(tmp_path, damage):
-    import uuid
-
-    parent = secure_private_directory(tmp_path / "onboarding")
-    scope = secure_private_directory(parent / str(uuid.uuid4()))
-    profile = secure_private_directory(scope / "browser-profile")
-    secure_private_directory(profile / "chrome")
-    atomic_write_metadata(profile / "browser-choice.json", {"version": 1, "channel": "chrome"})
-    discovery.mark_scope(scope, "genshin", "CLOSED")
-    if damage == "open":
-        discovery.mark_scope(scope, "genshin", "OPEN")
-    elif damage == "foreign-game":
-        discovery.mark_scope(scope, "zzz", "CLOSED")
-    elif damage == "copied":
-        state = load_metadata(scope / "discovery-state.json", private=True)
-        state["scope"] = "0" * 64
-        atomic_write_metadata(scope / "discovery-state.json", state)
-    elif damage == "missing":
-        (scope / "discovery-state.json").unlink()
-    elif damage == "missing-engine":
-        (profile / "chrome").rmdir()
-    else:
-        (profile / "SingletonLock").touch()
-    with pytest.raises(WorkspaceError):
-        discovery.resume_scope(parent, "genshin", scope.name)
-
-
-def test_explicit_discovery_resume_reuses_only_selected_closed_profile(tmp_path, monkeypatch):
-    import uuid
-
-    auth = tmp_path / "auth"
-    parent = discovery.discovery_root(auth, cli.CONTRACT_ROOT)
-    scope = secure_private_directory(parent / str(uuid.uuid4()))
-    profile = secure_private_directory(scope / "browser-profile")
-    secure_private_directory(profile / "chrome")
-    atomic_write_metadata(profile / "browser-choice.json", {"version": 1, "channel": "chrome"})
-    discovery.mark_scope(scope, "genshin", "CLOSED")
-    assert discovery.resume_scope(parent, "genshin", scope.name) == scope
-    visited = []
-
-    async def fake(game, args, selected, source):
-        visited.append(selected)
-        return selected / "browser-profile", discovery.binding_roles(
-            game, binding_payload(game)["data"]
-        )
-
-    monkeypatch.setattr(discovery, "discover_game", fake)
+@pytest.mark.parametrize("operation", ("sync", "login", "discover"))
+def test_legacy_discovery_resume_is_explicitly_unsupported(tmp_path, capsys, operation):
     assert (
         cli.main(
             [
                 "--game",
                 "genshin",
                 "--operation",
-                "discover",
+                operation,
                 "--resume-discovery",
-                scope.name,
+                "00000000-0000-0000-0000-000000000000",
                 "--auth-root",
-                str(auth),
-                "--storage-root",
-                str(tmp_path / "results"),
+                str(tmp_path / "auth"),
             ]
         )
-        == 0
+        == 1
     )
-    assert visited == [scope] and not scope.exists()
-    assert (parent / "selected-genshin.json").exists()
+    assert "DISCOVERY_RESUME_UNSUPPORTED" in capsys.readouterr().out
+    assert not (tmp_path / "auth").exists()
 
 
-def test_failed_login_marks_discovery_closed_only_after_actual_close(tmp_path, monkeypatch):
-    from contextlib import asynccontextmanager
-    from hoyo_roster.games.genshin import browser, login_provider
-
-    scope = secure_private_directory(tmp_path / "scope")
-    discovery.mark_scope(scope, "genshin", "OPEN")
-    provider, context, page, gate = provider_for(
-        "genshin", tmp_path / "contracts", [binding_payload("genshin", retcode=10001)], uid=None
+def test_legacy_discovery_directory_is_preserved(tmp_path, capsys):
+    directory = secure_private_directory(tmp_path / "auth/onboarding/synthetic")
+    (directory / "synthetic-state").write_text("unchanged")
+    before = tree_digest(directory)
+    assert (
+        cli.main(
+            [
+                "--game",
+                "genshin",
+                "--resume-discovery",
+                "synthetic",
+                "--auth-root",
+                str(tmp_path / "auth"),
+            ]
+        )
+        == 1
     )
-    closed = []
+    assert tree_digest(directory) == before
 
-    @asynccontextmanager
-    async def session(**kwargs):
-        try:
-            yield SimpleNamespace(context=context, page=page)
-        finally:
-            closed.append(True)
 
-    monkeypatch.setattr(browser, "persistent_browser", session)
-    monkeypatch.setattr(discovery, "RequestGate", lambda *args: gate)
-    monkeypatch.setattr(login_provider, "GenshinLoginProvider", lambda *args, **kwargs: provider)
-    args = SimpleNamespace(headless=False, login_timeout=0.02)
-    token = OPTIONS.set(LoginOptions("phone", True, timeout=0.02, allow_login=True))
-    try:
-        with pytest.raises(LoginTimeout):
-            asyncio.run(discovery.discover_game("genshin", args, scope, cli.CONTRACT_ROOT))
-    finally:
-        OPTIONS.reset(token)
-    assert closed == [True]
-    assert load_metadata(scope / "discovery-state.json", private=True)["state"] == "CLOSED"
+def test_auth_failure_closes_same_account_context(tmp_path, monkeypatch, capsys):
+    from tests.test_account_workflow import SharedContext, install_context, argv
+    from hoyo_roster.games.genshin.login_provider import GenshinLoginProvider
+
+    async def fail(self, context):
+        raise LoginTimeout("synthetic timeout")
+
+    context = SharedContext()
+    install_context(monkeypatch, context)
+    monkeypatch.setattr(GenshinLoginProvider, "owned_roles", fail)
+    assert cli.main(argv(tmp_path)) == 1
+    assert context.pages and all(page.closed for page in context.pages)
+    assert "BROWSER_CLOSE=CLOSED" in capsys.readouterr().out
+    assert not (tmp_path / "results").exists()

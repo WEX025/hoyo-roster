@@ -18,6 +18,7 @@ from hoyo_roster.errors import (
     LoginControlUnavailable,
 )
 from hoyo_roster.login import ExpectedIdentity, identity_digest
+from hoyo_roster.login_ui import LoginPageConfig
 from hoyo_roster.login_identity import LoginIdentityStore
 from hoyo_roster.models import LoginProbeResult, LoginProbeStatus
 from hoyo_roster.request_gate import RequestGate
@@ -49,6 +50,13 @@ PROFILE_PATH = Path("data/honkai-star-rail/profile.json")
 RouteHandler = Callable[[Route], Awaitable[None]]
 
 
+LOGIN_UI = LoginPageConfig(
+    "act.mihoyo.com",
+    "/sr/event/cultivation-tool/",
+    "星穹铁道养成工具登录页（act.mihoyo.com/sr/event/cultivation-tool/）",
+)
+
+
 @dataclass(slots=True, repr=False)
 class HsrLoginProvider:
     context: BrowserContextAccess = field(repr=False)
@@ -61,6 +69,7 @@ class HsrLoginProvider:
     identity_store: LoginIdentityStore | None = field(default=None, repr=False)
     session: BrowserSession | None = field(default=None, repr=False)
     game: str = field(default=GAME, init=False)
+    login_ui: LoginPageConfig = field(default=LOGIN_UI, init=False)
     binding: dict[str, Any] | None = field(default=None, init=False, repr=False)
     expected_identity_source: str = field(default="UNAVAILABLE", init=False)
     _expected_uid: str | None = field(default=None, init=False, repr=False)

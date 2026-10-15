@@ -1,3 +1,5 @@
+from hoyo_roster.auth import account_browser as REAL_ACCOUNT_BROWSER
+
 """Synthetic restart, SDK readiness, consent and browser-control regression evidence."""
 
 import asyncio
@@ -468,7 +470,9 @@ def run_mock_process(storage, operation, headed):
         async def stop(self):
             events.append("runtime-stop")
 
-    browser.async_playwright = Runtime
+    from hoyo_roster import auth
+
+    auth.async_playwright = Runtime
     browser_runtime.preferred_channel = lambda: "chromium"
 
     async def no_wait(self, **kwargs):
@@ -528,10 +532,8 @@ def test_login_then_new_process_sync_reuses_same_synthetic_profile(tmp_path, hea
 def test_persistent_close_finishes_before_runtime_stop(
     tmp_path, monkeypatch, game, close_failure, headed
 ):
-    import importlib
     from hoyo_roster import browser_runtime
 
-    browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     events = []
 
     class PersistentContext(Context):
@@ -568,7 +570,9 @@ def test_persistent_close_finishes_before_runtime_stop(
         async def stop(self):
             events.append("stop")
 
-    monkeypatch.setattr(browser, "async_playwright", Runtime)
+    from hoyo_roster import auth
+
+    monkeypatch.setattr(auth, "async_playwright", Runtime)
     monkeypatch.setattr(browser_runtime, "preferred_channel", lambda: "chromium")
     if game == "zzz":
 
@@ -580,9 +584,7 @@ def test_persistent_close_finishes_before_runtime_stop(
         context.new_page = new_page
 
     async def use():
-        async with browser.persistent_browser(
-            repo_root=tmp_path / "repo", browser_profile=tmp_path / "profile", headed=headed
-        ):
+        async with REAL_ACCOUNT_BROWSER(tmp_path / "profile", headed=headed):
             events.append("use")
 
     if close_failure:
@@ -697,7 +699,6 @@ def test_cli_login_does_not_report_success_when_persistent_close_fails(
     from hoyo_roster.cli import main
     from hoyo_roster.request_gate import RequestGate
 
-    domain = importlib.import_module(f"hoyo_roster.games.{game}.cli")
     browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     context = Context([binding_payload(game)])
     page = Page()
@@ -711,7 +712,9 @@ def test_cli_login_does_not_report_success_when_persistent_close_fails(
     async def no_wait(self, **kwargs):
         return None
 
-    monkeypatch.setattr(domain, "persistent_browser", failed_close)
+    from tests.shared_browser import install
+
+    install(monkeypatch, failed_close)
     monkeypatch.setattr(RequestGate, "reserve", no_wait)
     if game == "hsr":
         monkeypatch.setattr(browser, "_profile_has_active_browser_root", lambda profile: False)

@@ -359,8 +359,10 @@ def test_genshin_bootstrap_accepts_only_official_supported_region_and_pins_it(
     assert asyncio.run(provider.probe(context)).status is LoginProbeStatus.WRONG_ACCOUNT
 
 
-def test_genshin_existing_identity_conflict_rejected_before_network(tmp_path, source):
-    from hoyo_roster.games.genshin.errors import ConfigurationError
+def test_genshin_explicit_identity_checks_official_binding_without_reading_business_profile(
+    tmp_path, source
+):
+    from hoyo_roster.errors import WrongAccount
 
     root = tmp_path / "workspace"
     empty_workspace(source, root)
@@ -372,9 +374,9 @@ def test_genshin_existing_identity_conflict_rejected_before_network(tmp_path, so
     provider, context, page, gate = provider_for(
         "genshin", root, [binding_payload("genshin")], uid=UID_B
     )
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(WrongAccount):
         asyncio.run(coordinate(root, provider, context, page, gate))
-    assert context.request.count == 0
+    assert context.request.count == 1
 
 
 def test_genshin_no_explicit_identity_fails_clearly_instead_of_assertion(tmp_path, source):

@@ -4,15 +4,15 @@
 
 ## 首次使用
 
-所有 OS 首次使用都直接运行 `hoyo-roster`：先在各游戏官方页面由本人登录，再自动发现该账号所有受支持国服 UID，**不先询问或要求填写 UID**。省略游戏等同 `--game all`，原神/绝区零也可分别选择；星铁不登录、不采集。默认 sync/login/discover 都无需 UID；init/inspect/recover 等指定身份的离线维护仍需要明确游戏/UID。`--operation discover` 不采集角色；本人已有明确身份时可选 `--uid`，维持精确身份流程。
+所有 OS 都直接运行 `hoyo-roster`，默认依次执行原神→绝区零；各游戏入口检查同一账号会话，必要时暂停并登录，之后继续当前游戏。无需先提供 UID；官方 Binding 自动发现本人受支持身份，每个角色仍须精确核验游戏、UID 和区服。显式 `--game` 仅执行该游戏，`--uid` 可进一步精确选择已有身份。崩铁暂停，不登录、不采集。
 
-首次发现用认证根内新 UUID 范围创建私有 Profile，浏览器确认关闭后才把本次新 Profile 放到首个发现身份的空目标中；已有目标不覆盖、不复制认证材料。其他角色使用各自独立会话，必要时本人另行登录。认证根 onboarding/selected-游戏.json 保存本机 UID/区服选择，私有权限保护、不在终端打印 UID，不证明登录或所有权；后续命令仍从官方 Binding 精确核验后才采集。默认命令复用这些选择；显式 discover 重新发现当前本人登录账号。失败/关闭不确定保留本次临时范围，不探索或清理旧会话。
+登录模块拥有一个账号级持久 Profile/Context；各游戏在同一上下文创建并关闭自己的页面和客户端，账号锁保持到真正关闭上下文。`--operation login` 和 `discover` 只处理认证及身份，不创建业务 current。多角色不另建 Profile 或要求独立登录。游戏间会话失效时，仅恢复当前游戏；采集中失效最多恢复一次，重做该游戏两轮采集，已完成游戏保持不变。普通单游戏失败继续其他游戏并汇总失败；身份冲突、风控、共享认证失败停止账号任务。
 
 按 README 安装 Python 3.12 和项目；浏览器选择及 Chromium 备用安装见下节。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
 
 `--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、认证 key/指纹、节流与认证锁按游戏/UID 隔离；不同结果根共用同一认证范围时仍由认证锁互斥。
 
-结果范围为 `<结果根>/users/<scope>/<game>/<hash>/`；认证元数据范围为 `<认证根>/users/<scope>/<game>/<hash>/`。浏览器 Profile 单独位于较浅的 `<认证根>/profiles/<身份哈希>/browser-profile/`，仍按 user/game/UID 唯一隔离，由同一身份锁保护；不会迁移或复用旧布局的 Profile。scope/hash 由身份确定，不含明文 UID。Windows 文件系统内部使用受检的长路径命名空间，而传给 Chromium 的 user-data-dir 使用普通盘符路径；认证根应尽量短，为浏览器内部数据库留出路径空间。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
+结果范围为 `<结果根>/game-results-v3/<scope>/<game>/<hash>/`；认证范围为 `<认证根>/account-session-v1/`，共享 Profile 位于其 `browser-profile/`，账号锁保护整个上下文生命周期。scope/hash 由身份确定，不含明文 UID。Windows 文件系统内部使用受检的长路径命名空间，而传给 Chromium 的 user-data-dir 使用普通盘符路径；认证根应尽量短，为浏览器内部数据库留出路径空间。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
 
 POSIX 上，程序逐层把**新建应用目录**设为 0700，不修改已有共享父目录。clone 创建且包含 `.gitkeep` 的顶层 `data/` 可保持属于本人、不可被组/其他人写入的 0755 权限；其下身份目录仍须 0700。其他已存在的结果根、认证根及身份目录必须属于当前用户且为 0700，否则报 `UNSAFE_PRIVATE_DIRECTORY`。普通结果和元数据为 0600，浏览器内部文件权限由 Chromium 管理并被 0700 Profile 包围。
 
@@ -23,7 +23,7 @@ hoyo-roster --game all --operation login
 hoyo-roster
 ```
 
-`init` 只在没有 current 时建立验证后的空工作区；已有有效 current 经预检后原样复用，不换代、不改文件或时间戳，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立 Profile、锁和节流状态。
+`init` 只在没有 current 时建立验证后的空工作区；已有有效 current 经预检后原样复用，不换代、不改文件或时间戳，不联网。`login` 检查精确官方 Binding，不采集角色。默认 `sync` 检查会话、核验身份、采集第1次和第2次、验证、保存或报告无变化；无变化保留业务时间戳。相同游戏/UID 始终选择同一隔离范围；不同游戏/UID 使用独立结果范围及结果锁，登录态、账号锁和请求节流由账号共享。
 
 启动浏览器后，程序先在同一持久 Context 中打开受限的临时官方页面，等待页面资源与已有会话校验完成，再发送初始 Binding；初始化页允许官方资源和已注册的会话校验，不允许短信、二维码创建或游戏业务请求。临时页关闭后才继续核验；初始化超时/网络/操控错误单独停止，不当成认证过期。初始化或会话指纹本身都不证明身份；每次登录/同步仍须通过精确官方 game/UID/region Binding。初始化阶段遇风险、限流或无效校验响应同样停止。程序不导出 Cookie/token，也不延长官方有效期。关闭持久 Context 完成后才停止 Playwright；关闭失败仍尝试停止运行时，不报告登录成功。
 
@@ -45,7 +45,7 @@ hoyo-roster --game genshin --non-interactive --login-method qr --allow-login
 
 可选 `--login-method phone --phone-stdin --allow-sms`：显式授权一次代码发码，需新登录时从终端隐藏输入手机号；非交互调用用一行 stdin，并同时按既有要求提供 `--non-interactive --allow-login`。号码格式为国服 11 位手机号，只留本次内存、不写配置/日志或命令行；输入失败不回显号码。程序在唯一可见的官方 SDK 手机号框填写一次，显示 `PHONE_ENTERED`；未获代勾授权时显示 `WAITING_FOR_TERMS`，已获授权并完成勾选时显示 `TERMS_ACCEPTED`。本人阅读《米哈游用户协议》《米哈游隐私政策》，包括页面提示的未注册手机号验证通过自动注册；未单独授权时本人勾选，已有明确授权时可用 `--allow-terms` 代勾已识别的协议。未知协议/额外权限或控件歧义转 `PHONE_AUTOMATION_MANUAL`，不猜坐标。
 
-本人勾选或按单独授权代勾后，程序至多点击一次“获取验证码”，显示 `SMS_SUBMITTING`，此时**尚未证明请求提交或短信发送**。发送控件不确定显示 `SMS_ACTION_UNCERTAIN`，不重试；结束前仍未观察到 POST 会显示 `SMS_REQUEST_NOT_OBSERVED`。同一命令跨发现与逐身份阶段共享一次授权；后续身份显示 `PHONE_AUTHORIZATION_USED` 并采用人工操作，不再读取号码或自动发码。图片 CAPTCHA 由本人完成；辅助流程的本次短信验证码在 `OTP_INPUT_REQUIRED` 后通过隐藏输入临时交给程序代填，不提前收集或复用；需要重新运行的超时/取消不自动延续旧发码操作。
+本人勾选或按单独授权代勾后，程序至多点击一次“获取验证码”，显示 `SMS_SUBMITTING`，此时**尚未证明请求提交或短信发送**。发送控件不确定显示 `SMS_ACTION_UNCERTAIN`，不重试；结束前仍未观察到 POST 会显示 `SMS_REQUEST_NOT_OBSERVED`。同一命令跨游戏及逐身份阶段复用授权；一次自动发码额度用完后不会因重登自动恢复：交互终端只询问是否额外允许一次填号及发码，明确允许后继续原登录窗口；拒绝则取消。非交互模式报 SMS_AUTHORIZATION_REQUIRED 后停止，须先补充本人授权。仍有效的登录方式及协议授权不重复询问。图片 CAPTCHA 由本人完成；辅助流程的本次短信验证码在 `OTP_INPUT_REQUIRED` 后通过隐藏输入临时交给程序代填，不提前收集或复用；需要重新运行的超时/取消不自动延续旧发码操作。
 
 只有观察到实际官方 POST 才输出 `SMS_REQUESTING`；回执须为 HTTP 200、整数 retcode=0、布尔 `data.sent_new` 和非负整数 `data.countdown`。`SMS_ACCEPTED` 表示官方接受新发码，不证明手机送达；`SMS_COOLDOWN` 表示已有验证码/倒计时，未新发短信。点击、倒计时或单独 retcode=0 都不能证明发码。网络失败、畸形回执或请求后 30 秒仍无回执报 `SMS_RECEIPT_UNKNOWN`，读取单次回执最多 5 秒；不重试。官方拒绝或同一命令又观察到发码请求报 `SMS_REQUEST_REJECTED`，风险/限流保留原错误码。手动 CAPTCHA 期间不推进身份探测，清除后再检查已观察的回执。回执未知时停止本次流程并做既有关闭/清理，不以再次点击试探；固定状态不能替代手机送达确认。已观察发码请求时，即使同轮精确 Binding 已通过，也须在请求后 30 秒和剩余登录期限内完成回执判定；重复、未知、拒绝及风控/限流不会被身份通过掩盖，不取消未决回执后报登录成功。
 
@@ -53,20 +53,13 @@ hoyo-roster --game genshin --non-interactive --login-method qr --allow-login
 
 面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入本人登录总预算 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
 
-## 发现中断与恢复
+## 会话中断与恢复
 
-首次发现失败或新会话无法放入已有身份目录时，输出 `DISCOVERY_SCOPE=RETAINED` 和本次 `DISCOVERY_RUN_ID`。`DISCOVERY_PROFILE_CONFLICT` 表示新旧会话均保留，选择文件未改，也未继续启动第二次身份登录；先检查本人已有精确身份的会话，不覆盖/删除已有 Profile 或复制凭据来处理冲突。恢复发现本身不能解除该冲突。
+共享认证保存在 `<认证根>/account-session-v1/`，Profile 为其 `browser-profile/`，同一命令跨游戏、角色共享。取消、超时或关闭失败后保留该范围，下次普通命令重新通过官方服务核验；不把文件存在当作登录有效。浏览器仍在运行或存在 Singleton 标记时，先检查确切的本工具浏览器，不删锁和运行标记来强行启动。
 
-只有本版本写出的归属标记、游戏、私有权限、浏览器选择、未占用状态和**实际关闭确认**均通过时，才显示 `DISCOVERY_RESUME=AVAILABLE`。可显式选择这个范围，先无界面检查其已有登录状态：
+旧的按身份 Profile、onboarding 目录和旧结果保持原地；程序不读取、搬移、合并或删除。`--resume-discovery` 不再支持，返回 `DISCOVERY_RESUME_UNSUPPORTED`。新账号范围通过正常登录建立，不延续旧的短信操作授权。
 
-```bash
-hoyo-roster --game genshin --operation discover --resume-discovery OWNED_DISCOVERY_UUID --auth-root /absolute/private/auth --headless
-```
-
-若确需重新登录，仍按已有授权选择方式、本人操作，保留同一范围；恢复参数不能与 `--phone-stdin` / `--allow-sms` 合用，不能延续旧发码动作。此前短信状态未知/已请求时不要重新发送或使用历史验证码。`UNPROVEN`、旧无标记范围、游戏不匹配、占用或未知关闭状态拒绝恢复，保留原地；不自动扫描其他范围或补造关闭标记。身份和数据的 `inspect/recover` 与此登录范围恢复不同。
-
-官方 Binding 无受支持角色时显示 `NO_ROLES` 与 `NOT_COLLECTED`，不保存空选择；`discover` 可正常结束，但 `login/sync` 在全部游戏均无角色时退出 1，不宣称同步成功。已有空选择会在下次明确命令重新发现；默认 all 中一个游戏无角色不影响另一个有角色的验证与同步。
-
+官方 Binding 无受支持角色时显示 `NO_ROLES` 与 `NOT_COLLECTED`，继续其他选中游戏。全部无角色时返回非成功状态，不宣称完成采集。多个绑定角色自动逐一处理，保存范围仍按游戏和 UID 隔离。
 ## 会话检查与登录授权工作流
 
 直接运行 `hoyo-roster`。工具先启动专用浏览器、检查官方会话和 Binding；有效时直接采集。会话缺失时，保持同一进程和窗口，依次询问：
@@ -80,7 +73,7 @@ hoyo-roster --game genshin --operation discover --resume-discovery OWNED_DISCOVE
 
 ## 辅助短信验证码输入
 
-交互选择辅助手机号，或明确允许后使用 `--phone-stdin --allow-sms`，会在本次 `SMS_ACCEPTED` 后核验官方 SDK 中唯一的短信登录表单、已确认协议、6 位验证码框和登录按钮，再输出 `OTP_INPUT_REQUIRED`。通过 Codex 使用时，助手应立即询问本次收到的验证码，把回答仅交给当前 CLI 的隐藏 stdin；普通终端直接隐藏输入。不要把验证码放进命令行、脚本、计时 MD、日志或截图。聊天中提供的验证码仍属于聊天内容，工具不额外持久化它。
+交互选择辅助手机号，或明确允许后使用 `--phone-stdin --allow-sms`，会在本次 `SMS_ACCEPTED` 后核验官方 SDK 中唯一的短信登录表单、已确认协议、6 位验证码框和登录按钮，再输出 `OTP_INPUT_REQUIRED`。通过 Codex 使用时，助手应立即询问本次收到的验证码，把回答仅交给当前 CLI 的隐藏 stdin；普通终端直接隐藏输入。不要把验证码放进命令行、脚本、日志或截图。聊天中提供的验证码仍属于聊天内容，工具不额外持久化它。
 
 验证码临时代填一次后显示 `OTP_FILLED`，下一轮重新核对图片 CAPTCHA、回执、协议及控件，再点击一次“登录”，显示 `LOGIN_SUBMITTING`。两者都不代表认证成功，仍须精确 Binding、完整采集验证和实际关闭。未知结构、撤销协议、填写/提交不确定显示 `OTP_AUTOMATION_MANUAL`，交还同一窗口且不重试；非 6 位 ASCII 数字或输入不可用报 `OTP_INPUT_INVALID`，不回显。等待输入不阻塞 CAPTCHA、风控/限流、身份探测和总登录超时；取消/关闭清理隐藏读入并恢复终端回显。
 
@@ -163,7 +156,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 | `WRONG_ACCOUNT` / Binding 错误 | 确认本人游戏、UID、区服；不要借其他会话绕过 |
 | `RATE_LIMITED` / `RISK_CONTROL` | 停止本轮，按官方提示处理；不自动重试或代解验证 |
 | 双次漂移 / schema / lifecycle 错误 | 旧 current 保留，等待来源稳定或提交脱敏问题反馈 |
-| `USER_WORKSPACE_BUSY` | 等另一同身份进程退出，不删锁文件来绕过 |
+| `USER_WORKSPACE_BUSY` | 等同账号会话或同游戏结果任务退出，不删锁文件来绕过 |
 | Profile 在用或 Singleton 残留 | 关闭确切本工具浏览器并检查；不删除正在使用的 Profile |
 | `CANDIDATE_SCOPE_MISMATCH` / `CANDIDATE_OWNERSHIP_UNPROVEN` | 保留并私下备份候选，核实来源后由本人处置；不按 UUID 或临时文件名删除 |
 | `GENERATION_REQUIRED` / `INVALID_GENERATION` / `INVALID_CANDIDATE_RUN_ID` | 检查 inspect 标识及 --help，不复用其他身份的 UUID |
@@ -176,7 +169,7 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 
 ## 退出登录与卸载
 
-浏览器关闭后执行 `--operation logout`：只删除该身份 Profile 和已验证身份指纹；角色数据保留。发现 Singleton 标识时停止，要求先检查是否仍有浏览器进程。退出登录不会退出其他应用的米游社会话。
+浏览器关闭后执行 `--operation logout`：删除当前账号范围的共享 Profile，使所有游戏后续会话检查失效；角色数据和请求节流保留。旧按身份 Profile 不受影响。发现 Singleton 标识时停止，要求先检查是否仍有浏览器进程。退出登录不会退出其他应用的米游社会话。
 
 卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。
 
@@ -193,3 +186,5 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 普通手机号、协议、验证码控件或发送/登录按钮短暂未挂载或不可用时，先显示 WAITING_FOR_LOGIN_CONTROLS，按固定 CONTROL_STAGE 和 CONTROL_REASON 说明阶段，最多等待 15 秒，并受原登录总预算限制。控件出现后自动继续，无需重复询问已有授权或让本人重新填号。未知结构持续不恢复才进入对应接管状态，实际填写或点击结果不确定仍不重试。
 
 只要求相关可见表单内控件唯一，不因无关 SDK frame 阻断。协议识别两份已授权名称和官方链接，接受已/我已、空白、标点、二维码缺少自动注册说明以及 hideBack 参数不同或缺失。原生 checkbox 不可见时操作同一自定义 checkbox 的可见 SDK 控件，并核对勾选状态。新增协议/额外权限、非官方目标、真正有歧义的控件、风控和限流仍停止；官方 Binding 身份核验不变。
+
+短信服务拒绝报 `SMS_REQUEST_REJECTED`；观察到重复短信请求报 `SMS_DUPLICATE_REQUEST`。两者均终止当前认证尝试，不自动重发；错误不包含响应体或输入值。

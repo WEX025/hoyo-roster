@@ -7,19 +7,19 @@ import json
 import os
 import re
 import shutil
-import stat
 import uuid
 from collections.abc import Iterator, Callable
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol, Literal
 
+from .errors import WorkspaceError
 from . import paths
 from . import platform_io as io
 import portalocker
 from .storage.candidate import CandidateScope, CandidatePolicy, inspect_candidates, REGIONS
-from .validation import ValidationFailure, run_validator
+from .validation import ValidationFailure, run_validator, copy_game_workspace
 from .storage.common import (
     AtomicWriteError,
     MetadataError,
@@ -38,10 +38,6 @@ GAMES = {
 }
 _ALIAS = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
 _UID = re.compile(r"[1-9][0-9]{0,31}\Z")
-
-
-class WorkspaceError(ValueError):
-    """A fixed privacy-safe error code, never a source value."""
 
 
 CommitState = Literal["NOT_COMMITTED", "PRE_COMMIT", "DURABILITY_UNKNOWN", "COMMITTED"]
@@ -113,9 +109,11 @@ def direct_configuration(
     return UserConfiguration(alias, storage_root, {game: uid}, auth_root)
 
 
-def validate_workspace(root: Path) -> None:
+def validate_workspace(root: Path, game: str | None = None) -> None:
     try:
-        run_validator(root, validator_root=Path(__file__).resolve().parent / "contracts")
+        run_validator(
+            root, scope_game=game, validator_root=Path(__file__).resolve().parent / "contracts"
+        )
     except ValidationFailure as error:
         raise WorkspaceError(
             "WORKSPACE_VALIDATION_FAILED"
@@ -124,9 +122,12 @@ def validate_workspace(root: Path) -> None:
         ) from None
 
 
-def empty_workspace(source: Path, destination: Path) -> None:
+def empty_workspace(source: Path, destination: Path, game: str | None = None) -> None:
     """Copy only public contracts; never read source account data."""
     private_directory(destination)
+    if game is not None:
+        copy_game_workspace(source, destination, game)
+        return
     schemas = source / "schemas"
     tree_digest(schemas)
     shutil.copytree(schemas, destination / "schemas")
@@ -165,7 +166,6 @@ class LocalSnapshotStore:
             raise WorkspaceError("INVALID_CONFIG")
         try:
             io.check_components(config.storage_root)
-            io.check_components(config.auth_root)
         except (io.UnsafePath, OSError):
             raise WorkspaceError("UNSAFE_PRIVATE_DIRECTORY") from None
         resolved = config.storage_root.expanduser().resolve()
@@ -180,14 +180,6 @@ class LocalSnapshotStore:
             raise WorkspaceError("UNSAFE_STORAGE_ROOT")
         if repository is not None and repository.is_relative_to(resolved):
             raise WorkspaceError("UNSAFE_STORAGE_ROOT")
-        auth = config.auth_root.expanduser().resolve()
-        if (
-            paths.containing_repository(auth) is not None
-            or auth.is_relative_to(self.source)
-            or self.source.is_relative_to(auth)
-            or (repository is not None and repository.is_relative_to(auth))
-        ):
-            raise WorkspaceError("UNSAFE_AUTH_ROOT")
         # A cloned data/ container is usually 0755 because of its tracked placeholder.
         # Leave it unchanged; all identity directories below it must still be 0700.
         if resolved == repository_data and config.storage_root.exists():
@@ -196,28 +188,15 @@ class LocalSnapshotStore:
             root = config.storage_root
         else:
             root = private_directory(config.storage_root)
-        self.user_root = private_directory(root / "users" / config.user)
+        self.user_root = private_directory(root / "game-results-v3" / config.user)
         key = hashlib.sha256(f"{game}:{self._uid}".encode()).hexdigest()
         self.root = private_directory(self.user_root / game / key)
         self.candidate_base = self.root / "candidates"
-        auth = private_directory(config.auth_root)
-        self.auth_user_root = private_directory(auth / "users" / config.user)
-        self.auth_root = private_directory(self.auth_user_root / game / key)
         if owner is not None and any(
             os.path.lexists(self.root / name)
             for name in ("browser-profile", "identity.key", "verified-identity.json")
         ):
             raise WorkspaceError("AUTH_STATE_IN_RESULT_DIRECTORY")
-        # Authentication is independent of the result destination; never migrate user data.
-        # Chromium's own Windows databases cannot reliably use deep Profile trees.
-        # Keep authentication metadata in the existing locked identity scope, but
-        # give the browser a shallow, independently hashed identity directory.
-        # Existing layouts are preserved; this is not a migration or fallback.
-        profile_key = hashlib.sha256(
-            f"profile:v1:{config.user}:{game}:{self._uid}".encode()
-        ).hexdigest()
-        self.profile_root = private_directory(auth / "profiles" / profile_key)
-        self.browser_profile = self.profile_root / "browser-profile"
         self.current_file = self.root / "current.json"
         self._locked = False
         self._commit_state = "NOT_COMMITTED"
@@ -227,10 +206,8 @@ class LocalSnapshotStore:
 
     @contextmanager
     def locked(self) -> Iterator[LocalSnapshotStore]:
-        # Serialize both result writes and auth/session reuse across result destinations.
-        with ExitStack() as stack:
-            for root in sorted({self.user_root, self.auth_user_root}):
-                stack.enter_context(self._lock_directory(root))
+        # Only this game's result scope; the auth service owns the account/Profile lock.
+        with self._lock_directory(self.user_root):
             self._locked = True
             try:
                 yield self
@@ -332,7 +309,7 @@ class LocalSnapshotStore:
         profile = load_metadata(path / "data" / self.game / "profile.json")
         actual = self._profile_region(profile, boundary)
         expected = {
-            "authority": "hoyo-roster/generation-v2",
+            "authority": "hoyo-roster/generation-v3",
             "scope": self.scope_digest,
             "identity": self._identity_document(actual),
             "generation": path.name,
@@ -345,12 +322,7 @@ class LocalSnapshotStore:
             raise WorkspaceError("GENERATION_OWNERSHIP_UNPROVEN")
         if actual is not None and boundary is None:
             raise WorkspaceError("IDENTITY_MISMATCH")
-        for game in GAMES.values():
-            if game != self.game:
-                other = load_metadata(path / "data" / game / "profile.json")
-                if other["sync"]["state"] != "not_synced":
-                    raise WorkspaceError("IDENTITY_SCOPE_CONFLICT")
-        validate_workspace(path)
+        validate_workspace(path, self.game)
 
     def current(self) -> Path | None:
         if not os.path.lexists(self.current_file):
@@ -442,24 +414,6 @@ class LocalSnapshotStore:
         except Exception:
             self._cleanup_pending = True
 
-    def logout(self) -> None:
-        self._require_lock()
-        if self.browser_profile.exists():
-            if not io.private(self.browser_profile, 0o700):
-                raise WorkspaceError("UNSAFE_BROWSER_PROFILE")
-            # Browser must be closed; never remove live or stale singleton authority.
-            from .browser_runtime import profile_in_use
-
-            if profile_in_use(self.browser_profile):
-                raise WorkspaceError("BROWSER_PROFILE_IN_USE_OR_STALE")
-            remove_owned_tree(self.browser_profile)
-        for path in (self.auth_root / "identity.key", self.auth_root / "verified-identity.json"):
-            if os.path.lexists(path):
-                metadata = path.lstat()
-                if not stat.S_ISREG(metadata.st_mode) or not io.private(path, 0o600):
-                    raise WorkspaceError("UNSAFE_IDENTITY_STATE")
-                path.unlink()
-
     def _verify_private_metadata(self, path: Path) -> None:
         if not path.is_file() or not io.private(path, 0o600):
             raise WorkspaceError("UNSAFE_METADATA")
@@ -500,8 +454,7 @@ class LocalSnapshotStore:
                 if parent != Path(".") and inventory.get(parent.as_posix()) != "directory":
                     raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
         required_files = ["generation.json", "data/manifest.json", "tools/validate_repository.py"]
-        for game in GAMES.values():
-            required_files.extend((f"data/{game}/profile.json", f"data/{game}/roster.json"))
+        required_files.extend((f"data/{self.game}/profile.json", f"data/{self.game}/roster.json"))
         if any(inventory.get(name) in (None, "directory") for name in required_files):
             raise WorkspaceError("UNOWNED_CLEANUP_RESIDUE")
 
@@ -518,7 +471,7 @@ class LocalSnapshotStore:
             value = load_metadata(marker)
             if (
                 not isinstance(value, dict)
-                or value.get("authority") != "hoyo-roster/generation-v2"
+                or value.get("authority") != "hoyo-roster/generation-v3"
                 or value.get("scope") != self.scope_digest
                 or value.get("generation") != path.name
                 or value.get("identity") != identity
@@ -586,7 +539,7 @@ class LocalSnapshotStore:
                 not isinstance(journal, dict)
                 or set(journal)
                 != {"authority", "scope", "identity", "old", "new", "inventories", "evidence"}
-                or journal.get("authority") != "hoyo-roster/transaction-v2"
+                or journal.get("authority") != "hoyo-roster/transaction-v3"
                 or journal.get("scope") != self.scope_digest
                 or journal.get("identity") != self._identity_document(self._identity_region())
             ):
@@ -681,7 +634,7 @@ class LocalSnapshotStore:
         journal_attempted = False
         self._commit_state = "PRE_COMMIT"
         try:
-            empty_workspace(self.source, new)
+            empty_workspace(self.source, new, self.game)
             existing = (
                 game_dir if game_dir is not None else (old / "data" / self.game if old else None)
             )
@@ -694,11 +647,11 @@ class LocalSnapshotStore:
                 target = new / "data" / self.game
                 remove_owned_tree(target)
                 shutil.copytree(existing, target)
-            validate_workspace(new)
+            validate_workspace(new, self.game)
             write_json(
                 new / "generation.json",
                 {
-                    "authority": "hoyo-roster/generation-v2",
+                    "authority": "hoyo-roster/generation-v3",
                     "scope": self.scope_digest,
                     "identity": self._identity_document(
                         self._profile_region(
@@ -732,7 +685,7 @@ class LocalSnapshotStore:
             atomic_write_metadata(
                 self.transaction_file,
                 {
-                    "authority": "hoyo-roster/transaction-v2",
+                    "authority": "hoyo-roster/transaction-v3",
                     "scope": self.scope_digest,
                     "identity": self._identity_document(region),
                     "old": old.name if old else None,

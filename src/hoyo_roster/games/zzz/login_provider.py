@@ -8,6 +8,7 @@ from typing import Any
 
 from hoyo_roster.browser import initialize_session_page, BrowserContextAccess
 from hoyo_roster.login import ExpectedIdentity, identity_digest
+from hoyo_roster.login_ui import LoginPageConfig
 from hoyo_roster.models import LoginProbeResult, LoginProbeStatus
 from hoyo_roster.request_gate import RequestGate
 from playwright.async_api import Page
@@ -32,6 +33,11 @@ PROFILE_PATH = Path("data/zenless-zone-zero/profile.json")
 EXPECTED_REGION = "prod_gf_cn"
 
 
+LOGIN_UI = LoginPageConfig(
+    "www.miyoushe.com", "/zzz/", "绝区零米游社登录页（www.miyoushe.com/zzz/）", panel_text="登录"
+)
+
+
 @dataclass(slots=True, repr=False)
 class ZzzLoginProvider:
     context: BrowserContextAccess = field(repr=False)
@@ -42,6 +48,7 @@ class ZzzLoginProvider:
     endpoints: EndpointClient | None = field(default=None, repr=False)
     expected_uid_override: str | None = field(default=None, repr=False)
     game: str = field(default=GAME, init=False)
+    login_ui: LoginPageConfig = field(default=LOGIN_UI, init=False)
     binding_data: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _expected_uid: str | None = field(default=None, init=False, repr=False)
     _expected_region: str | None = field(default=None, init=False, repr=False)
@@ -143,6 +150,52 @@ class ZzzLoginProvider:
                 region=role.server,
             ),
         )
+
+    async def owned_roles(self, context):
+        from hoyo_roster.models import OwnedRole
+        from hoyo_roster.errors import (
+            AuthenticationRequired,
+            RateLimited,
+            RiskControl,
+            LoginNetworkError,
+            LoginBindingFailed,
+        )
+
+        if context is not self.context:
+            raise ConfigurationError("Owned-role probe context changed")
+        try:
+            data = dict(await self.endpoints.get_binding())
+        except AuthenticationError:
+            raise AuthenticationRequired("Official authentication required") from None
+        except RateLimitedError:
+            raise RateLimited("Official Binding rate limited") from None
+        except RiskControlError:
+            raise RiskControl("Official Binding risk control") from None
+        except RequestTransportError:
+            raise LoginNetworkError("Official Binding transport failed") from None
+        except ApiResponseError:
+            raise LoginBindingFailed("Official Binding invalid") from None
+        if not isinstance(data, dict) or not isinstance(data.get("list"), list):
+            raise LoginBindingFailed("Official Binding list invalid")
+        roles, seen = [], set()
+        for item in data["list"]:
+            if not isinstance(item, dict):
+                raise LoginBindingFailed("Official Binding role invalid")
+            if item.get("game_biz") != GAME_BIZ:
+                continue
+            try:
+                uid = parse_role_uid(item.get("game_uid"))
+                selected = select_role(data, uid)
+                region = selected.server
+                if region != EXPECTED_REGION:
+                    raise ValueError
+                if uid in seen:
+                    raise ValueError
+            except Exception:
+                raise LoginBindingFailed("Official Binding identity invalid") from None
+            seen.add(uid)
+            roles.append(OwnedRole(self.game, uid, region))
+        return tuple(sorted(roles, key=lambda role: (role.uid, role.region)))
 
     def login_page(self, fallback: Page) -> Page:
         return fallback

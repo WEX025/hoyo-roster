@@ -1,7 +1,8 @@
+from hoyo_roster.auth import account_browser as REAL_ACCOUNT_BROWSER
+
 """Synthetic browser selection, startup fallback and persisted ownership boundaries."""
 
 import asyncio
-import importlib
 import os
 from types import SimpleNamespace
 
@@ -177,34 +178,19 @@ def test_metadata_failure_prevents_browser_start(profile, monkeypatch):
 
 
 @pytest.mark.parametrize("channel", runtime.CHANNELS)
-def test_nested_singleton_stops_profile_placement(profile, channel, tmp_path):
-    from hoyo_roster.discovery import adopt_new_profile
-    from hoyo_roster.user_workspace import WorkspaceError
-
+def test_nested_singleton_detected_in_shared_profile(profile, channel):
     directory = secure_private_directory(profile / channel)
     (directory / "SingletonLock").touch()
     assert runtime.profile_in_use(profile)
-    destination = secure_private_directory(tmp_path / "destination") / "browser-profile"
-    store = SimpleNamespace(browser_profile=destination, auth_root=destination.parent)
-    with pytest.raises(WorkspaceError, match="USER_WORKSPACE_BUSY"):
-        adopt_new_profile(profile, store)
-    assert profile.exists() and not destination.exists()
 
 
-def test_profile_placement_preserves_selected_browser(profile, tmp_path, monkeypatch):
-    from hoyo_roster.discovery import adopt_new_profile
-
+def test_shared_profile_pins_selected_browser_without_moving(profile, monkeypatch):
     monkeypatch.setattr(runtime, "preferred_channel", lambda: "msedge")
     engine = Chromium()
     launch(engine, profile)
-    destination = secure_private_directory(tmp_path / "destination") / "browser-profile"
-    store = SimpleNamespace(browser_profile=destination, auth_root=destination.parent)
-    assert adopt_new_profile(profile, store)
     monkeypatch.setattr(runtime, "preferred_channel", lambda: "chrome")
-    assert launch(engine, destination, headed=False).channel == "msedge"
-    assert engine.calls[-1]["user_data_dir"] == runtime.chromium_profile_path(
-        destination / "msedge"
-    )
+    assert launch(engine, profile, headed=False).channel == "msedge"
+    assert engine.calls[-1]["user_data_dir"] == runtime.chromium_profile_path(profile / "msedge")
 
 
 def test_duplicate_metadata_keys_rejected(profile):
@@ -223,11 +209,12 @@ def test_duplicate_metadata_keys_rejected(profile):
 def test_business_failure_after_launch_closes_without_fallback(
     profile, tmp_path, monkeypatch, game, error
 ):
-    browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
+    from hoyo_roster import auth as browser
+
     monkeypatch.setattr(runtime, "preferred_channel", lambda: "msedge")
     engine = Chromium()
     events = []
-    context = SimpleNamespace(pages=[SimpleNamespace(on=lambda *args: None)])
+    context = SimpleNamespace(pages=[])
 
     async def close():
         events.append("close")
@@ -252,9 +239,7 @@ def test_business_failure_after_launch_closes_without_fallback(
     monkeypatch.setattr(browser, "async_playwright", Runtime)
 
     async def use():
-        async with browser.persistent_browser(
-            repo_root=tmp_path / "repo", browser_profile=profile, headed=True
-        ):
+        async with REAL_ACCOUNT_BROWSER(profile, headed=True):
             raise error("synthetic business failure")
 
     with pytest.raises(error):
@@ -265,20 +250,20 @@ def test_business_failure_after_launch_closes_without_fallback(
 
 @pytest.mark.parametrize("channel", runtime.CHANNELS)
 def test_logout_retains_profile_with_nested_singleton(tmp_path, source, channel):
-    from hoyo_roster.user_workspace import LocalSnapshotStore, WorkspaceError, direct_configuration
+    from hoyo_roster.auth import AuthService
+    from hoyo_roster.user_workspace import WorkspaceError
 
-    store = LocalSnapshotStore(
-        source,
-        direct_configuration("zzz", "123456789", storage_root=tmp_path / "results"),
-        "zzz",
-    )
-    with store.locked():
-        root = secure_private_directory(store.browser_profile)
-        directory = secure_private_directory(root / channel)
-        (directory / "SingletonLock").touch()
-        with pytest.raises(WorkspaceError, match="BROWSER_PROFILE_IN_USE_OR_STALE"):
-            store.logout()
-        assert (directory / "SingletonLock").exists()
+    service = AuthService(tmp_path / "auth", headed=False, timeout=1)
+    directory = secure_private_directory(service.profile / channel)
+    (directory / "SingletonLock").touch()
+
+    async def run():
+        async with service:
+            with pytest.raises(WorkspaceError, match="BROWSER_PROFILE_IN_USE_OR_STALE"):
+                service.logout()
+
+    asyncio.run(run())
+    assert (directory / "SingletonLock").exists()
 
 
 @pytest.mark.parametrize(

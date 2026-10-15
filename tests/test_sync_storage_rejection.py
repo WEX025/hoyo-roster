@@ -22,7 +22,6 @@ def test_sync_rejects_storage_failure_without_deleting_candidate(
 ):
     import importlib
 
-    domain = importlib.import_module(f"hoyo_roster.games.{game}.cli")
     browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     context = Context([binding_payload(game)]) if game == "genshin" else OfficialContext(game)
     if game != "genshin":
@@ -47,7 +46,9 @@ def test_sync_rejects_storage_failure_without_deleting_candidate(
     async def reserve(self, **kwargs):
         return 0
 
-    monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
+    from tests.shared_browser import install
+
+    install(monkeypatch, simulated_browser)
     monkeypatch.setattr(RequestGate, "reserve", reserve)
     root = tmp_path / "private"
     store = uw.LocalSnapshotStore(

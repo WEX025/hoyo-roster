@@ -12,11 +12,9 @@ import math
 import re
 import uuid
 from pathlib import Path
-from .config import Settings
 from .errors import OperationError, LoginTimeout, BrowserUnavailable, BrowserProfileInvalid
-from .progress import OPTIONS, options_from_args, emit
-from .request_gate import RequestGate
-from .sync import OperationResult
+from .progress import emit
+from .validation import CONTRACT_ROOT as CONTRACT_ROOT
 from .user_workspace import (
     GAMES,
     LocalSnapshotStore,
@@ -24,7 +22,6 @@ from .user_workspace import (
     direct_configuration,
 )
 
-MODULES = {game: f"hoyo_roster.games.{game}.cli" for game in GAMES}
 OPERATIONS = (
     "discover",
     "init",
@@ -36,7 +33,6 @@ OPERATIONS = (
     "cleanup-candidate",
     "logout",
 )
-CONTRACT_ROOT = Path(__file__).resolve().parent / "contracts"
 
 
 def print_current_result(store: LocalSnapshotStore) -> None:
@@ -67,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hoyo-roster",
         description=__doc__,
         epilog=(
-            "所有系统默认先登录，再自动发现本人 UID，无需预先填写。省略 --game 时处理原神和绝区零。"
+            "默认依次同步原神、绝区零；各游戏检查并复用账号会话，失效时按需登录；无需预先填写 UID。省略 --game 时处理原神和绝区零。"
             "崩坏：星穹铁道暂时无法获取，请不要使用；hsr 参数仅保留接口。"
             "原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，角色名单仍须闭合。"
             "绝区零已支持能力保留，详见 docs/data-format.md。"
@@ -132,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", help="owned candidate UUID for explicit cleanup")
     parser.add_argument(
         "--resume-discovery",
-        help="reuse an explicitly selected owned, confirmed-closed discovery UUID; requires one game",
+        help="old discovery recovery is unsupported; old profiles are preserved without migration",
     )
     parser.add_argument(
         "--generation", help="verified generation UUID for recovery or non-current cleanup"
@@ -208,10 +204,19 @@ async def run(args) -> int:
         )
     ):
         raise WorkspaceError("INVALID_PHONE_LOGIN_OPTIONS")
-    if args.operation == "discover" or (args.uid is None and args.operation in {"login", "sync"}):
-        from .discovery import run_discovery
+    if not math.isfinite(args.login_timeout) or not 0 < args.login_timeout <= 3600:
+        raise WorkspaceError("INVALID_LOGIN_TIMEOUT")
+    if args.operation in {"discover", "login", "sync"}:
+        from .workflow import run_task
 
-        return await run_discovery(args)
+        return await run_task(args)
+    if args.operation == "logout":
+        from .auth import AuthService
+
+        async with AuthService(args.auth_root, headed=False, timeout=args.login_timeout) as auth:
+            auth.logout()
+        print("LOCAL_SESSION=REMOVED")
+        return 0
     if args.game == "all":
         raise WorkspaceError("ARGUMENTS_INVALID")
     config, game, operation = select_configuration(args)
@@ -231,9 +236,6 @@ async def run(args) -> int:
         )
         if store.cleanup_pending:
             emit("CLEANUP_PENDING")
-    if isinstance(result, OperationResult):
-        result.report()
-        return 0
     return result
 
 
@@ -301,45 +303,14 @@ async def run_locked(args, config, game, operation, store):
             ) from None
         print("LOCAL_CANDIDATE=CLEANED")
         return 0
-    if operation == "logout":
-        store.logout()
-        print("LOCAL_SESSION=REMOVED")
-        return 0
-    workspace = store.prepare()
+    if operation != "init":
+        raise WorkspaceError("ARGUMENTS_INVALID")
+    store.prepare()
     print_current_result(store)
     if store.cleanup_pending:
-        return 0 if operation == "init" else 1
-    if operation == "init":
-        print("LOCAL_WORKSPACE=READY")
-        return 0
-    module = importlib.import_module(MODULES[game])
-    gate = RequestGate(Settings(external_root=store.auth_root))
-    domain_args = argparse.Namespace(
-        repo_root=workspace,
-        browser_profile=store.browser_profile,
-        uid=config.uid(game),
-        expected_region=getattr(args, "discovered_region", None),
-        headed=not args.headless,
-        request_interval=2.0,
-        login_check_only=operation == "login",
-        login_wait_seconds=args.login_timeout,
-    )
-    token = OPTIONS.set(options_from_args(args))
-    try:
-        result = await module.run_sync(
-            domain_args, snapshot_store=store, request_gate_override=gate
-        )
-        print_current_result(store)
-        return result
-    except module.SyncError as error:
-        reporter = importlib.import_module(f"hoyo_roster.games.{game}.redaction")
-        code, _ = reporter.public_error(error)
-        print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={code}\n提示=参阅 docs/local-use.md；身份/风险/限流错误应停止。"
-        )
         return 1
-    finally:
-        OPTIONS.reset(token)
+    print("LOCAL_WORKSPACE=READY")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

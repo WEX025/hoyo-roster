@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 from contextlib import (
     AbstractAsyncContextManager,
 )
@@ -11,29 +10,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from hoyo_roster.validation import validate_game_source, ValidationFailure
 from hoyo_roster.progress import emit
 from hoyo_roster.blocking import run_blocking
-from hoyo_roster.config import production_settings
-from hoyo_roster.login import coordinate_login
 from hoyo_roster.request_gate import RequestGate
 from hoyo_roster.user_workspace import SnapshotStore
-from hoyo_roster.sync import OperationResult, publish_snapshot, operation_browser
+from hoyo_roster.sync import OperationResult, publish_snapshot
 from functools import partial
 
 from .browser import (
     BrowserSession,
-    persistent_browser,
+    shared_browser,
     prime_rpc_headers,
-    resolve_browser_profile,
 )
 from .candidate import (
     assert_no_stale_candidates,
     create_candidate,
-    run_repository_validator,
 )
 from .endpoints import EndpointClient
 from .errors import (
-    CandidateValidationError,
     ConfigurationError,
     FormalRepositoryPrevalidationError,
     SnapshotConsistencyError,
@@ -60,10 +55,10 @@ def _repo_root(path: Path) -> Path:
 
 def _prevalidate_formal_repository(repo_root: Path) -> None:
     try:
-        run_repository_validator(repo_root)
-    except CandidateValidationError as error:
+        validate_game_source(repo_root, "zenless-zone-zero")
+    except ValidationFailure as error:
         raise FormalRepositoryPrevalidationError(
-            "formal repository prevalidation failed", diagnostic_sha256=error.diagnostic_sha256
+            "formal repository prevalidation failed", diagnostic_sha256=error.diagnostic
         ) from None
 
 
@@ -75,6 +70,8 @@ async def _binding_with_login(
     uid: str | None,
     request_gate: RequestGate | None,
     request_interval: float,
+    auth_service=None,
+    allow_login=True,
 ) -> dict[str, Any]:
     provider = create_routine_login_provider(
         context=browser_session.context,
@@ -86,33 +83,19 @@ async def _binding_with_login(
         request_interval=request_interval,
     )
 
-    def print_waiting() -> None:
-        print("WAITING_FOR_USER_LOGIN=YES", flush=True)
-
-    waiting_callback: Callable[[], None] = print_waiting
-    settings = production_settings()
-    result = await coordinate_login(
-        repo_root=repo_root,
-        context=browser_session.context,
-        page=browser_session.page,
-        request_gate=request_gate,
-        providers=(provider,),
-        headed=browser_session.headed,
-        poll_interval=settings.login_probe_interval_seconds,
-        timeout=settings.login_timeout_seconds,
-        waiting_callback=waiting_callback,
-    )
+    result = await auth_service.ensure_session(provider, allow_login=allow_login)
     if not result.success:
         raise ConfigurationError("expected ZZZ identity was unavailable")
     assert provider.binding_data is not None
     return provider.binding_data
 
 
-async def run_sync(
+async def _run_sync_once(
     args: argparse.Namespace,
     *,
     snapshot_store: SnapshotStore,
     request_gate_override: RequestGate | None = None,
+    auth_service=None,
 ) -> OperationResult:
     repo_root = await run_blocking(_repo_root, args.repo_root)
     await run_blocking(
@@ -122,16 +105,12 @@ async def run_sync(
     await run_blocking(_prevalidate_formal_repository, repo_root)
     request_gate = request_gate_override
     browser_context: AbstractAsyncContextManager[BrowserSession]
-    browser_profile = resolve_browser_profile(repo_root, args.browser_profile)
-    browser_context = persistent_browser(
-        repo_root=repo_root,
-        browser_profile=browser_profile,
-        headed=args.headed,
-    )
+    browser_context = shared_browser(auth_service)
+    manager = browser_context
 
     transport: BrowserTransport | None = None
     async with (
-        operation_browser(browser_context) as browser_session,
+        manager as browser_session,
     ):
         transport = BrowserTransport(
             browser_session.context,
@@ -148,9 +127,8 @@ async def run_sync(
             uid=args.uid,
             request_gate=request_gate,
             request_interval=args.request_interval,
+            auth_service=auth_service,
         )
-        if args.login_check_only:
-            return OperationResult("zzz", "login")
         await prime_rpc_headers(
             browser_session,
             request_gate=request_gate,
@@ -164,7 +142,16 @@ async def run_sync(
         pass_1_request_count = transport.request_count - request_count_start
         first_snapshot = normalize_collection(first_collection)
         emit("COLLECTING_2")
-        second_binding = await endpoints.get_binding()
+        second_binding = await _binding_with_login(
+            endpoints,
+            repo_root=repo_root,
+            browser_session=browser_session,
+            uid=args.uid,
+            request_gate=request_gate,
+            request_interval=args.request_interval,
+            auth_service=auth_service,
+            allow_login=False,
+        )
         second_collection = await endpoints.collect_from_binding(
             second_binding,
             uid=args.uid,
@@ -201,3 +188,23 @@ async def run_sync(
         )
         result = OperationResult("zzz", "sync", total_live_request_count, lifecycle.no_op, modified)
     return result
+
+
+async def run_sync(args, *, snapshot_store, auth_service, request_gate_override=None):
+    """Retry the entire uncommitted two-pass capture once after explicit auth loss."""
+    from hoyo_roster.errors import AuthenticationRequired
+    from .errors import AuthenticationError
+
+    for attempt in range(2):
+        try:
+            return await _run_sync_once(
+                args,
+                snapshot_store=snapshot_store,
+                request_gate_override=request_gate_override,
+                auth_service=auth_service,
+            )
+        except (AuthenticationRequired, AuthenticationError):
+            if attempt:
+                raise AuthenticationRequired("Authentication recovery exhausted") from None
+            print("AUTH_RECOVERY=RESTART_CURRENT_GAME", flush=True)
+    raise AssertionError("unreachable")

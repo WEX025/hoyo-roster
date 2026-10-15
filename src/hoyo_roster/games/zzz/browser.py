@@ -6,13 +6,11 @@ import asyncio
 import os
 from ... import platform_io as io
 import stat
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from hoyo_roster.browser import navigate_login_page
-from hoyo_roster.browser_runtime import launch_profile
 from hoyo_roster.config import (
     resolve_private_profile_path,
 )
@@ -23,7 +21,6 @@ from playwright.async_api import (
     Page,
     Playwright,
     Request,
-    async_playwright,
 )
 
 from .errors import ConfigurationError, LoginRequired, RiskControlError
@@ -99,37 +96,6 @@ def _capture_rpc_headers(session: BrowserSession, request: Request) -> None:
             session.rpc_headers[key] = value
 
 
-@asynccontextmanager
-async def persistent_browser(
-    *,
-    repo_root: Path,
-    browser_profile: Path,
-    headed: bool,
-) -> AsyncIterator[BrowserSession]:
-    """Open a persistent context with all recording features disabled."""
-
-    profile = resolve_browser_profile(repo_root, browser_profile)
-    playwright = await async_playwright().start()
-    context: BrowserContext | None = None
-    try:
-        context = await launch_profile(playwright, profile, headed=headed)
-        page = context.pages[0] if context.pages else await context.new_page()
-        session = BrowserSession(
-            playwright=playwright,
-            context=context,
-            page=page,
-            headed=headed,
-        )
-        page.on("request", lambda request: _capture_rpc_headers(session, request))
-        yield session
-    finally:
-        try:
-            if context is not None:
-                await context.close()
-        finally:
-            await playwright.stop()
-
-
 async def open_login_page(
     session: BrowserSession,
     *,
@@ -184,3 +150,20 @@ async def prime_rpc_headers(
             raise ConfigurationError("official page did not provide required device headers")
         await session.page.wait_for_timeout(100)
     await session.page.goto("about:blank", wait_until="domcontentloaded")
+
+
+@asynccontextmanager
+async def shared_browser(auth):
+    """Borrow one game page; the auth service retains ownership of the context."""
+    async with auth.page() as page:
+        session = BrowserSession(None, auth.context, page, auth.headed)
+
+        def capture(request):
+            _capture_rpc_headers(session, request)
+
+        page.on("request", capture)
+        try:
+            yield session
+        finally:
+            page.remove_listener("request", capture)
+            session.rpc_headers.clear()

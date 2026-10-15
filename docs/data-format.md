@@ -2,7 +2,7 @@
 
 **崩坏：星穹铁道暂时无法获取，请不要使用。原神目前不含圣遗物和完整属性面板。** 以下区分当前可用能力与保留的技术格式；星铁接口/格式继续存在，不是使用建议，也不推断上游原因。
 
-格式权威是发行包的 `src/hoyo_roster/contracts/schemas/`；验证器同时验证 schema、跨文件一致性、完整度、规范 JSON 和 roster/build 一一对应。`data/manifest.json` 列出三游戏文件。每个身份的当前 generation 都有三游戏基线，只有所选游戏包含个人数据；其他游戏始终 `not_synced` 且为空。
+格式权威是发行包的 `src/hoyo_roster/contracts/schemas/`；验证器同时验证 schema、跨文件一致性、完整度、规范 JSON 和 roster/build 一一对应。`data/manifest.json` 列出三游戏文件。每个身份的当前 generation 只包含本游戏数据、本游戏 schema 和必要公共契约。运行时只验证本游戏；公共 manifest 保留固定格式映射，但不要求其他游戏文件存在。整仓三游戏空基线验证保留为开发发布检查。结果使用 game-results-v3 新命名空间，generation/transaction 归属标记升级为 v3，旧目录不自动读取或迁移。
 
 Profile 保存游戏、UID、server、nickname、player_level 和 sync（state/source/synced_at）。名单的字符串角色 ID 是 map key；Build 为 `builds/<正整数角色ID>.json`，不重复存储角色身份。百分比为比例值（例如 5% → 0.05），精确数字通过 Decimal 与规范序列化保留；三游戏数据均不经 float 回读。规范 JSON 为两空格缩进、末尾换行，数字使用普通十进制、去除无意义的小数末尾零，负零写为 0；拒绝非有限值。独立验证器精确回读再比较规范文本，星铁的高精度 Decimal 同样适用于离线验证和恢复。只保存各游戏当前已支持的装备字段（原神当前武器等，不含圣遗物），不保存库存、货币、资源、目标配装、推荐结果或公共游戏机制数据库。
 

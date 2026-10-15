@@ -8,7 +8,7 @@ import os
 from ... import platform_io as io
 import stat
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +16,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from hoyo_roster.browser import navigate_login_page
-from hoyo_roster.browser_runtime import launch_profile
 from hoyo_roster.config import (
     resolve_private_profile_path,
 )
@@ -28,7 +27,6 @@ from playwright.async_api import (
     Playwright,
     Request,
     Response,
-    async_playwright,
 )
 
 from .endpoint_specs import BINDING, CULTIVATION_LIST
@@ -93,27 +91,6 @@ class BrowserSession:
     context: BrowserContext
     page: Page
     headed: bool
-
-
-@asynccontextmanager
-async def persistent_browser(
-    *, repo_root: Path, browser_profile: Path, headed: bool
-) -> AsyncIterator[BrowserSession]:
-    profile = resolve_browser_profile(repo_root, browser_profile)
-    playwright = await async_playwright().start()
-    context: BrowserContext | None = None
-    try:
-        context = await launch_profile(
-            playwright, profile, headed=headed, args=("--restore-last-session",)
-        )
-        page = context.pages[0] if context.pages else await context.new_page()
-        yield BrowserSession(playwright, context, page, headed)
-    finally:
-        try:
-            if context is not None:
-                await context.close()
-        finally:
-            await playwright.stop()
 
 
 async def open_login_page(
@@ -334,3 +311,11 @@ class OfficialCollector:
             self._page.remove_listener("response", observe)
             self._last_request = time.monotonic()
             self.request_count += 1
+
+
+@asynccontextmanager
+async def shared_browser(auth):
+    """Borrow one game page; the auth service retains ownership of the context."""
+    async with auth.page() as page:
+        session = BrowserSession(None, auth.context, page, auth.headed)
+        yield session

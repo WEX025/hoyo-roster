@@ -2,13 +2,11 @@
 
 import asyncio
 import copy
-import importlib
 import os
-from types import SimpleNamespace
 
 import pytest
 
-from hoyo_roster import cli, discovery, platform_io as io
+from hoyo_roster import cli, discovery, workflow, platform_io as io
 from hoyo_roster.errors import AuthenticationRequired, LoginBindingFailed, WrongAccount
 from hoyo_roster.progress import OPTIONS, LoginOptions
 from hoyo_roster.storage.common import secure_private_directory
@@ -28,7 +26,7 @@ def test_public_entrypoint_discovers_before_requiring_uid(monkeypatch, operation
     def forbidden_identity_selection(args):
         pytest.fail("Default login/discovery must not require a supplied UID")
 
-    monkeypatch.setattr(discovery, "run_discovery", discover)
+    monkeypatch.setattr(workflow, "run_task", discover)
     monkeypatch.setattr(cli, "select_configuration", forbidden_identity_selection)
     argv = [] if operation == "sync" else ["--operation", operation]
     if game is not None:
@@ -37,7 +35,7 @@ def test_public_entrypoint_discovers_before_requiring_uid(monkeypatch, operation
     assert calls == [(game, None, operation)]
 
 
-@pytest.mark.parametrize("game", discovery.SUPPORTED_GAMES)
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
 def test_discovery_uses_official_binding_after_login_without_uid(game, tmp_path, capsys):
     routine, context, page, gate = provider_for(
         game,
@@ -45,7 +43,7 @@ def test_discovery_uses_official_binding_after_login_without_uid(game, tmp_path,
         [binding_payload(game, retcode=10001), binding_payload(game)],
         uid=None,
     )
-    provider = discovery.DiscoveryProvider(game, routine)
+    provider = discovery.DiscoveryProvider(routine)
     token = OPTIONS.set(LoginOptions("qr", True, 2, True))
     try:
         result = asyncio.run(coordinate(cli.CONTRACT_ROOT, provider, context, page, gate))
@@ -58,11 +56,11 @@ def test_discovery_uses_official_binding_after_login_without_uid(game, tmp_path,
     assert UID_A not in repr(provider.roles)
 
 
-@pytest.mark.parametrize("game", discovery.SUPPORTED_GAMES)
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
 @pytest.mark.parametrize(
     "kind", ["duplicate", "bad-uid", "bad-region", "bad-level", "bad-list", "bad-item"]
 )
-def test_discovery_invalid_official_identity_fails_closed(game, kind):
+def test_discovery_invalid_official_identity_fails_closed(game, kind, tmp_path):
     data = binding_payload(game)["data"]
     if kind == "duplicate":
         data["list"].append(copy.deepcopy(data["list"][0]))
@@ -77,18 +75,36 @@ def test_discovery_invalid_official_identity_fails_closed(game, kind):
             "bad-level": ("level", True),
         }[kind]
         data["list"][0][field] = value
+    routine, context, _, _ = provider_for(
+        game,
+        tmp_path / "contracts",
+        [{"retcode": 0, "message": "synthetic", "data": data}],
+        uid=None,
+    )
     with pytest.raises(LoginBindingFailed):
-        discovery.binding_roles(game, data)
+        asyncio.run(routine.owned_roles(context))
 
 
-@pytest.mark.parametrize("game", discovery.SUPPORTED_GAMES)
-def test_discovery_all_bound_roles_and_other_games(game):
+@pytest.mark.parametrize("game", ("genshin", "zzz"))
+def test_discovery_all_bound_roles_and_other_games(game, tmp_path):
     data = binding_payload(game)["data"]
     data["list"].extend(binding_payload(game, UID_B)["data"]["list"])
     data["list"].extend(binding_payload("hsr")["data"]["list"])
-    roles = discovery.binding_roles(game, data)
+    routine, context, _, _ = provider_for(
+        game,
+        tmp_path / "contracts",
+        [{"retcode": 0, "message": "synthetic", "data": data}],
+        uid=None,
+    )
+    roles = asyncio.run(routine.owned_roles(context))
     assert [role.uid for role in roles] == [UID_A, UID_B]
-    assert discovery.binding_roles(game, {"list": []}) == ()
+    routine, context, _, _ = provider_for(
+        game,
+        tmp_path / "empty",
+        [{"retcode": 0, "message": "synthetic", "data": {"list": []}}],
+        uid=None,
+    )
+    assert asyncio.run(routine.owned_roles(context)) == ()
 
 
 def test_discovery_headless_never_opens_new_login(tmp_path):
@@ -103,7 +119,7 @@ def test_discovery_headless_never_opens_new_login(tmp_path):
         asyncio.run(
             coordinate(
                 cli.CONTRACT_ROOT,
-                discovery.DiscoveryProvider("genshin", routine),
+                discovery.DiscoveryProvider(routine),
                 context,
                 page,
                 gate,
@@ -125,132 +141,6 @@ def test_discovered_genshin_region_must_match_before_collection(tmp_path):
     with pytest.raises(WrongAccount):
         asyncio.run(coordinate(root, provider, context, page, gate))
     assert context.request.count == 1 and page.urls == []
-
-
-def test_new_profile_adoption_never_overwrites_existing(tmp_path):
-    source = secure_private_directory(tmp_path / "onboarding" / "profile")
-    destination = secure_private_directory(tmp_path / "identity" / "profile")
-    marker = destination / "synthetic-existing.txt"
-    marker.write_text("unchanged")
-    store = SimpleNamespace(browser_profile=destination, auth_root=destination.parent)
-    assert discovery.adopt_new_profile(source, store) is False
-    assert marker.read_text() == "unchanged" and source.exists()
-
-
-def test_new_profile_adoption_moves_only_closed_profile(tmp_path):
-    source = secure_private_directory(tmp_path / "onboarding" / "profile")
-    target_parent = secure_private_directory(tmp_path / "identity")
-    store = SimpleNamespace(browser_profile=target_parent / "profile", auth_root=target_parent)
-    (source / "SingletonLock").touch()
-    with pytest.raises(WorkspaceError, match="USER_WORKSPACE_BUSY"):
-        discovery.adopt_new_profile(source, store)
-    (source / "SingletonLock").unlink()
-    from hoyo_roster.storage.common import atomic_write_metadata, load_metadata
-
-    atomic_write_metadata(source.parent / "request-state.json", {"next_allowed_at": 1234})
-    atomic_write_metadata(target_parent / "request-state.json", {"next_allowed_at": 1200})
-    assert discovery.adopt_new_profile(source, store)
-    assert store.browser_profile.exists() and not source.exists()
-    assert io.private(store.browser_profile)
-    assert load_metadata(target_parent / "request-state.json", private=True) == {
-        "next_allowed_at": 1234
-    }
-
-
-@pytest.mark.parametrize("game", discovery.SUPPORTED_GAMES)
-@pytest.mark.parametrize("extended", (False, True))
-def test_private_profile_must_stay_outside_repository_with_extended_paths(tmp_path, game, extended):
-    repo = secure_private_directory(tmp_path / "repo")
-    profile = secure_private_directory(repo / "profile")
-    browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
-    with pytest.raises(browser.ConfigurationError):
-        browser.resolve_browser_profile(
-            tmp_path / "repo", profile if extended else tmp_path / "repo" / "profile"
-        )
-
-
-def test_discovery_selection_is_not_authentication(tmp_path, monkeypatch, capsys):
-    from hoyo_roster.storage.common import atomic_write_metadata
-
-    auth = tmp_path / "auth"
-    parent = discovery.discovery_root(auth, cli.CONTRACT_ROOT)
-    atomic_write_metadata(
-        parent / "selected-genshin.json",
-        {
-            "authority": "hoyo-roster/owned-role-selection-v1",
-            "game": "genshin",
-            "roles": [{"uid": UID_A, "region": "cn_gf01"}],
-        },
-    )
-    calls = []
-
-    async def exact(args):
-        calls.append((args.game, args.uid, args.discovered_region))
-        raise WrongAccount("synthetic changed official account")
-
-    monkeypatch.setattr(cli, "run", exact)
-    args = cli.build_parser().parse_args(
-        ["--game", "genshin", "--auth-root", str(auth), "--headless"]
-    )
-    with pytest.raises(WrongAccount):
-        asyncio.run(discovery.run_discovery(args))
-    assert calls == [("genshin", UID_A, "cn_gf01")]
-    assert UID_A not in capsys.readouterr().out
-
-
-def test_discovery_close_failure_retains_scope_and_never_saves(tmp_path, monkeypatch, capsys):
-    from hoyo_roster.sync import BrowserCloseFailed
-
-    async def fail(*args):
-        raise BrowserCloseFailed("synthetic")
-
-    monkeypatch.setattr(discovery, "discover_game", fail)
-    auth = tmp_path / "auth"
-    args = cli.build_parser().parse_args(["--game", "genshin", "--auth-root", str(auth)])
-    with pytest.raises(BrowserCloseFailed):
-        asyncio.run(discovery.run_discovery(args))
-    parent = io.filesystem_path(auth / "onboarding")
-    assert not (parent / "selected-genshin.json").exists()
-    assert len([path for path in parent.iterdir() if path.is_dir()]) == 1
-    assert "DISCOVERY_STATUS=PASS" not in capsys.readouterr().out
-
-
-def test_all_games_discovery_uses_each_exact_identity(tmp_path, monkeypatch, capsys):
-    visited, exact_calls = [], []
-
-    async def fake(game, args, scope, source):
-        visited.append(game)
-        profile = secure_private_directory(scope / "browser-profile")
-        data = binding_payload(game)["data"]
-        data["list"].extend(binding_payload(game, UID_B)["data"]["list"])
-        return profile, discovery.binding_roles(game, data)
-
-    async def exact(args):
-        exact_calls.append((args.game, args.uid, args.discovered_region))
-        return 0
-
-    monkeypatch.setattr(discovery, "discover_game", fake)
-    monkeypatch.setattr(cli, "run", exact)
-    args = cli.build_parser().parse_args(
-        [
-            "--game",
-            "all",
-            "--auth-root",
-            str(tmp_path / "auth"),
-            "--storage-root",
-            str(tmp_path / "results"),
-        ]
-    )
-    assert asyncio.run(discovery.run_discovery(args)) == 0
-    assert visited == ["genshin", "zzz"]
-    assert [item[0] for item in exact_calls] == ["genshin", "genshin", "zzz", "zzz"]
-    assert [item[1] for item in exact_calls] == [UID_A, UID_B, UID_A, UID_B]
-    output = capsys.readouterr().out
-    assert "GAME_PAUSED" in output and UID_A not in output
-    # A new invocation reuses selectors, still running exact authentication per role.
-    visited.clear()
-    assert asyncio.run(discovery.run_discovery(args)) == 0
-    assert visited == [] and len(exact_calls) == 8
 
 
 @pytest.mark.parametrize("role_count", (1, 2))
@@ -289,7 +179,7 @@ def test_zzz_business_selects_only_exact_discovered_role():
     [
         (["--game", "hsr"], "GAME_PAUSED"),
         (["--game", "all", "--uid", UID_A], "ARGUMENTS_INVALID"),
-        (["--game", "genshin", "--operation", "discover", "--uid", UID_A], "ARGUMENTS_INVALID"),
+        (["--game", "genshin", "--resume-discovery", "bad"], "DISCOVERY_RESUME_UNSUPPORTED"),
     ],
 )
 def test_invalid_discovery_does_not_login(argv, code, capsys):

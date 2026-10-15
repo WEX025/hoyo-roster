@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 from contextlib import (
     AbstractAsyncContextManager,
 )
@@ -13,18 +12,15 @@ from typing import Any
 
 from hoyo_roster.progress import emit
 from hoyo_roster.blocking import run_blocking
-from hoyo_roster.config import production_settings
-from hoyo_roster.login import coordinate_login
 from hoyo_roster.request_gate import RequestGate
 from hoyo_roster.user_workspace import SnapshotStore
-from hoyo_roster.sync import OperationResult, publish_snapshot, operation_browser
+from hoyo_roster.sync import OperationResult, publish_snapshot
 from functools import partial
 
 from .browser import (
     BrowserSession,
     OfficialCollector,
-    persistent_browser,
-    resolve_browser_profile,
+    shared_browser,
 )
 from .candidate import (
     assert_no_stale_candidates,
@@ -68,7 +64,11 @@ async def _binding_with_login(
     request_gate: RequestGate | None,
     request_interval: float,
     expected_region: str | None = None,
+    auth_service=None,
+    allow_login=True,
 ) -> dict[str, Any]:
+    if uid is None:
+        raise AuthenticationError("An exact owned identity is required before collection")
     provider = create_routine_login_provider(
         context=session.context,
         page=session.page,
@@ -80,22 +80,7 @@ async def _binding_with_login(
         expected_region=expected_region,
     )
 
-    def print_waiting() -> None:
-        print("WAITING_FOR_USER_LOGIN=YES", flush=True)
-
-    waiting_callback: Callable[[], None] = print_waiting
-    settings = production_settings()
-    login_result = await coordinate_login(
-        repo_root=repo_root,
-        context=session.context,
-        page=session.page,
-        request_gate=request_gate,
-        providers=(provider,),
-        headed=session.headed,
-        poll_interval=settings.login_probe_interval_seconds,
-        timeout=settings.login_timeout_seconds,
-        waiting_callback=waiting_callback,
-    )
+    login_result = await auth_service.ensure_session(provider, allow_login=allow_login)
     if not login_result.available_coverage_success or provider.binding_data is None:
         raise AuthenticationError("official Binding did not confirm the expected account")
     return provider.binding_data
@@ -111,6 +96,7 @@ async def _pass(
     request_interval: float,
     expected_region: str | None = None,
     pass_number: int = 1,
+    auth_service=None,
 ) -> tuple[Snapshot, int]:
     start = collector.request_count
     binding_data = await _binding_with_login(
@@ -121,6 +107,8 @@ async def _pass(
         request_gate=request_gate,
         request_interval=request_interval,
         expected_region=expected_region,
+        auth_service=auth_service,
+        allow_login=pass_number == 1,
     )
     binding = select_binding(binding_data, uid)
     emit(f"COLLECTING_{pass_number}")
@@ -132,11 +120,12 @@ async def _pass(
     return snapshot, collector.request_count - start
 
 
-async def run_sync(
+async def _run_sync_once(
     args: argparse.Namespace,
     *,
     snapshot_store: SnapshotStore,
     request_gate_override: RequestGate | None = None,
+    auth_service=None,
 ) -> OperationResult:
     repo_root = await run_blocking(_repo_root, args.repo_root)
     await run_blocking(
@@ -146,32 +135,16 @@ async def run_sync(
     await run_blocking(prevalidate_repository, repo_root)
     request_gate = request_gate_override
     browser_context: AbstractAsyncContextManager[BrowserSession]
-    browser_profile = resolve_browser_profile(repo_root, args.browser_profile)
-    browser_context = persistent_browser(
-        repo_root=repo_root,
-        browser_profile=browser_profile,
-        headed=args.headed,
-    )
+    browser_context = shared_browser(auth_service)
+    manager = browser_context
     collector: OfficialCollector | None = None
-    async with operation_browser(browser_context) as session:
+    async with manager as session:
         collector = OfficialCollector(
             session.context,
             session.page,
             request_interval=args.request_interval,
             request_gate=request_gate,
         )
-        if args.login_check_only:
-            binding_data = await _binding_with_login(
-                collector,
-                session,
-                repo_root=repo_root,
-                uid=args.uid,
-                request_gate=request_gate,
-                request_interval=args.request_interval,
-                expected_region=getattr(args, "expected_region", None),
-            )
-            select_binding(binding_data, args.uid)
-            return OperationResult("genshin", "login")
         first, first_requests_after_binding = await _pass(
             collector,
             session,
@@ -180,6 +153,7 @@ async def run_sync(
             request_gate=request_gate,
             request_interval=args.request_interval,
             expected_region=getattr(args, "expected_region", None),
+            auth_service=auth_service,
         )
         second, second_requests = await _pass(
             collector,
@@ -190,6 +164,7 @@ async def run_sync(
             request_interval=args.request_interval,
             expected_region=getattr(args, "expected_region", None),
             pass_number=2,
+            auth_service=auth_service,
         )
         first_requests = first_requests_after_binding
         assert_stable(first, second)
@@ -226,3 +201,23 @@ async def run_sync(
             "genshin", "sync", first_requests + second_requests, lifecycle.no_op, modified
         )
     return result
+
+
+async def run_sync(args, *, snapshot_store, auth_service, request_gate_override=None):
+    """Retry the entire uncommitted two-pass capture once after explicit auth loss."""
+    from hoyo_roster.errors import AuthenticationRequired
+    from .errors import AuthenticationError
+
+    for attempt in range(2):
+        try:
+            return await _run_sync_once(
+                args,
+                snapshot_store=snapshot_store,
+                request_gate_override=request_gate_override,
+                auth_service=auth_service,
+            )
+        except (AuthenticationRequired, AuthenticationError):
+            if attempt:
+                raise AuthenticationRequired("Authentication recovery exhausted") from None
+            print("AUTH_RECOVERY=RESTART_CURRENT_GAME", flush=True)
+    raise AssertionError("unreachable")

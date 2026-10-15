@@ -251,7 +251,9 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     from hoyo_roster.request_gate import RequestGate
 
     monkeypatch.setattr(RequestGate, "reserve", pace)
-    monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
+    from tests.shared_browser import install
+
+    install(monkeypatch, simulated_browser)
     if game == "hsr":
         monkeypatch.setattr(browser, "_profile_has_active_browser_root", lambda profile: False)
     if game == "zzz":

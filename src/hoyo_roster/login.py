@@ -27,7 +27,13 @@ from .errors import (
     RiskControl,
     WrongAccount,
 )
-from .login_ui import ManualCaptchaWait, choose_method, confirm_method_entry
+from .login_ui import (
+    ManualCaptchaWait,
+    LoginPageConfig,
+    choose_method,
+    confirm_method_entry,
+    renew_sms_authorization,
+)
 from .progress import OPTIONS, emit
 from .models import LoginProbeResult, LoginProbeStatus
 from .sms import SmsReceiptWatch
@@ -103,7 +109,9 @@ class LoginCoordinatorResult:
 
 
 class LoginProvider(Protocol):
+    page: Page
     game: str
+    login_ui: LoginPageConfig | None
 
     async def expected_identity(self, repo_root: Path) -> ExpectedIdentity: ...
 
@@ -275,24 +283,26 @@ async def coordinate_login(
         action = None
         if method == "phone" and options is not None and options.phone_input is not None:
             if options.phone_input.used:
-                emit("PHONE_AUTHORIZATION_USED")
-            else:
-                from .phone_login import PhoneLoginAction, read_phone
-
-                options.phone_input.used = True
                 async with asyncio.timeout(max(0.0, deadline - monotonic())):
-                    action = PhoneLoginAction(
-                        await read_phone(), watch, allow_terms=options.allow_terms
-                    )
-                phone_actions.append(action)
-                from .otp_login import OtpLoginAction
+                    await renew_sms_authorization(options)
+            from .phone_login import PhoneLoginAction, read_phone
 
-                otp_actions.append((OtpLoginAction(action), action))
+            options.phone_input.used = True
+            async with asyncio.timeout(max(0.0, deadline - monotonic())):
+                action = PhoneLoginAction(
+                    await read_phone(), watch, allow_terms=options.allow_terms
+                )
+            phone_actions.append(action)
+            from .otp_login import OtpLoginAction
+
+            otp_actions.append((OtpLoginAction(action), action))
         prepared.append(provider)
         async with asyncio.timeout(max(0.0, deadline - monotonic())):
             await provider.prepare_login_or_session(context, page, request_gate)
         login_page = provider.login_page(page)
-        captcha_wait = ManualCaptchaWait(game=provider.game)
+        captcha_wait = ManualCaptchaWait(
+            game=provider.game, target=getattr(provider, "login_ui", None)
+        )
         login_waits.append((login_page, captcha_wait))
         if action is not None:
             action.page = login_page

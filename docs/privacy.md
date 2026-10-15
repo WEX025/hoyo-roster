@@ -2,11 +2,11 @@
 
 工具保存本人角色状态到本机。浏览器 Profile 包含敏感 Cookie/登录状态，绝不属于正式结果；另有 scope-local HMAC key、身份指纹、持久工作区身份边界（游戏/UID 摘要/区服）、节流时间、候选、代际和恢复日志。隔离目录使用游戏/UID 派生哈希，哈希不是加密匿名化，不能公开分享整个目录。
 
-省略 UID 的发现入口仅处理本人登录账号的官方受支持绑定。认证根 onboarding/ 下的 selected-游戏.json 是含 UID/区服的私有本机选择文件，不是认证证据，不公开输出或提交。首次登录的临时 Profile 仅在确认关闭后放入一个空的身份目标；不复制凭据、不覆盖既有 Profile，其他身份各自登录。清理只检查本次新 UUID 范围的文件类型和重定向元数据，不读取认证文件；关闭失败保留范围。
+省略 UID 的游戏入口仅处理本人登录账号的官方受支持绑定。身份从官方 Binding 读取，不把本机文件当认证证据。所有游戏共享一个账号 Profile/Context，各游戏使用独立页面及请求字段；不复制 Cookie、不将 Profile 搬到某个游戏身份。账号身份冲突时停止，不把新账号的数据写入旧角色结果。
 
-正常同步不 fetch/commit/push，不上传给项目作者、GitHub 或任何其他数据仓库；浏览器仍与官方服务及官方页面引用的服务通信。本项目不规避官方风险控制。结果默认 `<已核验的本项目仓库>/data/users/<scope>/<game>/<hash>/`；克隆后普通 `pip install .` 也适用。无法核验源码的独立安装回退到 `<系统用户数据根>/results/users/<scope>/<game>/<hash>/`，不写包安装目录，不依赖 cwd。`--storage-root` 仅覆盖结果。
+正常同步不 fetch/commit/push，不上传给项目作者、GitHub 或任何其他数据仓库；浏览器仍与官方服务及官方页面引用的服务通信。本项目不规避官方风险控制。结果默认 `<已核验的本项目仓库>/data/game-results-v3/<scope>/<game>/<hash>/`；克隆后普通 `pip install .` 也适用。无法核验源码的独立安装回退到 `<系统用户数据根>/results/game-results-v3/<scope>/<game>/<hash>/`，不写包安装目录，不依赖 cwd。`--storage-root` 仅覆盖结果。
 
-认证元数据默认 `<系统用户数据根>/users/<scope>/<game>/<hash>/`（platformdirs 各平台位置见 README），浏览器会话容器为 `<认证根>/profiles/<身份哈希>/browser-profile/` 的较浅私有路径；两者由相同身份锁保护。容器中 `browser-choice.json` 只保存版本和浏览器 channel，实际 Profile 位于 `<channel>/`，首选启动失败与 Chromium 备用不共用目录。首次选择后固定复用，不读日常 Edge/Chrome 的 Profile 或登录态。`--auth-root` 只选择仓库外的私有认证根。Profile、HMAC key、已验证指纹、认证锁和节流属于认证范围；候选、工作区身份、代际、当前指针及恢复日志属于结果范围。不自动迁移或删除旧范围，不能将旧 storage-root 连同 Profile 整体搬到源码 `data/`。本项目尚未发布，不提供历史逻辑兼容或迁移；已有数据保留原处。
+认证范围为 `<系统用户数据根>/account-session-v1/`（平台位置见 README），共享浏览器容器为该范围的 `browser-profile/`；账号锁保护整个上下文生命周期，节流同属账号范围。容器中 `browser-choice.json` 只保存版本和浏览器 channel，实际 Profile 位于 `<channel>/`；首次选择后固定复用，不读取日常浏览器 Profile。`--auth-root` 只选择仓库外的私有认证根。游戏结果保存在结果根 `game-results-v3/` 下，按游戏/UID 区分，各自持有结果锁。旧认证、onboarding 和旧结果均不搜索、不读取、不迁移、不删除。
 
 POSIX 新建应用目录每层 0700，普通数据/元数据 0600；clone 的顶层 data/ 可保持属于本人且不可被其他人写入的 0755，身份子目录为 0700。不会 chmod 用户已有共享父目录或安全配置。所选 Edge/Chrome/Chromium 自己创建的内部文件可能有不同权限，但会话容器和实际 Profile 根均为 0700。Windows 新对象采用当前用户 SID 的受保护 DACL；已有根须校验而不修复，不以 chmod 作为凭据保护。拒绝 reparse/junction 和不支持的文件系统，参见 [平台边界](platform-support.md)。持有相同用户身份或系统管理权限的人仍可能读取数据，文件权限不替代系统账户安全。
 
@@ -16,7 +16,7 @@ POSIX 新建应用目录每层 0700，普通数据/元数据 0600；clone 的顶
 
 源码 `data/` 只跟踪 `.gitkeep`，`.gitignore` 忽略全部个人结果。普通 `git add .` 会忽略这些文件，但已跟踪文件、`git add -f` 或整个目录打包仍可泄露；忽略不是隐私权限。禁止提交个人结果；提交前运行 `python tools/check_private_data.py`，检查只读取 Git 索引路径，不读取个人内容，发现 `data/` 内除顶层占位文件外任何跟踪路径都会失败。
 
-源码版本升级不会清理个人数据。退出登录仅清理选定身份的 Profile/身份指纹；工作区身份与区服绑定继续保留；已采集数据、节流和恢复记录保留。候选失败通常安全清理，清理失败需 inspect 和显式 cleanup-candidate。提交持久化未知时同时保留新旧代际，不可删除可能被 current 引用的目录。
+源码版本升级不会清理个人数据。退出登录仅清理当前账号的共享 Profile，使所有游戏后续检查失效；工作区身份与区服绑定继续保留；已采集数据、节流和恢复记录保留。候选失败通常安全清理，清理失败需 inspect 和显式 cleanup-candidate。提交持久化未知时同时保留新旧代际，不可删除可能被 current 引用的目录。
 
 清理全部个人痕迹需本人关闭工具及确切浏览器进程，私下核对所选范围，按需求备份正式 JSON，然后删除该范围的 Profile、key、指纹、节流、candidates、代际和指针/恢复日志。其他身份和共享目录应保留。卸载包或删除源码虚拟环境不会删除个人范围；删除整个源码克隆会同时删除其中 data/ 结果，须先核对并私下备份；仓库外认证不随克隆删除。系统缓存中的 Chromium 安装由 Playwright/用户管理。
 

@@ -42,13 +42,15 @@ py -3.12 -m venv .venv
 
 离线 smoke 仅用新临时目录检查权限、锁、保存和恢复，不登录、不发短信，不访问已有结果或认证目录。Windows 安装失败或 smoke 失败时先停止，报告固定错误代码与平台；不要用管理员运行或放宽 ACL 绕过。真实验收顺序见[平台验收](docs/platform-support.md#本人-windows-验收)。
 
-首次使用直接运行 `hoyo-roster`：先在官方页面登录，再自动发现本人原神和绝区零的 UID，并逐身份核验、同步；**无需提前查找、填写或提供 UID，Windows、macOS、Linux 使用同一流程。** `--game all` 与默认相同，`--game genshin` / `--game zzz` 只发现对应游戏。`--operation discover` 只发现并保存本机角色选择，不采集角色数据。再次运行读取私有选择文件，但仍重新验证官方身份，选择文件不能证明会话有效。多个角色逐一处理，不默认挑选其中一个。星铁仍暂停。
+首次使用直接运行 `hoyo-roster`：依次执行原神→绝区零。各游戏先检查账号级共享会话，有效则直接复用；缺失或失效才触发登录，登录后回到当前游戏继续。正常只登录一次，无需提前查找或提供 UID。每个游戏从官方 Binding 自动发现本人全部受支持身份，再逐身份核验、采集和保存。`--game genshin` / `--game zzz` 只执行对应游戏；`--operation discover` 只发现身份，`--operation login` 只认证及核验身份，均不创建角色数据快照。星铁仍暂停。
+
+若原神完成后会话失效，绝区零自行触发登录并继续，原神结果不重抓。采集中失效最多恢复一次，并重新完成当前游戏的两轮采集；普通单游戏失败不阻止另一游戏，整次任务仍返回失败。身份冲突、账号风控及共享认证失败停止相关账号任务。
 
 `--uid` 仅是已有明确身份时的可选精确选择，也用于指定身份的离线检查/恢复，不是首次使用前置条件。即使显式提供 UID，是否属于当前登录账号仍须由官方账号绑定信息核验。
 
 `hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。新会话在 Windows 优先使用已安装的 Edge，在 macOS 优先使用已安装的 Chrome，Linux 使用 Playwright Chromium。首选浏览器缺失或首次启动失败时尝试 Chromium；Chromium 未安装则明确停止，请在同一虚拟环境运行 `python -m playwright install chromium`（Windows 用 `.\.venv\Scripts\python.exe -m playwright install chromium`）。程序不自动安装或覆盖系统浏览器，发行包也不包含 Chromium。
 
-每个身份使用工具专用的私有会话，不读取日常浏览器登录态。首次选定浏览器后保存选择，可见登录和无界面采集复用同一浏览器；已有会话启动失败、登录失效、验证码、身份冲突和限流都不自动换浏览器。旧的无选择标记 Profile 保留并停止，不自动迁移；新会话需显式使用新的 `--auth-root`，首次由本人登录。详见[本机使用指南](docs/local-use.md#浏览器选择和会话复用)。
+所有游戏复用工具专用的账号级私有会话，不读取日常浏览器登录态。首次选定浏览器后保存选择，可见登录和无界面采集复用同一浏览器；已有会话启动失败、登录失效、验证码、身份冲突和限流都不自动换浏览器。旧的无选择标记 Profile 保留并停止，不自动迁移；新会话需显式使用新的 `--auth-root`，首次由本人登录。详见[本机使用指南](docs/local-use.md#浏览器选择和会话复用)。
 
 ```bash
 hoyo-roster
@@ -56,7 +58,7 @@ hoyo-roster --game genshin --operation login --login-method qr
 hoyo-roster --game zzz --operation discover
 ```
 
-没有受支持角色时明确显示 NO_ROLES/NOT_COLLECTED；全部游戏无角色的同步不会报成功。发现中断与已有会话冲突的处理见[发现恢复](docs/local-use.md#发现中断与恢复)。
+没有受支持角色时明确显示 NO_ROLES/NOT_COLLECTED；全部游戏无角色的同步不会报成功。共享会话中断处理见[会话恢复](docs/local-use.md#会话中断与恢复)。
 
 默认操作为同步。`--operation login` 只检查登录和精确身份，不采集角色；`--operation inspect` 检查本机数据状态。完整的首次使用、升级与恢复步骤见[本机使用指南](docs/local-use.md)。
 
@@ -66,7 +68,7 @@ hoyo-roster --game zzz --operation discover
 
 ## 二维码与短信登录
 
-会话有效时，程序直接复用该游戏和 UID 的独立会话。需要重新登录时，终端先说明本人配合、官方通信、本机会话保存及协议边界，再询问 **二维码 / 手机号 / 取消**。
+会话有效时，程序直接复用当前账号的共享会话。需要重新登录时，终端先说明本人配合、官方通信、本机会话保存及协议边界，再询问 **二维码 / 手机号 / 取消**。
 
 二维码需要本人扫码并确认；辅助手机号方式支持隐藏输入手机号、请求一次短信，再询问本次验证码，由程序代填并提交一次；未启用辅助输入时仍由本人在官方页面操作。必要的协议和隐私条款由本人阅读；程序单独询问是否允许代勾已识别的米哈游用户协议和隐私政策，默认不代勾。出现未知新协议或额外权限时，应暂停并另行确认。实际登录入口以官方页面为准；没有观察到入口，不等于官方不支持该方式。
 
@@ -119,7 +121,7 @@ hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 
 系统用户数据根由 platformdirs 统一选择：macOS 为 `~/Library/Application Support/hoyo-roster`，Windows 为 `%LOCALAPPDATA%\hoyo-roster`，Linux 为 `$XDG_DATA_HOME/hoyo-roster`（未设置时 `~/.local/share/hoyo-roster`）。独立 wheel 的结果放在该根的 `results/` 下。
 
-浏览器 Profile、认证 key/指纹、认证锁和节流留在仓库外的上述系统用户数据根，按游戏/UID 隔离；可用 `--auth-root /absolute/private/auth` 明确覆盖认证根，必须在仓库外。本项目尚未发布，不提供历史逻辑兼容或数据迁移；既有目录保留原地，程序不搜索、迁移或清理它们。目录策略见[本机使用指南](docs/local-use.md)。
+浏览器 Profile、账号认证锁和节流留在仓库外的上述系统用户数据根，放在 `account-session-v1/` 账号范围内；可用 `--auth-root /absolute/private/auth` 明确覆盖认证根，必须在仓库外。本项目尚未发布，不提供历史逻辑兼容或数据迁移；既有目录保留原地，程序不搜索、迁移或清理它们。目录策略见[本机使用指南](docs/local-use.md)。
 
 终端显示 `RESULT_SCOPE`（身份结果目录）、`CURRENT_POINTER`（当前指针）和 `CURRENT_RESULT`（当前 JSON 所在目录），据此打开 `profile.json`、`roster.json`、`builds/` 及绝区零的 `bangboos.json`。结果仍是当前快照，哈希不是加密；完整本机路径也不要贴到公开反馈。
 

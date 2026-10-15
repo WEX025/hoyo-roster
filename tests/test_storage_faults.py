@@ -116,7 +116,7 @@ def test_precommit_fault_preserves_old(store, monkeypatch, stage):
         monkeypatch.setattr(
             workspace,
             "validate_workspace",
-            lambda root: (_ for _ in ()).throw(workspace.WorkspaceError("synthetic")),
+            lambda root, game=None: (_ for _ in ()).throw(workspace.WorkspaceError("synthetic")),
         )
     elif stage == "data_fsync":
         monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("synthetic")))

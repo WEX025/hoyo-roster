@@ -25,7 +25,7 @@ LOGIN_NOTICE = (
     "显式选择 --phone-stdin --allow-sms 可从终端临时隐藏输入号码，待本人在官方窗口勾选协议后程序至多点一次发码；"
     "号码只在本次内存使用，不记录或输出，程序不读取浏览器输入值。"
     "允许本工具打开官方页面、等待本人登录、核验所选游戏/UID/区服，"
-    "并在本机该身份独立 Profile 中保存及复用会话。浏览器与官方服务通信；"
+    "并在本机账号专用共享 Profile 中保存及跨游戏复用会话。浏览器与官方服务通信；"
     "辅助手机号流程在确认新发码回执后询问本次验证码，隐藏接收、临时填写并提交一次官方登录表单，不保存或输出输入值。请先阅读米哈游用户协议和隐私政策："
     "https://user.mihoyo.com/#/agreement?hideBack=true 和 "
     "https://user.mihoyo.com/#/privacyAgreement?hideBack=true；未注册的手机号验证通过将自动注册。"
@@ -63,11 +63,21 @@ async def visible_frames(page):
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class LoginPageConfig:
+    host: str
+    path_prefix: str
+    window_label: str
+    panel_selector: str | None = None
+    panel_text: str | None = None
+
+
 @dataclass
 class ManualCaptchaWait:
     game: str | None = None
     active: bool = False
     control_failed: bool = False
+    target: LoginPageConfig | None = None
 
     async def ready(self, page, deadline: float) -> None:
         """Hold this same login page until challenge UI disappears, bounded/cancellable.
@@ -117,11 +127,7 @@ class ManualCaptchaWait:
                 if not self.active:
                     emit("WAITING_FOR_MANUAL_CAPTCHA")
                     # Fixed provider labels only; never print page URLs with queries or identifiers.
-                    window = {
-                        "genshin": "原神养成计算器登录页（act.mihoyo.com/ys/event/calculator/）",
-                        "zzz": "绝区零米游社登录页（www.miyoushe.com/zzz/）",
-                        "hsr": "星穹铁道养成工具登录页（act.mihoyo.com/sr/event/cultivation-tool/）",
-                    }.get(self.game)
+                    window = self.target.window_label if self.target else None
                     if window:
                         print(f"请操作本工具打开的官方浏览器窗口：{window}", flush=True)
                     self.active = True
@@ -186,6 +192,23 @@ async def choose_method() -> str | None:
     return options.method
 
 
+async def renew_sms_authorization(options) -> None:
+    """Only a new explicit answer grants an additional send after reauthentication."""
+    from .errors import SmsAuthorizationRequired
+
+    emit("PHONE_AUTHORIZATION_USED")
+    emit("SMS_AUTHORIZATION_REQUIRED")
+    if options.non_interactive or not sys.stdin.isatty():
+        raise SmsAuthorizationRequired("Additional SMS request needs explicit new permission")
+    try:
+        answer = await read_terminal("本次重登是否允许再次临时填写手机号并请求一次短信？[y/N]：")
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() not in {"y", "yes"}:
+        raise LoginCancelled("Additional SMS request was not authorized")
+    options.phone_input = PhoneInput()
+
+
 async def choose_terms(options, interactive: bool) -> None:
     if not interactive or options.allow_terms:
         return
@@ -213,20 +236,16 @@ def sdk_frame(frame) -> bool:
     )
 
 
-def panel_page(page, game: str | None) -> bool:
+def panel_page(page, target: LoginPageConfig | None) -> bool:
     parsed = urlparse(page.url)
-    expected = {
-        "genshin": ("act.mihoyo.com", "/ys/event/calculator/"),
-        "zzz": ("www.miyoushe.com", "/zzz/"),
-    }.get(game)
     return (
-        expected is not None
+        target is not None
         and parsed.scheme == "https"
-        and parsed.hostname == expected[0]
+        and parsed.hostname == target.host
         and parsed.port in (None, 443)
         and parsed.username is None
         and parsed.password is None
-        and parsed.path.startswith(expected[1])
+        and parsed.path.startswith(target.path_prefix)
     )
 
 
@@ -321,14 +340,22 @@ async def confirm_method_entry(
                     not handed_off
                     and not frames
                     and not opened
-                    and panel_page(page, captcha_wait.game)
+                    and panel_page(page, captcha_wait.target)
                 ):
-                    control = (
-                        page.locator(".tw-fixed.tw-top-0 img.tw-cursor-pointer.tw-rounded-full")
-                        if captcha_wait.game == "genshin"
-                        else page.get_by_text(re.compile("^登录$"))
-                    )
-                    if await control.count() == 1 and await control.is_visible():
+                    target = captcha_wait.target
+                    if target.panel_selector:
+                        control = page.locator(target.panel_selector)
+                    elif target.panel_text:
+                        control = page.get_by_text(
+                            re.compile("^" + re.escape(target.panel_text) + "$")
+                        )
+                    else:
+                        control = None
+                    if (
+                        control is not None
+                        and await control.count() == 1
+                        and await control.is_visible()
+                    ):
                         opened = True
                         emit("OPENING_LOGIN_PANEL")
                         await control.click(timeout=1500)

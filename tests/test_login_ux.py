@@ -198,7 +198,9 @@ def test_panel_click_requires_exact_official_origin(url):
     from types import SimpleNamespace
     from hoyo_roster.login_ui import panel_page
 
-    assert not panel_page(SimpleNamespace(url=url), "genshin")
+    from hoyo_roster.games.genshin.login_provider import LOGIN_UI
+
+    assert not panel_page(SimpleNamespace(url=url), LOGIN_UI)
 
 
 @pytest.mark.parametrize(

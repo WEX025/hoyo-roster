@@ -9,6 +9,7 @@ from typing import Any
 
 from hoyo_roster.browser import initialize_session_page, BrowserContextAccess
 from hoyo_roster.login import ExpectedIdentity, identity_digest
+from hoyo_roster.login_ui import LoginPageConfig
 from hoyo_roster.models import LoginProbeResult, LoginProbeStatus
 from hoyo_roster.request_gate import RequestGate
 from playwright.async_api import Page
@@ -33,6 +34,14 @@ PROFILE_PATH = Path("data/genshin-impact/profile.json")
 SUPPORTED_REGIONS = frozenset({"cn_gf01", "cn_qd01"})
 
 
+LOGIN_UI = LoginPageConfig(
+    "act.mihoyo.com",
+    "/ys/event/calculator/",
+    "原神养成计算器登录页（act.mihoyo.com/ys/event/calculator/）",
+    panel_selector=".tw-fixed.tw-top-0 img.tw-cursor-pointer.tw-rounded-full",
+)
+
+
 @dataclass(slots=True, repr=False)
 class GenshinLoginProvider:
     context: BrowserContextAccess = field(repr=False)
@@ -44,6 +53,7 @@ class GenshinLoginProvider:
     expected_uid_override: str | None = field(default=None, repr=False)
     expected_region_override: str | None = field(default=None, repr=False)
     game: str = field(default=GAME, init=False)
+    login_ui: LoginPageConfig = field(default=LOGIN_UI, init=False)
     binding_data: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _expected_uid: str | None = field(default=None, init=False, repr=False)
     _expected_region: str | None = field(default=None, init=False, repr=False)
@@ -66,17 +76,7 @@ class GenshinLoginProvider:
         self._expected_region = None
         self._bootstrap_digest = None
         self.binding_data = None
-        payload = load_json(repo_root / PROFILE_PATH)
-        if not isinstance(payload, dict) or payload.get("game") != "genshin-impact":
-            raise ConfigurationError("formal Genshin Profile contract was invalid")
-        account = payload.get("account")
-        if not isinstance(account, dict):
-            raise ConfigurationError("formal Genshin account was invalid")
-        raw_uid = account.get("uid")
-        raw_region = account.get("server")
-        if raw_uid is None and raw_region is None:
-            if self.expected_uid_override is None:
-                return ExpectedIdentity(game=self.game, digest=None)
+        if self.expected_uid_override is not None:
             uid = positive_id(self.expected_uid_override, label="requested Genshin UID")
             self._expected_uid = uid
             if self.expected_region_override is not None:
@@ -90,6 +90,16 @@ class GenshinLoginProvider:
                 f"genshin-login-bootstrap:v1:{GAME_BIZ}:{uid}".encode()
             ).hexdigest()
             return ExpectedIdentity(game=self.game, digest=self._bootstrap_digest)
+        payload = load_json(repo_root / PROFILE_PATH)
+        if not isinstance(payload, dict) or payload.get("game") != "genshin-impact":
+            raise ConfigurationError("formal Genshin Profile contract was invalid")
+        account = payload.get("account")
+        if not isinstance(account, dict):
+            raise ConfigurationError("formal Genshin account was invalid")
+        raw_uid = account.get("uid")
+        raw_region = account.get("server")
+        if raw_uid is None and raw_region is None:
+            return ExpectedIdentity(game=self.game, digest=None)
         if raw_uid is None or raw_region is None:
             raise ConfigurationError("formal Genshin identity was incomplete")
         uid = positive_id(raw_uid, label="formal Genshin UID")
@@ -156,6 +166,52 @@ class GenshinLoginProvider:
                 region=binding["server"],
             ),
         )
+
+    async def owned_roles(self, context):
+        from hoyo_roster.models import OwnedRole
+        from hoyo_roster.errors import (
+            AuthenticationRequired,
+            RateLimited,
+            RiskControl,
+            LoginNetworkError,
+            LoginBindingFailed,
+        )
+
+        if context is not self.context:
+            raise ConfigurationError("Owned-role probe context changed")
+        try:
+            data = await self.collector.binding()
+        except AuthenticationError:
+            raise AuthenticationRequired("Official authentication required") from None
+        except RateLimitedError:
+            raise RateLimited("Official Binding rate limited") from None
+        except RiskControlError:
+            raise RiskControl("Official Binding risk control") from None
+        except RequestTransportError:
+            raise LoginNetworkError("Official Binding transport failed") from None
+        except ApiResponseError:
+            raise LoginBindingFailed("Official Binding invalid") from None
+        if not isinstance(data, dict) or not isinstance(data.get("list"), list):
+            raise LoginBindingFailed("Official Binding list invalid")
+        roles, seen = [], set()
+        for item in data["list"]:
+            if not isinstance(item, dict):
+                raise LoginBindingFailed("Official Binding role invalid")
+            if item.get("game_biz") != GAME_BIZ:
+                continue
+            try:
+                uid = positive_id(item.get("game_uid"))
+                selected = select_binding(data, uid)
+                region = selected["server"]
+                if region not in SUPPORTED_REGIONS:
+                    raise ValueError
+                if uid in seen:
+                    raise ValueError
+            except Exception:
+                raise LoginBindingFailed("Official Binding identity invalid") from None
+            seen.add(uid)
+            roles.append(OwnedRole(self.game, uid, region))
+        return tuple(sorted(roles, key=lambda role: (role.uid, role.region)))
 
     def login_page(self, fallback: Page) -> Page:
         return fallback

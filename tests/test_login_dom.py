@@ -23,6 +23,13 @@ SMS = "https://passport-api.mihoyo.com" + SMS_PATH
 QR = "<img class=\"qr-loaded\" style=\"width:80px;height:80px\" src=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80'/%3E%3C/svg%3E\">"
 
 
+def login_wait(game):
+    import importlib
+
+    config = importlib.import_module(f"hoyo_roster.games.{game}.login_provider").LOGIN_UI
+    return ManualCaptchaWait(game, target=config)
+
+
 async def isolated(run, html, *, root=ROOT, game="genshin"):
     unexpected = []
     sent = []
@@ -87,7 +94,7 @@ def test_avatar_panel_and_qr_switch_once(capsys, game):
     async def run(context, page, sent):
         await page.goto(root)
         await confirm_method_entry(
-            page, "qr", captcha_wait=ManualCaptchaWait(game), deadline=monotonic() + 4
+            page, "qr", captcha_wait=login_wait(game), deadline=monotonic() + 4
         )
         assert await page.evaluate("opens") == 1
         assert await page.frames[1].evaluate("switches") == 1
@@ -146,7 +153,7 @@ def test_authorized_phone_fill_terms_and_one_real_dom_click(capsys, allow_terms)
         watch = SmsReceiptWatch(context)
         watch.start()
         action = PhoneLoginAction("19900000000", watch, allow_terms=allow_terms)
-        captcha = ManualCaptchaWait("genshin")
+        captcha = login_wait("genshin")
         deadline = monotonic() + 4
         try:
             await page.goto(SDK)
@@ -234,8 +241,9 @@ def test_captcha_pauses_probes_and_disappeared_panel_accepts_binding(capsys):
 def test_expired_qr_is_not_ready_and_timeout_no_refresh(capsys):
     async def run(context, page, sent):
         await page.goto(SDK)
+        await page.locator(".qr-expired").wait_for(state="visible")
         with pytest.raises(LoginTimeout):
-            await confirm_method_entry(page, "qr", deadline=monotonic() + 0.25)
+            await confirm_method_entry(page, "qr", deadline=monotonic() + 1.0)
         assert sent == []
 
     asyncio.run(isolated(run, QR + '<div class="qr-expired">已过期</div>'))
@@ -381,7 +389,7 @@ def test_assisted_sms_code_prompt_fill_and_single_submit(monkeypatch, capsys, ga
         watch.start()
         phone = PhoneLoginAction("19900000000", watch, allow_terms=True)
         otp = OtpLoginAction(phone)
-        captcha = ManualCaptchaWait(game)
+        captcha = login_wait(game)
         deadline = monotonic() + 8
         try:
             await page.goto(SDK)
@@ -433,7 +441,7 @@ def test_styled_hidden_checkbox_and_late_terms_mount_are_automatic(capsys):
         watch = SmsReceiptWatch(context)
         watch.start()
         action = PhoneLoginAction("19900000000", watch, allow_terms=True)
-        captcha = ManualCaptchaWait("genshin")
+        captcha = login_wait("genshin")
         deadline = monotonic() + 5
         try:
             await page.goto(SDK)

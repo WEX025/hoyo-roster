@@ -21,3 +21,16 @@ def source():
 @pytest.fixture
 def local_tool():
     return cli
+
+
+@pytest.fixture(autouse=True)
+def no_live_account_browser(monkeypatch):
+    from hoyo_roster import auth
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Synthetic tests must replace the account browser/network")
+        yield
+
+    monkeypatch.setattr(auth, "account_browser", forbidden)

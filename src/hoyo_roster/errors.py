@@ -77,6 +77,10 @@ class LoginConsentRequired(OperationError):
     code = "LOGIN_CONSENT_REQUIRED"
 
 
+class SmsAuthorizationRequired(LoginConsentRequired):
+    code = "SMS_AUTHORIZATION_REQUIRED"
+
+
 class LoginControlUnavailable(OperationError):
     code = "LOGIN_CONTROL_UNAVAILABLE"
 
@@ -93,6 +97,10 @@ class SmsRequestRejected(OperationError):
     code = "SMS_REQUEST_REJECTED"
 
 
+class SmsDuplicateRequest(SmsRequestRejected):
+    code = "SMS_DUPLICATE_REQUEST"
+
+
 class PhoneInputInvalid(OperationError):
     code = "PHONE_INPUT_INVALID"
 
@@ -103,3 +111,7 @@ class OtpInputInvalid(OperationError):
 
 class RequestScheduleInvalid(ConfigurationError):
     code = "REQUEST_SCHEDULE_INVALID"
+
+
+class WorkspaceError(ValueError):
+    """A fixed privacy-safe error code, never a source value."""

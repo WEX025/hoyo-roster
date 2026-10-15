@@ -35,7 +35,11 @@ from hoyo_roster.storage.common import (
     tree_digest as _shared_tree_digest,
 )
 
-from hoyo_roster.validation import ValidationFailure, run_validator as validate_contract
+from hoyo_roster.validation import (
+    ValidationFailure,
+    run_validator as validate_contract,
+    validate_game_source,
+)
 
 from .errors import (
     CandidateCleanupError,
@@ -237,7 +241,10 @@ def create_candidate(
     if uid is not None and not CandidateScope.identity(scope.game, uid).accepts(scope):
         raise CandidateValidationError("CANDIDATE_SCOPE_MISMATCH")
     root = repo_root.resolve()
-    run_repository_validator(root)
+    try:
+        validate_game_source(root, "zenless-zone-zero")
+    except ValidationFailure as error:
+        raise CandidateValidationError(error.code, diagnostic_sha256=error.diagnostic) from None
     _check_nonshrinking_roster(root, snapshot)
 
     def populate(workspace: CandidateWorkspace) -> None:

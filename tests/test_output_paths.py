@@ -102,7 +102,9 @@ def test_no_verified_source_falls_back_to_user_directory(checkout, monkeypatch, 
     assert paths.default_storage_root().expanduser() == paths.default_private_root() / "results"
 
 
-def test_explicit_roots_and_auth_isolation(checkout, tmp_path, monkeypatch, source):
+def test_explicit_results_and_shared_auth_roots(checkout, tmp_path, monkeypatch, source):
+    from hoyo_roster.auth import account_scope
+
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
     stores = [
         LocalSnapshotStore(
@@ -114,32 +116,15 @@ def test_explicit_roots_and_auth_isolation(checkout, tmp_path, monkeypatch, sour
         for game in ("genshin", "zzz")
         for uid in (UID, "987654321")
     ]
-    assert len({s.root for s in stores}) == len({s.auth_root for s in stores}) == 4
+    assert len({store.root for store in stores}) == 4
+    assert not paths.default_private_root().exists()
     for store in stores:
-        assert store.root.is_relative_to(checkout / "data")
-        assert not store.auth_root.is_relative_to(checkout)
-        assert store.browser_profile.parent == store.auth_root
+        assert store.root.is_relative_to(checkout / "data/game-results-v3")
         assert store.root.stat().st_mode & 0o777 == 0o700
+    shared = account_scope(tmp_path / "auth")
+    assert shared == account_scope(tmp_path / "auth")
+    assert not shared.is_relative_to(checkout)
     assert (checkout / "data").stat().st_mode & 0o777 == 0o755
-    custom = LocalSnapshotStore(
-        source,
-        direct_configuration(
-            "genshin", UID, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-        ),
-        "genshin",
-        candidate_policy=candidate_policy_for("genshin"),
-    )
-    assert custom.root.is_relative_to(tmp_path / "results")
-    assert custom.auth_root.is_relative_to(tmp_path / "auth")
-    assert (
-        stores[0].auth_root
-        == LocalSnapshotStore(
-            source,
-            direct_configuration("genshin", UID, storage_root=tmp_path / "different"),
-            "genshin",
-            candidate_policy=candidate_policy_for("genshin"),
-        ).auth_root
-    )
 
 
 @pytest.mark.parametrize(
@@ -188,6 +173,10 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
         error = "UNSAFE_PRIVATE_DIRECTORY"
         auth.symlink_to(checkout / "data", target_is_directory=True)
     with pytest.raises(WorkspaceError, match=error):
+        if kind.startswith("auth-"):
+            from hoyo_roster.auth import account_scope
+
+            account_scope(auth)
         config = direct_configuration("genshin", UID, storage_root=result, auth_root=auth)
         LocalSnapshotStore(
             source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
@@ -197,57 +186,39 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
 def test_old_data_and_profile_are_preserved_without_migration(
     checkout, tmp_path, monkeypatch, source
 ):
-    old = tmp_path / "old-private"
-    config = direct_configuration("genshin", UID, storage_root=old, auth_root=old)
-    store = LocalSnapshotStore(
-        source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
-    )
-    with store.locked():
-        current = store.prepare()
-    store.browser_profile.mkdir(mode=0o700)
-    (store.browser_profile / "synthetic-state").write_text("synthetic")
+    from hoyo_roster.auth import account_scope
+    from hoyo_roster.storage.common import secure_private_directory
+
+    old = secure_private_directory(tmp_path / "auth/users/legacy/genshin")
+    (old / "synthetic-state").write_text("synthetic")
     before = tree_digest(old)
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
-    new = LocalSnapshotStore(
+    store = LocalSnapshotStore(
         source,
-        direct_configuration("genshin", UID, auth_root=old),
+        direct_configuration("genshin", UID, auth_root=tmp_path / "auth"),
         "genshin",
         candidate_policy=candidate_policy_for("genshin"),
     )
-    assert new.current() is None
-    assert new.browser_profile == store.browser_profile
-    assert store.current() == current
-    assert tree_digest(old) == before
-    assert not (new.root / "browser-profile").exists()
-    data_digest = tree_digest(current / "data")
-    with (
-        store.locked(),
-        pytest.raises(WorkspaceError, match="WORKSPACE_RESIDUE_REQUIRES_INSPECTION"),
-    ):
+    assert store.current() is None
+    account_scope(tmp_path / "auth")
+    with store.locked():
         store.prepare()
-    assert tree_digest(current / "data") == data_digest
-    assert (store.browser_profile / "synthetic-state").read_text() == "synthetic"
+    assert tree_digest(old) == before
+    assert not (store.root / "browser-profile").exists()
 
 
-def test_auth_lock_serializes_different_result_destinations(tmp_path, source):
-    a = LocalSnapshotStore(
-        source,
-        direct_configuration("genshin", UID, storage_root=tmp_path / "a"),
-        "genshin",
-        candidate_policy=candidate_policy_for("genshin"),
-    )
-    b = LocalSnapshotStore(
-        source,
-        direct_configuration("genshin", UID, storage_root=tmp_path / "b"),
-        "genshin",
-        candidate_policy=candidate_policy_for("genshin"),
-    )
-    with a.locked():
-        with pytest.raises(WorkspaceError, match="USER_WORKSPACE_BUSY"):
-            with b.locked():
-                pytest.fail("shared auth must be locked")
-    with b.locked():
-        assert b._locked
+def test_result_locks_are_independent_of_other_destinations(tmp_path, source):
+    stores = [
+        LocalSnapshotStore(
+            source,
+            direct_configuration("genshin", UID, storage_root=tmp_path / name),
+            "genshin",
+            candidate_policy=candidate_policy_for("genshin"),
+        )
+        for name in ("a", "b")
+    ]
+    with stores[0].locked(), stores[1].locked():
+        assert all(store._locked for store in stores)
 
 
 def test_local_git_check_rejects_forced_and_already_tracked_paths_without_reading(checkout):
@@ -298,36 +269,34 @@ def test_cli_reports_current_json_location(checkout, monkeypatch, local_tool, ca
     assert UID not in output
 
 
-def test_logout_removes_only_selected_external_auth(tmp_path, source):
+def test_logout_removes_shared_auth_and_retains_results_and_old_profiles(tmp_path, source):
+    import asyncio
+    from hoyo_roster.auth import AuthService
+    from hoyo_roster.storage.common import secure_private_directory, atomic_write_metadata
+
     store = LocalSnapshotStore(
         source,
         direct_configuration("zzz", UID, storage_root=tmp_path / "results"),
         "zzz",
         candidate_policy=candidate_policy_for("zzz"),
     )
-    other = LocalSnapshotStore(
-        source,
-        direct_configuration("zzz", "987654321", storage_root=tmp_path / "results"),
-        "zzz",
-        candidate_policy=candidate_policy_for("zzz"),
-    )
     with store.locked():
         current = store.prepare()
     before = tree_digest(current)
-    for item in (store, other):
-        item.browser_profile.mkdir(mode=0o700)
-        (item.browser_profile / "synthetic-state").write_text("synthetic")
-        for name in ("identity.key", "verified-identity.json", "request-state.json"):
-            (item.auth_root / name).write_text("synthetic")
-            (item.auth_root / name).chmod(0o600)
-    with store.locked():
-        store.logout()
-    assert not store.browser_profile.exists()
-    assert not (store.auth_root / "identity.key").exists()
-    assert not (store.auth_root / "verified-identity.json").exists()
-    assert (store.auth_root / "request-state.json").exists()
-    assert other.browser_profile.exists()
-    assert (other.auth_root / "identity.key").exists()
+    service = AuthService(tmp_path / "auth", headed=False, timeout=1)
+    profile = secure_private_directory(service.profile)
+    (profile / "synthetic-state").write_text("synthetic")
+    atomic_write_metadata(service.scope / "request-state.json", {"next_allowed_at": 1234})
+    legacy = secure_private_directory(tmp_path / "auth/users/legacy")
+    (legacy / "synthetic-state").write_text("preserved")
+
+    async def run():
+        async with service:
+            service.logout()
+
+    asyncio.run(run())
+    assert not profile.exists() and (service.scope / "request-state.json").exists()
+    assert (legacy / "synthetic-state").read_text() == "preserved"
     assert tree_digest(current) == before
 
 
