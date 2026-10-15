@@ -110,6 +110,7 @@ async def _pass(
     request_gate: RequestGate | None,
     request_interval: float,
     expected_region: str | None = None,
+    pass_number: int = 1,
 ) -> tuple[Snapshot, int]:
     start = collector.request_count
     binding_data = await _binding_with_login(
@@ -122,6 +123,7 @@ async def _pass(
         expected_region=expected_region,
     )
     binding = select_binding(binding_data, uid)
+    emit(f"COLLECTING_{pass_number}")
     list_data, request_size = await collector.cultivation_list(
         uid=binding["uid"], region=binding["server"]
     )
@@ -170,7 +172,6 @@ async def run_sync(
             )
             select_binding(binding_data, args.uid)
             return OperationResult("genshin", "login")
-        emit("COLLECTING_1")
         first, first_requests_after_binding = await _pass(
             collector,
             session,
@@ -180,7 +181,6 @@ async def run_sync(
             request_interval=args.request_interval,
             expected_region=getattr(args, "expected_region", None),
         )
-        emit("COLLECTING_2")
         second, second_requests = await _pass(
             collector,
             session,
@@ -189,6 +189,7 @@ async def run_sync(
             request_gate=request_gate,
             request_interval=args.request_interval,
             expected_region=getattr(args, "expected_region", None),
+            pass_number=2,
         )
         first_requests = first_requests_after_binding
         assert_stable(first, second)

@@ -39,3 +39,5 @@ python tools/verify_distribution.py
 涉及浏览器可见/无头切换或 Profile 复用时，运行 `python tools/browser_profile_smoke.py` 检查该系统的默认浏览器选择（Windows Edge、macOS Chrome，缺失时 Chromium）；安装 Playwright Chromium 后另运行 `python tools/browser_profile_smoke.py --channel chromium` 检查备用路径。它们仅创建新临时合成 Profile，测试页面请求拦截为虚构响应，不登录、不访问官方服务，不读取真实认证。
 
 登录流程修改的定向 Chromium 合成测试：`HOYO_NATIVE_LOGIN_SMOKE=1 python -m pytest -q tests/test_login_dom.py`。所有页面/请求均由测试拦截，未知请求直接阻止；不访问官方服务、不使用真实认证。回执、超时与精确身份回归见 `tests/test_sms_receipt.py`、`tests/test_login_ux.py`、`tests/test_manual_captcha.py` 和 `tests/test_session_handoff.py`。实际证据见 [登录流程验证记录](docs/login-workflow-validation.md)。
+
+macOS 离线 smoke 使用经过所有权与固定目标核验的系统临时别名 `/var`、`/tmp` 的真实路径；不放宽结果/认证根的符号链接保护，自定义 TMPDIR 或别名下的重定向仍拒绝。终端与一次发码回归见 `tests/test_terminal.py`、`tests/test_phone_login.py`；原生 Ctrl-C 及完全拦截的 SDK DOM 检查可用 `HOYO_NATIVE_LOGIN_SMOKE=1`，它们不发真实短信。

@@ -114,6 +114,44 @@ def test_close_failure_never_reports_success_and_keeps_persistence(sync_setup, c
         assert "PROGRESS=SAVED" in text and "COMMIT_STATE=COMMITTED" in text
 
 
+def test_repeated_cancellation_drains_browser_close(capsys):
+    from hoyo_roster.sync import operation_browser
+
+    async def run():
+        closing, release, entered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        events = []
+
+        @asynccontextmanager
+        async def manager():
+            try:
+                yield None
+            finally:
+                closing.set()
+                await release.wait()
+                events.append("closed")
+
+        async def use():
+            async with operation_browser(manager()):
+                entered.set()
+                await asyncio.Future()
+
+        task = asyncio.create_task(use())
+        await entered.wait()
+        task.cancel()
+        await closing.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert events == ["closed"]
+
+    asyncio.run(run())
+    output = capsys.readouterr().out
+    assert "BROWSER_CLOSE=CLOSED" in output and "BROWSER_CLOSE=FAILED" not in output
+
+
 def test_durability_unknown_reports_state_and_preserves_candidates(sync_setup, monkeypatch, capsys):
     argv, store, _ = sync_setup
     assert cli.main([*argv, "--operation", "init"]) == 0

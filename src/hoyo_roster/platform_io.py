@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
+import tempfile
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -40,6 +42,30 @@ def check_components(path: Path) -> None:
     for part in (*reversed(path.parents), path):
         if os.path.lexists(part) and is_redirect(part.lstat()):
             raise UnsafePath("UNSAFE_REDIRECTED_PATH")
+
+
+def temporary_root() -> Path:
+    """Canonicalize only root-owned macOS system aliases for disposable tools.
+
+    This is not used for user-supplied result/auth paths. Other redirects, including
+    a symlink below the system alias or a custom TMPDIR, still fail before creation.
+    """
+    path = filesystem_path(Path(tempfile.gettempdir()))
+    if sys.platform == "darwin":
+        for name in ("var", "tmp"):
+            alias, target = Path("/") / name, Path("/private") / name
+            if path == alias or alias in path.parents:
+                metadata = alias.lstat()
+                if is_redirect(metadata):
+                    if metadata.st_uid != 0 or os.readlink(alias) not in {
+                        f"private/{name}",
+                        str(target),
+                    }:
+                        raise UnsafePath("UNSAFE_REDIRECTED_PATH")
+                    path = target / path.relative_to(alias)
+                break
+    check_components(path)
+    return path
 
 
 def owned(path: Path) -> bool:

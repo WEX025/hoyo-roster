@@ -201,6 +201,7 @@ class OfficialCollector:
                 BINDING.url,
                 params={"game_biz": "hk4e_cn"},
                 max_redirects=0,
+                timeout=30_000,
             )
         except Exception:
             raise RequestTransportError("binding: request transport failed") from None
@@ -214,7 +215,9 @@ class OfficialCollector:
         if response.status < 200 or response.status >= 300:
             raise ApiResponseError("binding: HTTP failure")
         try:
-            data = _response_data(await response.json(), endpoint="binding")
+            data = _response_data(
+                await asyncio.wait_for(response.json(), timeout=30), endpoint="binding"
+            )
         except (AuthenticationError, RiskControlError, ApiResponseError):
             raise
         except Exception:
@@ -264,7 +267,7 @@ class OfficialCollector:
 
     async def cultivation_list(self, *, uid: str, region: str) -> tuple[dict[str, Any], int]:
         await self._reserve()
-        await self._page.goto("about:blank", wait_until="domcontentloaded")
+        await self._page.goto("about:blank", wait_until="domcontentloaded", timeout=30_000)
         loop = asyncio.get_running_loop()
         observed: asyncio.Future[Response] = loop.create_future()
         second_page = False
@@ -291,7 +294,7 @@ class OfficialCollector:
         self._page.on("request", observe_request)
         self._page.on("response", observe)
         try:
-            await self._page.goto(CALCULATOR_URL, wait_until="domcontentloaded")
+            await self._page.goto(CALCULATOR_URL, wait_until="domcontentloaded", timeout=30_000)
             try:
                 response = await asyncio.wait_for(observed, timeout=45)
             except TimeoutError:
@@ -314,7 +317,10 @@ class OfficialCollector:
             if response.status < 200 or response.status >= 300:
                 raise ApiResponseError("cultivation-avatar-list: HTTP failure")
             try:
-                data = _response_data(await response.json(), endpoint="cultivation-avatar-list")
+                data = _response_data(
+                    await asyncio.wait_for(response.json(), timeout=30),
+                    endpoint="cultivation-avatar-list",
+                )
             except (AuthenticationError, RiskControlError, ApiResponseError):
                 raise
             except Exception:

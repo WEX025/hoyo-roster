@@ -91,3 +91,11 @@ class SmsReceiptUnknown(OperationError):
 
 class SmsRequestRejected(OperationError):
     code = "SMS_REQUEST_REJECTED"
+
+
+class PhoneInputInvalid(OperationError):
+    code = "PHONE_INPUT_INVALID"
+
+
+class RequestScheduleInvalid(ConfigurationError):
+    code = "REQUEST_SCHEDULE_INVALID"

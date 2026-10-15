@@ -56,6 +56,8 @@ hoyo-roster --game genshin --operation login --login-method qr
 hoyo-roster --game zzz --operation discover
 ```
 
+没有受支持角色时明确显示 NO_ROLES/NOT_COLLECTED；全部游戏无角色的同步不会报成功。发现中断与已有会话冲突的处理见[发现恢复](docs/local-use.md#发现中断与恢复)。
+
 默认操作为同步。`--operation login` 只检查登录和精确身份，不采集角色；`--operation inspect` 检查本机数据状态。完整的首次使用、升级与恢复步骤见[本机使用指南](docs/local-use.md)。
 
 ## 二维码与短信登录
@@ -71,6 +73,10 @@ hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 ```
 
 `--allow-login` 只允许说明中的本机手动登录与会话复用，不替代本人确认官方协议，也不授予未知新权限。`--headless` 只适用于已登录且身份匹配的会话；需要新登录时会停止。
+
+若希望由代码填写手机号并请求一次短信，使用 `hoyo-roster --game genshin --login-method phone --phone-stdin --allow-sms`（绝区零改为 `--game zzz`）。需要登录时，号码从终端临时隐藏输入，或由非交互调用者提供一行 stdin；不放在命令行、不记录或输出。本人仍须在**本工具打开的原神养成计算器或绝区零米游社窗口**阅读并勾选官方协议（未注册号码验证通过可能自动注册）。程序只在控件/协议唯一核对且本人已勾选后点一次“获取验证码”；图片验证码和短信验证码仍由本人操作。一次自动发码授权在整条命令的发现/逐身份阶段共享，不会为第二个身份自动再发；页面未知或点击不确定交接，不重试。
+
+`SMS_SUBMITTING` 仅表示一次点击，`SMS_REQUESTING` 才表示观察到实际官方 POST，`SMS_ACCEPTED` 表示严格回执接受新发码，仍不证明手机送达。不要因点击或倒计时再次发码。Codex 内置浏览器的独立登录不能替代本工具窗口的会话。
 
 ## 图片验证码由本人操作
 

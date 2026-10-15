@@ -1,6 +1,7 @@
 """Shared validated candidate publication and completed-operation reporting."""
 
 from __future__ import annotations
+import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from collections.abc import AsyncIterator
@@ -62,7 +63,9 @@ class BrowserCloseFailed(OperationError):
 
 
 @asynccontextmanager
-async def operation_browser[T](manager: AbstractAsyncContextManager[T]) -> AsyncIterator[T]:
+async def operation_browser[T](
+    manager: AbstractAsyncContextManager[T], *, on_closed: Callable[[], None] | None = None
+) -> AsyncIterator[T]:
     session = await manager.__aenter__()
     primary = None
     try:
@@ -71,13 +74,26 @@ async def operation_browser[T](manager: AbstractAsyncContextManager[T]) -> Async
         primary = error
         raise
     finally:
-        try:
-            await manager.__aexit__(
+        cancelled = None
+        closing = asyncio.create_task(
+            manager.__aexit__(
                 type(primary) if primary else None,
                 primary,
                 primary.__traceback__ if primary else None,
             )
+        )
+        try:
+            while not closing.done():
+                try:
+                    await asyncio.shield(closing)
+                except asyncio.CancelledError as error:
+                    cancelled = error
+            closing.result()
         except BaseException:
             print("BROWSER_CLOSE=FAILED", flush=True)
             raise BrowserCloseFailed("Browser cleanup did not complete") from None
         print("BROWSER_CLOSE=CLOSED", flush=True)
+        if on_closed is not None:
+            await run_blocking(on_closed)
+        if cancelled is not None:
+            raise cancelled

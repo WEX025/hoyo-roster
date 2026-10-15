@@ -150,6 +150,7 @@ class BrowserTransport:
                         params=request_params,
                         headers=headers,
                         max_redirects=0,
+                        timeout=30_000,
                     )
                 else:
                     response = await self._context.request.post(
@@ -158,6 +159,7 @@ class BrowserTransport:
                         data=_json_body(body),
                         headers=headers,
                         max_redirects=0,
+                        timeout=30_000,
                     )
             except Exception:
                 raise RequestTransportError(f"{spec.name}: request transport failed") from None
@@ -176,14 +178,14 @@ class BrowserTransport:
         if response.status < 200 or response.status >= 300:
             raise ApiResponseError(f"{spec.name}: HTTP status {response.status}")
         try:
-            payload: Any = await response.json()
+            payload: Any = await asyncio.wait_for(response.json(), timeout=30)
         except Exception:
             raise ApiResponseError(f"{spec.name}: response was not JSON") from None
         if not isinstance(payload, dict):
             raise ApiResponseError(f"{spec.name}: response root was not an object")
         retcode = payload.get("retcode")
         message = payload.get("message")
-        if not isinstance(retcode, int) or not isinstance(message, str):
+        if type(retcode) is not int or not isinstance(message, str):
             raise ApiResponseError(f"{spec.name}: retcode or message was missing")
         if retcode in RISK_RETCODES:
             raise RiskControlError(f"{spec.name}: risk-control retcode {retcode}")
