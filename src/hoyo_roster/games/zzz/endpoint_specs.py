@@ -46,20 +46,6 @@ BINDING = EndpointSpec(
     allows_redirect=False,
     pagination_contract=None,
 )
-BADGE_LOGIN = EndpointSpec(
-    name="cultivate:badge-login",
-    scheme="https",
-    host="api-takumi.mihoyo.com",
-    path="/common/badge/v1/login/account",
-    method="POST",
-    purpose="establish the read-only cultivate session",
-    allows_body=True,
-    allows_device_id=False,
-    required_response_fields=(),
-    allows_auth_cookie=True,
-    allows_redirect=False,
-    pagination_contract=None,
-)
 AVATAR_BASIC = EndpointSpec(
     name="record:avatar/basic",
     scheme="https",
@@ -133,7 +119,6 @@ CULTIVATE_BATCH_DETAIL = EndpointSpec(
 
 _REGISTERED_ENDPOINTS = (
     BINDING,
-    BADGE_LOGIN,
     AVATAR_BASIC,
     AVATAR_INFO,
     BUDDY_INFO,
@@ -146,7 +131,7 @@ ENDPOINT_REGISTRY = MappingProxyType(
 
 
 def require_registered_endpoint(endpoint: object) -> EndpointSpec:
-    """Reject copied or forged specs before headers, cookies, or network access."""
+    """Validate registered source metadata before requesting a client read."""
 
     if not isinstance(endpoint, EndpointSpec):
         raise ConfigurationError("endpoint must be a registered immutable EndpointSpec")

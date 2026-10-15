@@ -8,6 +8,9 @@ from pathlib import Path
 from .jsonio import StrictJsonError, require_real_path_chain
 
 
+CONTRACT_ROOT = Path(__file__).resolve().parent / "contracts"
+
+
 class ValidationFailure(ValueError):
     def __init__(self, code: str, diagnostic: str) -> None:
         super().__init__(code)
@@ -44,3 +47,35 @@ def run_validator(
         raise ValidationFailure(
             "VALIDATOR_REJECTED", hashlib.sha256(result.stdout + b"\0" + result.stderr).hexdigest()
         )
+
+
+def copy_game_workspace(source: Path, destination: Path, game: str) -> None:
+    """Copy only one game's public contracts/data; never inspect another game."""
+    import shutil
+    from .storage.common import copy_regular_file, tree_digest
+
+    if game not in {"genshin-impact", "honkai-star-rail", "zenless-zone-zero"}:
+        raise ValueError("INVALID_GAME")
+    destination.mkdir(parents=True, exist_ok=True)
+    for relative in (Path("schemas/common"), Path("schemas") / game, Path("data") / game):
+        tree_digest(source / relative)
+        (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source / relative, destination / relative)
+    for relative in (
+        Path("schemas/repository-manifest.schema.json"),
+        Path("data/manifest.json"),
+        Path("tools/validate_repository.py"),
+    ):
+        (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+        copy_regular_file(source / relative, destination / relative)
+
+
+def validate_game_source(root: Path, game: str) -> None:
+    """Project a full public checkout or own generation into a strict game contract."""
+    import tempfile
+    from . import platform_io as io
+
+    with tempfile.TemporaryDirectory(prefix="hoyo-contract-", dir=io.temporary_root()) as temporary:
+        projected = Path(temporary) / "workspace"
+        copy_game_workspace(root, projected, game)
+        run_validator(projected, scope_game=game)

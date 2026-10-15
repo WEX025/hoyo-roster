@@ -4,7 +4,6 @@ import importlib
 import shutil
 import stat
 import uuid
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,9 +19,7 @@ from hoyo_roster.storage.common import (
     tree_digest,
 )
 from hoyo_roster.user_workspace import GAMES, LocalSnapshotStore, direct_configuration
-from tests.test_direct_entrypoint import BusinessPage
-from tests.test_game_chains import OfficialContext
-from tests.test_login_flow import Context, UID_A, UID_B, binding_payload
+from tests.fixtures import UID_A, UID_B, FakePort
 
 
 @pytest.fixture
@@ -211,7 +208,6 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
 ):
     """Run real providers/collectors/normalizers and inject only browser/network and a fault."""
     domain = importlib.import_module(f"hoyo_roster.games.{game}.cli")
-    browser = importlib.import_module(f"hoyo_roster.games.{game}.browser")
     module = importlib.import_module(f"hoyo_roster.games.{game}.candidate")
     root = tmp_path / "private"
     store = LocalSnapshotStore(
@@ -223,41 +219,7 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     with store.locked():
         current = store.prepare()
     before_data = tree_digest(current / "data")
-    if game == "genshin":
-        context = Context([binding_payload(game)])
-        page = BusinessPage(UID_A)
-    else:
-        context = OfficialContext(game)
-        context.request.login_expired = False
-        page = None
-
-    @asynccontextmanager
-    async def simulated_browser(**kwargs):
-        actual_page = page or await context.new_page()
-        session = browser.BrowserSession(None, context, actual_page, kwargs["headed"])
-        if game == "zzz":
-            actual_page.on(
-                "request", lambda request: browser._capture_rpc_headers(session, request)
-            )
-        try:
-            yield session
-        finally:
-            if game == "hsr" and session.business_guard_installed:
-                await browser.remove_business_guard(session)
-
-    async def pace(*args, **kwargs):
-        return 0
-
-    from hoyo_roster.request_gate import RequestGate
-
-    monkeypatch.setattr(RequestGate, "reserve", pace)
-    monkeypatch.setattr(domain, "persistent_browser", simulated_browser)
-    if game == "hsr":
-        monkeypatch.setattr(browser, "_profile_has_active_browser_root", lambda profile: False)
-    if game == "zzz":
-        monkeypatch.setattr(domain.BrowserTransport, "_wait_for_slot", pace)
-    else:
-        monkeypatch.setattr(domain.OfficialCollector, "_throttle", pace)
+    port = FakePort()
     seen = []
     original_create = domain.create_candidate
 
@@ -279,7 +241,7 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
         lambda path: (_ for _ in ()).throw(OSError("synthetic cleanup failure")),
     )
     argv = ["--game", game, "--uid", UID_A, "--storage-root", str(root)]
-    assert cli.main(argv) == 1
+    assert cli.main(argv, client=port.client()) == 1
     monkeypatch.undo()
     # The normal CLI prepare upgrades the baseline before collecting. Pin the generation
     # that is current at the injected candidate failure, then prove cleanup preserves it.

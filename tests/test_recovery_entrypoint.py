@@ -7,7 +7,7 @@ import pytest
 from tests import candidate_policy_for
 from hoyo_roster import cli, user_workspace
 from hoyo_roster.storage.common import tree_digest
-from tests.test_login_flow import UID_A
+from tests.fixtures import UID_A
 
 
 @pytest.mark.parametrize(

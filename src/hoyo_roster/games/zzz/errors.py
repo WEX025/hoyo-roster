@@ -13,30 +13,8 @@ class ConfigurationError(SyncError):
     code = "CONFIGURATION_ERROR"
 
 
-class LoginRequired(SyncError):
-    code = "LOGIN_REQUIRED"
-
-
-class AuthenticationError(SyncError):
-    code = "AUTHENTICATION_ERROR"
-
-
-class RiskControlError(SyncError):
-    code = "RISK_CONTROL_ERROR"
-
-
-class RateLimitedError(RiskControlError):
-    code = "RATE_LIMITED"
-
-
 class ApiResponseError(SyncError):
     code = "API_RESPONSE_ERROR"
-
-
-class RequestTransportError(ApiResponseError):
-    """The request failed before a validated HTTP response was available."""
-
-    code = "REQUEST_TRANSPORT_ERROR"
 
 
 class SnapshotConsistencyError(SyncError):

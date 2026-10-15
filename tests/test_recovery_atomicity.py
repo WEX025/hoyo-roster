@@ -12,7 +12,7 @@ import pytest
 from tests import candidate_policy_for
 from hoyo_roster import cli, user_workspace as uw
 from hoyo_roster.storage.common import atomic_write_metadata, load_metadata, tree_digest
-from tests.test_login_flow import UID_A
+from tests.fixtures import UID_A
 
 
 def make_store(root, game="genshin"):

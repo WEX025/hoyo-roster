@@ -34,7 +34,11 @@ from hoyo_roster.storage.common import (
     tree_digest as _shared_tree_digest,
 )
 
-from hoyo_roster.validation import ValidationFailure, run_validator as validate_contract
+from hoyo_roster.validation import (
+    ValidationFailure,
+    run_validator as validate_contract,
+    validate_game_source,
+)
 
 from .errors import (
     CandidateCleanupError,
@@ -106,8 +110,8 @@ def prevalidate_repository(repo_root: Path) -> None:
         )
         if not all(path.is_file() and not path.is_symlink() for path in required):
             raise OSError
-        run_validator(repo_root)
-    except (OSError, CandidateValidationError) as error:
+        validate_game_source(repo_root, "honkai-star-rail")
+    except (OSError, ValueError, CandidateValidationError) as error:
         raise FormalRepositoryPrevalidationError(
             "formal repository prevalidation failed"
         ) from error

@@ -1,10 +1,24 @@
 # hoyo-roster
 
-hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存为本机私有 JSON 文件。
+hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存为本机私有 JSON 文件。四个业务模块为登录、原神、崩铁、绝区零，各游戏负责自己的采集与保存。
 
-**崩坏：星穹铁道暂时无法获取，请不要使用。原神目前不含圣遗物和完整属性面板。** 星铁数据格式和离线接口保留；`hsr` 登录/同步入口报 `GAME_PAUSED`，不代表当前可用；本说明不推断上游原因。
+**崩坏：星穹铁道暂时无法获取，请不要使用。原神目前不含圣遗物和完整属性面板。**
 
-当前版本 **0.1.0rc1 是发布候选**。指定版本的真实验收、合成回归及未验收范围见[发布与验证记录](docs/release-validation.md)；合成通过不代表最新真实界面已验收。
+## 登录与采集工作流
+
+默认原神→绝区零；各游戏先检查同一 AI 客户端浏览器中的登录态，缺失或失效时才调用登录模块。
+
+登录使用当前 AI 客户端的内置浏览器，与操作系统无关；Codex 使用 Codex 内置浏览器。AI 打开官方登录页，提示你自行登录，并主动询问是否完成。你确认后登录模块结束，将同一会话交给当前游戏采集模块。手机号、验证码、扫码、协议和图片验证都由你在页面操作。后续游戏复用同一会话。
+
+游戏身份核验与数据是否可读由游戏模块负责。登录模块结束不代表采集完成；第二个游戏发现会话失效时，再调用同一个登录模块即可。详见[四模块工作流](docs/workflow.md)。
+
+## 当前实现状态
+
+[local-roster skill](.agents/skills/local-roster/SKILL.md) 通过包内 client_host.mjs 建立真实客户端宿主和 Python 私有管道；Python 不自行启动浏览器。普通终端运行在线命令会报 CLIENT_BROWSER_REQUIRED。安装包不会自动获得客户端浏览器能力。
+
+登录交接和两游戏采集/校验/保存已通过生产代码与真实进程管道的合成源回归。当前 Codex 已实测原神登录保持与绝区零绑定角色页面复用；但官方页面没有 WebMCP 数据工具，当前浏览器接口不提供完整来源响应，因此默认完整同步返回 CLIENT_SOURCE_UNAVAILABLE，不输出角色快照。详见[客户端桥接](docs/client-bridge.md)和[验证状态](docs/release-validation.md)。
+
+其他客户端、Windows/Linux 客户端浏览器、客户端重启保持和完整真实采集尚未验收。版本 0.1.0rc1 仍为发布候选。
 
 ## 当前支持范围
 
@@ -12,101 +26,18 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 |---|---|---|
 | 原神 | 来源支持的等级、突破、命座、好感、技能和当前武器等字段 | **不含圣遗物和完整属性面板**。`partial` 表示字段覆盖有限；角色名单仍须通过闭合核验，不能按残缺名单保存 |
 | 绝区零 | 代理人等级、晋阶、影画、技能、音擎、驱动盘、面板和邦布 | 只有名单、养成名单、逐角色详情、批量详情和邦布的覆盖条件全部满足，才输出 `complete`；不表示账号的所有信息 |
-| 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的接口和历史测试不是使用建议 |
+| 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的离线格式和合成测试不代表采集能力 |
 
-开发与安装的历史验收平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配；Windows 11 x64 上 Chromium 的本人真实流程曾通过，系统 Edge 的原生离线复用通过，**当前默认 Edge 的真实端到端、macOS 系统 Chrome 及 Linux/WSL 实机验收仍未完成，不宣称跨平台正式可用**。Windows 当前目标为 Python 3.12、已安装的 Edge（Chromium 备用）、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)及[系统浏览器验证](docs/browser-selection-validation.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
+## 安装与离线维护
 
-更详细的字段、数据格式和完整度说明见[数据格式和完整度](docs/data-format.md)。
+Python 包要求 Python 3.12。安装后可对明确选择的已有结果执行离线检查和恢复；登录无需预先提供 UID。
 
-## 安装与快速开始
+    python3.12 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install .
+    hoyo-roster --game genshin --uid YOUR_UID --operation inspect
 
-```bash
-git clone --branch main https://github.com/WEX025/hoyo-roster.git
-cd hoyo-roster
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install .
-# macOS 未安装 Chrome 时需要；Linux 必须安装；也可作为备用：
-python -m playwright install chromium
-hoyo-roster --game all
-```
-
-Windows PowerShell（验收 PR 时先切换到该 PR 分支；无需激活脚本或修改系统执行策略）：
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .
-.\.venv\Scripts\python.exe tools\platform_smoke.py
-.\.venv\Scripts\python.exe -m hoyo_roster --game all
-```
-
-离线 smoke 仅用新临时目录检查权限、锁、保存和恢复，不登录、不发短信，不访问已有结果或认证目录。Windows 安装失败或 smoke 失败时先停止，报告固定错误代码与平台；不要用管理员运行或放宽 ACL 绕过。真实验收顺序见[平台验收](docs/platform-support.md#本人-windows-验收)。
-
-首次使用直接运行 `hoyo-roster`：先在官方页面登录，再自动发现本人原神和绝区零的 UID，并逐身份核验、同步；**无需提前查找、填写或提供 UID，Windows、macOS、Linux 使用同一流程。** `--game all` 与默认相同，`--game genshin` / `--game zzz` 只发现对应游戏。`--operation discover` 只发现并保存本机角色选择，不采集角色数据。再次运行读取私有选择文件，但仍重新验证官方身份，选择文件不能证明会话有效。多个角色逐一处理，不默认挑选其中一个。星铁仍暂停。
-
-`--uid` 仅是已有明确身份时的可选精确选择，也用于指定身份的离线检查/恢复，不是首次使用前置条件。即使显式提供 UID，是否属于当前登录账号仍须由官方账号绑定信息核验。
-
-`hoyo-roster` 和 `python -m hoyo_roster` 使用同一个入口，无需配置 `users.toml`、私有数据仓库、后台服务或 GitHub 登录。新会话在 Windows 优先使用已安装的 Edge，在 macOS 优先使用已安装的 Chrome，Linux 使用 Playwright Chromium。首选浏览器缺失或首次启动失败时尝试 Chromium；Chromium 未安装则明确停止，请在同一虚拟环境运行 `python -m playwright install chromium`（Windows 用 `.\.venv\Scripts\python.exe -m playwright install chromium`）。程序不自动安装或覆盖系统浏览器，发行包也不包含 Chromium。
-
-每个身份使用工具专用的私有会话，不读取日常浏览器登录态。首次选定浏览器后保存选择，可见登录和无界面采集复用同一浏览器；已有会话启动失败、登录失效、验证码、身份冲突和限流都不自动换浏览器。旧的无选择标记 Profile 保留并停止，不自动迁移；新会话需显式使用新的 `--auth-root`，首次由本人登录。详见[本机使用指南](docs/local-use.md#浏览器选择和会话复用)。
-
-```bash
-hoyo-roster
-hoyo-roster --game genshin --operation login --login-method qr
-hoyo-roster --game zzz --operation discover
-```
-
-没有受支持角色时明确显示 NO_ROLES/NOT_COLLECTED；全部游戏无角色的同步不会报成功。发现中断与已有会话冲突的处理见[发现恢复](docs/local-use.md#发现中断与恢复)。
-
-默认操作为同步。`--operation login` 只检查登录和精确身份，不采集角色；`--operation inspect` 检查本机数据状态。完整的首次使用、升级与恢复步骤见[本机使用指南](docs/local-use.md)。
-
-## 会话检查与登录授权工作流
-
-工具先检查专用浏览器的官方会话；有效时直接采集，缺失时询问二维码/手机号登录方式，并单独询问是否允许代勾已识别的用户协议和隐私政策（默认否）。收到答案后在同一窗口执行登录，随后自动发现 UID、核验并采集。交互选择手机号包含临时填写和一次发码授权；协议代勾需单独明确允许。二维码确认、图片验证和短信验证码仍由本人操作。详见[工作流和非交互参数](docs/local-use.md#会话检查与登录授权工作流)。
-
-## 二维码与短信登录
-
-会话有效时，程序直接复用该游戏和 UID 的独立会话。需要重新登录时，终端先说明本人配合、官方通信、本机会话保存及协议边界，再询问 **二维码 / 手机号 / 取消**。
-
-二维码需要本人扫码并确认；手机号方式需要本人在官方页面输入手机号、请求短信、输入验证码并确认。必要的协议和隐私条款由本人阅读；程序单独询问是否允许代勾已识别的米哈游用户协议和隐私政策，默认不代勾。出现未知新协议或额外权限时，应暂停并另行确认。实际登录入口以官方页面为准；没有观察到入口，不等于官方不支持该方式。
-
-可以用 `--login-method qr` 或 `--login-method phone` 选择方式，用 `--login-method cancel` 取消新登录。仅选择方式不等于已经允许登录；交互终端仍会询问。非交互调用需要先取得本人允许，再显式提供 `--non-interactive`、`--allow-login` 和登录方式，例如：
-
-```bash
-hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
-```
-
-`--allow-login` 只允许说明中的本机手动登录与会话复用，不替代本人确认官方协议，也不授予未知新权限。`--headless` 只适用于已登录且身份匹配的会话；需要新登录时会停止。
-
-若希望由代码填写手机号并请求一次短信，使用 `hoyo-roster --game genshin --login-method phone --phone-stdin --allow-sms`（绝区零改为 `--game zzz`）。需要登录时，号码从终端临时隐藏输入，或由非交互调用者提供一行 stdin；不放在命令行、不记录或输出。本人须阅读官方协议（未注册号码验证通过可能自动注册）；未单独允许代勾时，在**本工具打开的原神养成计算器或绝区零米游社窗口**手动勾选。明确允许代勾时可加 `--allow-terms`。程序只在控件/协议唯一核对且已勾选后点一次“获取验证码”；图片验证码和短信验证码仍由本人操作。一次自动发码授权在整条命令的发现/逐身份阶段共享，不会为第二个身份自动再发；页面未知或点击不确定交接，不重试。
-
-`SMS_SUBMITTING` 仅表示一次点击，`SMS_REQUESTING` 才表示观察到实际官方 POST，`SMS_ACCEPTED` 表示严格回执接受新发码，仍不证明手机送达。不要因点击或倒计时再次发码。Codex 内置浏览器的独立登录不能替代本工具窗口的会话。
-
-## 图片验证码由本人操作
-
-遇到图片验证码（CAPTCHA）时，程序显示 `WAITING_FOR_MANUAL_CAPTCHA`，并说明对应的官方浏览器登录窗口：原神养成计算器或绝区零米游社。**请本人自己点击图片或操作滑块，AI 不自动选择、不解图、不绕过验证。**
-
-保持该窗口和命令运行。等待期间，程序保留同一会话，暂停自动身份探测，不自动发码或重发短信。验证面板消失后显示 `CAPTCHA_CLEARED`，随后继续等待本人完成发码、登录和精确身份核验。**面板消失不代表验证或登录成功，页面倒计时也不代表短信实际送达。**
-
-等待期间可按 Ctrl-C 取消。各登录等待阶段默认上限为 900 秒，可用 `--login-timeout` 设置，范围为大于 0 且不超过 3600 秒；图片验证等待计入所在阶段。超时或窗口关闭会停止本次操作，保留会话目录供重新运行时核验复用。其他风控和限流仍按原规则停止。
-
-## 状态提示
-
-程序输出固定状态标识，并附中文提示。下表列出主要阶段；更多错误代码见[本机使用指南](docs/local-use.md#常见停止和建议)。标识保留原样，方便反馈问题。
-
-| 标识 | 含义或下一步 |
-|---|---|
-| `CHECKING_SESSION` / `INITIALIZING_SESSION` / `VERIFYING_IDENTITY` | 检查会话、初始化官方页面并核验游戏、UID 和区服 |
-| `WAITING_FOR_ENTRY` | 等待所选官方登录入口加载，请在浏览器中继续操作 |
-| `CONTROL_RETRY` | 浏览器操控暂时超时，在当前期限内等待恢复 |
-| `WAITING_FOR_MANUAL_CAPTCHA` | 等待本人在提示指向的官方窗口完成图片验证 |
-| `CAPTCHA_CLEARED` | 验证面板已消失，继续等待登录和身份核验；不代表短信已送达 |
-| `COLLECTING_1` / `COLLECTING_2` / `VALIDATING` | 采集两次并验证结果及来源覆盖 |
-| `SAVING` / `SAVED` | 正在保存 / 数据已保存 |
-| `UNCHANGED` | 数据无变化，保留原业务时间戳 |
-| `CLEANUP_PENDING` | 保存已成功，清理尚未完成；按指南检查并执行恢复 |
-| `LOGIN_TIMEOUT` / `LOGIN_CONTROL_UNAVAILABLE` | 等待超时或浏览器操控不可用，检查官方窗口后重新运行 |
-| `WRONG_ACCOUNT` / `RATE_LIMITED` / `RISK_CONTROL` | 身份不匹配、限流或风控，停止本次操作，按官方提示处理 |
+Windows 可使用 py -3.12 -m venv .venv 与虚拟环境中的 Scripts/python.exe，无需激活脚本或修改系统执行策略。本机路径、结果检查和恢复见[本机使用](docs/local-use.md)。安装 Python 包不会给它建立客户端内置浏览器连接。
 
 ## 输出与隐私
 
@@ -116,30 +47,20 @@ hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 
 系统用户数据根由 platformdirs 统一选择：macOS 为 `~/Library/Application Support/hoyo-roster`，Windows 为 `%LOCALAPPDATA%\hoyo-roster`，Linux 为 `$XDG_DATA_HOME/hoyo-roster`（未设置时 `~/.local/share/hoyo-roster`）。独立 wheel 的结果放在该根的 `results/` 下。
 
-浏览器 Profile、认证 key/指纹、认证锁和节流留在仓库外的上述系统用户数据根，按游戏/UID 隔离；可用 `--auth-root /absolute/private/auth` 明确覆盖认证根，必须在仓库外。本项目尚未发布，不提供历史逻辑兼容或数据迁移；既有目录保留原地，程序不搜索、迁移或清理它们。目录策略见[本机使用指南](docs/local-use.md)。
-
 终端显示 `RESULT_SCOPE`（身份结果目录）、`CURRENT_POINTER`（当前指针）和 `CURRENT_RESULT`（当前 JSON 所在目录），据此打开 `profile.json`、`roster.json`、`builds/` 及绝区零的 `bangboos.json`。结果仍是当前快照，哈希不是加密；完整本机路径也不要贴到公开反馈。
 
 仓库只跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略。普通 `git add .` 不带出这些结果，但忽略规则不能保护已经跟踪或强制添加的文件，也不保护整个目录的打包分享。提交前运行 `python tools/check_private_data.py`，检查只读取 Git 路径列表，不读取私人内容；禁止提交个人结果。
 
-正常同步只保存本机数据，不修改源码，不提交或上传个人结果；浏览器仍会与官方页面及其引用的服务通信。会话目录包含敏感登录状态，不属于正式角色结果，不应收集、输出或上传。程序输出不打印 UID 或凭据，但你输入的 UID 可能留在命令行历史和进程参数中。
+正常同步只保存本机数据，不修改源码，不提交或上传个人结果；浏览器仍会与官方页面及其引用的服务通信。客户端浏览器自行管理敏感登录状态；本工具的 runtime 目录只存锁和节流元数据。浏览器登录材料不属于角色结果，不应收集、输出或上传。程序输出不打印 UID 或凭据，但你输入的 UID 可能留在命令行历史和进程参数中。
 
 反馈问题时只提供版本、平台、固定错误代码和脱敏步骤，不附真实 UID、手机号、验证码、登录材料、截图、原始响应或个人 JSON。清理和卸载前先核对确切身份范围，保留有效数据或做好私下备份；详见[隐私、存储和清理](docs/privacy.md)。
 
-## 常见问题
 
-**为什么原神显示 `partial`？** 当前只覆盖已支持的有限字段，不含圣遗物和完整属性面板。这个状态不允许名单缺失；无法证明名单闭合或遇到未知多页数据时，程序会拒绝保存。
 
-**可以尝试星铁的 `hsr` 接口吗？** 请不要使用。星铁暂时无法获取，接口、格式和历史测试只是暂时保留的技术内容，不代表可用，也不据此推断上游原因。
-
-**页面开始倒计时，但没有收到短信怎么办？** 倒计时不能证明短信已送达。请本人查看官方页面提示；程序不会自动重发短信或代解验证码。
-
-**浏览器打不开，或提示会话目录正在使用怎么办？** 检查本工具选定的 Edge/Chrome/Chromium 是否可用，若首次回退提示 Chromium 缺失，在同一虚拟环境安装它。检查本工具对应的浏览器是否仍在运行，不删除会话目录、锁或浏览器运行标记来绕过检查。错误代码与处理步骤见[本机使用指南](docs/local-use.md)。
-
-**保存失败或有恢复待办怎么办？** 保留当前数据、恢复日志和相关代际，先检查状态，再按[恢复步骤](docs/local-use.md#检查与恢复)操作。不要按目录名或 UUID 盲删数据，也不要删除身份标记来绕过保护。
+--runtime-root 仅控制仓库外私有锁与节流元数据，不保存登录态。登录态由客户端浏览器管理，交接时保留同一会话；不导出登录材料，也不承诺退出客户端后仍可复用。旧账号认证和结果目录保留原地，不搜索、不迁移、不清理。
 
 ## 许可证与开发说明
 
 本项目代码和项目文档采用 [MIT 许可证](LICENSE)，版权声明为 © 2026 WEX025。依赖的许可证和保留通知见[第三方依赖声明](THIRD_PARTY_NOTICES.md)。本项目不是米哈游官方产品，不包含游戏素材；MIT 许可证不授予官方素材、商标或接口的使用权，官方服务及页面行为仍以其自身条款和提示为准。
 
-参与开发前请阅读[开发指南](CONTRIBUTING.md)。项目代理规则以 [AGENTS.md](AGENTS.md) 为权威，[CLAUDE.md](CLAUDE.md) 只指向该文件。历史验证结果及尚未完成的真实界面和平台验收见[发布与验证记录](docs/release-validation.md)。
+参与开发前请阅读[开发指南](CONTRIBUTING.md)。项目代理规则以 [AGENTS.md](AGENTS.md) 为权威，[CLAUDE.md](CLAUDE.md) 只指向该文件。当前验证范围及尚未完成的真实采集和平台验收见[发布与验证记录](docs/release-validation.md)。

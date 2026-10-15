@@ -9,7 +9,6 @@ from typing import Any, Protocol
 from .endpoint_specs import (
     AVATAR_BASIC,
     AVATAR_INFO,
-    BADGE_LOGIN,
     BINDING,
     BUDDY_INFO,
     CULTIVATE_AVATAR_BASIC,
@@ -18,7 +17,6 @@ from .endpoint_specs import (
 )
 from .errors import (
     ApiResponseError,
-    AuthenticationError,
     ConfigurationError,
     SnapshotConsistencyError,
 )
@@ -45,10 +43,6 @@ class Transport(Protocol):
         params: Mapping[str, object] | None = None,
         body: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]: ...
-
-    async def has_cookie(self, name: str) -> bool: ...
-
-    async def clear_cultivate_cookies(self) -> None: ...
 
 
 def _mapping(value: object, *, label: str) -> Mapping[str, Any]:
@@ -185,7 +179,6 @@ class EndpointClient:
 
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
-        self._cultivate_login_attempted = False
 
     async def get_binding(self) -> Mapping[str, Any]:
         return await self._transport.request_json(
@@ -204,23 +197,6 @@ class EndpointClient:
         params.update(extra_params or {})
         return await self._transport.request_json(endpoint, params=params)
 
-    async def _cultivate_login(self, role: Role) -> None:
-        if self._cultivate_login_attempted:
-            raise AuthenticationError("cultivate login refresh was already attempted")
-        self._cultivate_login_attempted = True
-        await self._transport.clear_cultivate_cookies()
-        await self._transport.request_json(
-            BADGE_LOGIN,
-            body={
-                "game_biz": "nap_cn",
-                "lang": "zh-cn",
-                "region": role.server,
-                "uid": role.uid,
-            },
-        )
-        if not await self._transport.has_cookie("e_nap_token"):
-            raise AuthenticationError("cultivate login did not create e_nap_token")
-
     async def _cultivate(
         self,
         endpoint: EndpointSpec,
@@ -229,23 +205,9 @@ class EndpointClient:
         extra_params: Mapping[str, object] | None = None,
         body: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        if not await self._transport.has_cookie("e_nap_token"):
-            await self._cultivate_login(role)
         params: dict[str, object] = {"uid": role.uid, "region": role.server}
         params.update(extra_params or {})
-        try:
-            return await self._transport.request_json(
-                endpoint,
-                params=params,
-                body=body,
-            )
-        except AuthenticationError:
-            await self._cultivate_login(role)
-            return await self._transport.request_json(
-                endpoint,
-                params=params,
-                body=body,
-            )
+        return await self._transport.request_json(endpoint, params=params, body=body)
 
     async def _complete_record_collection(
         self,

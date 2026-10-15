@@ -301,14 +301,13 @@ def test_windows_open_rejects_unsafe_handle_mock(windows, monkeypatch, attribute
 
 
 def test_existing_insecure_browser_profile_preserved(tmp_path):
-    from hoyo_roster.games.genshin.browser import resolve_browser_profile
-    from hoyo_roster.errors import ConfigurationError
+    from hoyo_roster.storage.common import secure_private_directory
     from hoyo_roster.storage.common import MetadataError
 
     profile = tmp_path / "profile"
     profile.mkdir(mode=0o755)
-    with pytest.raises((ConfigurationError, MetadataError)):
-        resolve_browser_profile(tmp_path / "contracts", profile)
+    with pytest.raises(MetadataError):
+        secure_private_directory(profile)
     if io.WINDOWS:
         assert not io.private(profile)
     else:

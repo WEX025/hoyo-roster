@@ -34,6 +34,10 @@ def verify(dist: Path) -> int:
         require(wheel.is_file() and wheel.stat().st_size > 0, "WHEEL_EMPTY")
         with zipfile.ZipFile(wheel) as archive:
             names = set(archive.namelist())
+            actual_package = {
+                name for name in names if name.startswith("hoyo_roster/") and not name.endswith("/")
+            }
+            require(actual_package == set(required), "WHEEL_PACKAGE_INVENTORY_DRIFT")
             for name, digest in required.items():
                 require(name in names, "WHEEL_RESOURCE_MISSING")
                 require(
@@ -60,6 +64,12 @@ def verify(dist: Path) -> int:
         require(sdist.is_file() and sdist.stat().st_size > 0, "SDIST_EMPTY")
         with tarfile.open(sdist) as archive:
             members = {name.partition("/")[2]: name for name in archive.getnames()}
+            actual_package = {
+                name.removeprefix("src/")
+                for name in members
+                if name.startswith("src/hoyo_roster/") and archive.getmember(members[name]).isfile()
+            }
+            require(actual_package == set(required), "SDIST_PACKAGE_INVENTORY_DRIFT")
             for name, digest in required.items():
                 path = "src/" + name
                 require(path in members, "SDIST_RESOURCE_MISSING")

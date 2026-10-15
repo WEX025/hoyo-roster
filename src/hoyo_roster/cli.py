@@ -8,15 +8,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
-import math
 import re
 import uuid
 from pathlib import Path
-from .config import Settings
-from .errors import OperationError, LoginTimeout, BrowserUnavailable, BrowserProfileInvalid
-from .progress import OPTIONS, options_from_args, emit
-from .request_gate import RequestGate
-from .sync import OperationResult
+from .errors import OperationError
+from .progress import emit
+from .validation import CONTRACT_ROOT as CONTRACT_ROOT
 from .user_workspace import (
     GAMES,
     LocalSnapshotStore,
@@ -24,7 +21,6 @@ from .user_workspace import (
     direct_configuration,
 )
 
-MODULES = {game: f"hoyo_roster.games.{game}.cli" for game in GAMES}
 OPERATIONS = (
     "discover",
     "init",
@@ -34,9 +30,7 @@ OPERATIONS = (
     "recover",
     "cleanup-generation",
     "cleanup-candidate",
-    "logout",
 )
-CONTRACT_ROOT = Path(__file__).resolve().parent / "contracts"
 
 
 def print_current_result(store: LocalSnapshotStore) -> None:
@@ -66,15 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = PrivateArgumentParser(
         prog="hoyo-roster",
         description=__doc__,
-        epilog=(
-            "所有系统默认先登录，再自动发现本人 UID，无需预先填写。省略 --game 时处理原神和绝区零。"
-            "崩坏：星穹铁道暂时无法获取，请不要使用；hsr 参数仅保留接口。"
-            "原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，角色名单仍须闭合。"
-            "绝区零已支持能力保留，详见 docs/data-format.md。"
-            "图片 CAPTCHA 请本人在本工具打开的官方浏览器窗口点击；AI 不自动选择、解图或绕过。"
-            "验证期间暂停自动身份探测并保留会话，完成后继续本人发码/登录和精确身份核验；"
-            "不自动重发短信，页面倒计时不代表实际送达。Ctrl-C 取消，窗口关闭停止。"
-        ),
+        epilog="在线操作须由 AI 客户端内置浏览器宿主建立双向管道；本人在官方页面登录并确认。没有客户端连接时不启动浏览器。崩铁采集暂停。",
     )
     parser.add_argument(
         "--game",
@@ -89,51 +75,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--storage-root",
         type=Path,
-        help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为系统用户数据根的 results/；不改变认证目录",
+        help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为系统用户数据根的 results/；不改变客户端浏览器会话",
     )
+    parser.add_argument("--runtime-root", type=Path, help="仓库外私有调度/锁元数据根；不保存登录态")
     parser.add_argument(
-        "--auth-root",
-        type=Path,
-        help="仓库外的私有认证根目录（绝对路径）；默认系统用户数据根，须通过 POSIX 权限或 Windows SID/DACL 检查",
-    )
-    parser.add_argument("--login-method", choices=("qr", "phone", "cancel"))
-    parser.add_argument("--non-interactive", action="store_true")
-    parser.add_argument(
-        "--phone-stdin",
-        action="store_true",
-        help="read an ephemeral phone number from stdin (hidden on a terminal); requires phone and --allow-sms; never a command-line number",
-    )
-    parser.add_argument(
-        "--allow-sms",
-        action="store_true",
-        help="authorize one automatic SMS click per command after the user checks official terms; requires --phone-stdin",
-    )
-    parser.add_argument(
-        "--allow-terms",
-        action="store_true",
-        help="explicitly authorize checking only the recognized official user agreement/privacy checkbox; unknown terms require manual review",
-    )
-    parser.add_argument(
-        "--allow-login",
-        action="store_true",
-        help="authorize manual official login and local session reuse; new terms still need user review",
-    )
-    parser.add_argument(
-        "--login-timeout",
-        type=float,
-        default=900,
-        help="total human login budget in seconds, including panel and manual CAPTCHA (default: 900)",
-    )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        help="reuse an existing exact session; no interactive login",
+        "--client-stdio", action="store_true", help="客户端宿主专用双向管道；不要在普通终端运行"
     )
     parser.add_argument("--run-id", help="owned candidate UUID for explicit cleanup")
-    parser.add_argument(
-        "--resume-discovery",
-        help="reuse an explicitly selected owned, confirmed-closed discovery UUID; requires one game",
-    )
     parser.add_argument(
         "--generation", help="verified generation UUID for recovery or non-current cleanup"
     )
@@ -148,8 +96,6 @@ def select_configuration(args):
         raise WorkspaceError("GAME_PAUSED")
     if args.uid is None:
         raise WorkspaceError("UID_REQUIRED")
-    if not math.isfinite(args.login_timeout) or not 0 < args.login_timeout <= 3600:
-        raise WorkspaceError("INVALID_LOGIN_TIMEOUT")
     if args.run_id is not None and args.operation != "cleanup-candidate":
         raise WorkspaceError("UNEXPECTED_CANDIDATE_RUN_ID")
     if args.generation is not None and args.operation not in {"recover", "cleanup-generation"}:
@@ -172,46 +118,19 @@ def select_configuration(args):
         except ValueError:
             raise WorkspaceError(invalid) from None
     return (
-        direct_configuration(
-            args.game, args.uid, storage_root=args.storage_root, auth_root=args.auth_root
-        ),
+        direct_configuration(args.game, args.uid, storage_root=args.storage_root),
         args.game,
         args.operation,
     )
 
 
-async def run(args) -> int:
-    if getattr(args, "allow_terms", False) and (
-        not args.allow_login
-        or args.headless
-        or args.operation not in {"discover", "login", "sync"}
-        or args.login_method not in {"qr", "phone"}
-    ):
-        raise WorkspaceError("INVALID_TERMS_LOGIN_OPTIONS")
-    if getattr(args, "resume_discovery", None) is not None and (
-        args.uid is not None
-        or args.game not in {"genshin", "zzz"}
-        or args.operation not in {"discover", "login", "sync"}
-    ):
-        raise WorkspaceError("INVALID_DISCOVERY_RESUME")
-    if getattr(args, "resume_discovery", None) is not None and (
-        getattr(args, "phone_stdin", False) or getattr(args, "allow_sms", False)
-    ):
-        raise WorkspaceError("DISCOVERY_RESUME_SMS_DISABLED")
-    phone_stdin, allow_sms = getattr(args, "phone_stdin", False), getattr(args, "allow_sms", False)
-    if phone_stdin != allow_sms or (
-        phone_stdin
-        and (
-            args.login_method != "phone"
-            or args.headless
-            or args.operation not in {"discover", "login", "sync"}
-        )
-    ):
-        raise WorkspaceError("INVALID_PHONE_LOGIN_OPTIONS")
-    if args.operation == "discover" or (args.uid is None and args.operation in {"login", "sync"}):
-        from .discovery import run_discovery
+async def run(args, client=None) -> int:
+    if args.operation in {"discover", "login", "sync"}:
+        from .workflow import run_task
 
-        return await run_discovery(args)
+        return await run_task(args, client=client)
+    if args.client_stdio:
+        raise WorkspaceError("ARGUMENTS_INVALID")
     if args.game == "all":
         raise WorkspaceError("ARGUMENTS_INVALID")
     config, game, operation = select_configuration(args)
@@ -231,9 +150,6 @@ async def run(args) -> int:
         )
         if store.cleanup_pending:
             emit("CLEANUP_PENDING")
-    if isinstance(result, OperationResult):
-        result.report()
-        return 0
     return result
 
 
@@ -301,71 +217,37 @@ async def run_locked(args, config, game, operation, store):
             ) from None
         print("LOCAL_CANDIDATE=CLEANED")
         return 0
-    if operation == "logout":
-        store.logout()
-        print("LOCAL_SESSION=REMOVED")
-        return 0
-    workspace = store.prepare()
+    if operation != "init":
+        raise WorkspaceError("ARGUMENTS_INVALID")
+    store.prepare()
     print_current_result(store)
     if store.cleanup_pending:
-        return 0 if operation == "init" else 1
-    if operation == "init":
-        print("LOCAL_WORKSPACE=READY")
-        return 0
-    module = importlib.import_module(MODULES[game])
-    gate = RequestGate(Settings(external_root=store.auth_root))
-    domain_args = argparse.Namespace(
-        repo_root=workspace,
-        browser_profile=store.browser_profile,
-        uid=config.uid(game),
-        expected_region=getattr(args, "discovered_region", None),
-        headed=not args.headless,
-        request_interval=2.0,
-        login_check_only=operation == "login",
-        login_wait_seconds=args.login_timeout,
-    )
-    token = OPTIONS.set(options_from_args(args))
-    try:
-        result = await module.run_sync(
-            domain_args, snapshot_store=store, request_gate_override=gate
-        )
-        print_current_result(store)
-        return result
-    except module.SyncError as error:
-        reporter = importlib.import_module(f"hoyo_roster.games.{game}.redaction")
-        code, _ = reporter.public_error(error)
-        print(
-            f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={code}\n提示=参阅 docs/local-use.md；身份/风险/限流错误应停止。"
-        )
         return 1
-    finally:
-        OPTIONS.reset(token)
+    print("LOCAL_WORKSPACE=READY")
+    return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, client=None) -> int:
     args = build_parser().parse_args(argv)
+    if args.client_stdio and args.operation not in {"sync", "discover", "login"}:
+        print("LOCAL_WORKSPACE=FAIL\nERROR_CODE=ARGUMENTS_INVALID")
+        return 1
+    if args.client_stdio and client is None:
+        from .worker import serve
+
+        return serve(args)
     try:
-        return asyncio.run(run(args))
+        return asyncio.run(run(args, client=client))
     except WorkspaceError as error:
         hint = "执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
-        if str(error) == "DISCOVERY_PROFILE_CONFLICT":
-            hint = "新发现会话与已有身份会话均保留，未覆盖或继续登录；先核验已有身份会话，参阅 local-use 的发现恢复步骤。"
-        elif str(error) in {"DISCOVERY_RESUME_UNPROVEN", "DISCOVERY_RESUME_SMS_DISABLED"}:
-            hint = "保留发现范围；只能显式复用已获证且确认关闭的会话，不能沿用自动发码或忽略未知关闭状态，参阅 local-use。"
         print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示={hint}")
         return 1
     except OperationError as error:
-        if isinstance(error, LoginTimeout):
-            emit("TIMEOUT")
-        if isinstance(error, BrowserUnavailable):
-            hint = "恢复会话选定的浏览器；Chromium 缺失时，在同一虚拟环境执行 python -m playwright install chromium。"
-        elif isinstance(error, BrowserProfileInvalid):
-            hint = "保留原会话目录；旧布局不迁移。新会话需显式使用新的仓库外 --auth-root，并由本人首次登录。"
-        elif error.code == "REQUEST_SCHEDULE_INVALID":
-            hint = "持久节流时间超过等待预算；检查系统时钟并保留 request-state.json，不清零或删除来绕过节流。"
-        else:
-            hint = "检查官方登录页面；需登录时选择 --login-method qr 或 phone 并确认登录前说明（非交互需 --allow-login）；操控失败可重新运行，Ctrl-C 取消。"
-        print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error.code}\n提示={hint}")
+        print(
+            "LOCAL_WORKSPACE=FAIL\nERROR_CODE="
+            + error.code
+            + "\n提示=请检查客户端内置浏览器连接及受支持的数据读取能力；详见 docs/local-use.md。"
+        )
         return 1
     except (KeyboardInterrupt, asyncio.CancelledError):
         emit("CANCELLED")

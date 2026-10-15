@@ -1,17 +1,19 @@
 # hoyo-roster
 
-Python 3.12 单包；唯一用户入口 `hoyo-roster` / `python -m hoyo_roster`。
-先读 [README.md](README.md)、[本机使用](docs/local-use.md) 的安装与环境说明；数据格式见 [docs/data-format.md](docs/data-format.md)，隐私见 [docs/privacy.md](docs/privacy.md)。核对 Python 3.12、项目依赖及所选 Edge/Chrome/Playwright Chromium；浏览器策略集中 browser_runtime，首次选择后固定复用，启动备用不跨目录复用登录材料。平台范围及实际验收记录见 [docs/platform-support.md](docs/platform-support.md) 与 [浏览器选择验证](docs/browser-selection-validation.md)，本分支不宣称正式跨平台可用；安装/依赖/环境失败须明确报告阻塞，不冒充可用。CLI 参数以 [src/hoyo_roster/cli.py](src/hoyo_roster/cli.py) 和实际 `hoyo-roster --help` 为准。
+先读 [README](README.md)、[四模块工作流](docs/workflow.md)、[本机使用](docs/local-use.md)。Python 3.12；客户端宿主为 src/hoyo_roster/client_host.mjs。所有操作系统统一借用当前 AI 客户端内置浏览器；Codex 使用 Codex 内置浏览器。没有可操作宿主或数据读取能力时报告明确错误，不自行启动浏览器。
 
-- 游戏实现位于 src/hoyo_roster/games/{genshin,zzz,hsr}；contracts 的 schema、空基线、验证器是格式权威。共享层负责登录协调、锁、节流、候选、精确 JSON 与存储；游戏 collector/normalize/lifecycle 保持独立。入口注入候选策略，存储不导入具体游戏；业务层返回操作结果，不修改存储提交/清理状态，浏览器关闭且锁释放后由公共入口输出最终 PASS。
-- 本人请求获取游戏数据时，所有 OS 默认先登录，再通过官方 Binding 自动发现本人 UID；不得把询问或填写 UID 作为首次登录的前置步骤。使用无 UID 的公共入口；未指定游戏默认 all，仅含原神/绝区零，明确指定游戏则只处理该游戏。本人主动提供游戏/UID 时可显式选择该精确身份，不能扩大范围。发现后每个角色仍须精确验证官方 game/UID/region Binding，再走双次采集。有效会话和本机选择可复用，但私有角色选择文件不是认证证据。仅使用本人账号，不推断他人身份；不同身份的 Profile、锁和节流保持独立。
-- 需新登录时，在打开可执行认证的登录页面前，先说明本人操作、官方通信、Profile 保存/复用及协议/权限边界，再取得允许并选择二维码/手机号/取消；`--login-method` 仅选择方式，非交互调用须按 CLI 要求明确方式、`--non-interactive` 和 `--allow-login`。缺失会话时先询问二维码/手机号/取消，再单独询问是否授权代勾已识别的《米哈游用户协议》《米哈游隐私政策》，说明未注册手机号验证通过自动注册；默认不勾选，明确授权才由代码在唯一受检官方 SDK 控件执行一次 check，不 toggle、不重试。本人阅读协议、扫码/验证码和最终确认；未知新协议/额外权限须暂停并另行询问。会话有效时复用。普通面板/方式切换仅在已注册官方页面和唯一可见控件上自动点击一次，结果不确定不重试；及时说明人工接管原因。交互选择手机号须说明并取得临时填写与一次发码允许；非交互显式 --phone-stdin --allow-sms 且已获本人号码传输/一次发码允许时，终端临时隐藏读号码，在唯一受检官方 SDK 填写，待本人勾选或按单独 --allow-terms 授权勾选已核对协议后至多点一次发码；跨发现/身份阶段共享一次授权，不读表单值、不记录号码。未知控件/协议、操控结果不确定交接且不重试。仅实际 POST/严格回执产生 SMS_REQUESTING/SMS_ACCEPTED，接受请求不等于送达；未知回执不重发。凭据、手机号、验证码（OTP）、Cookie/token、设备头、raw response、HAR/trace/截图不得输出、写日志或提交；验证码仍本人输入。
-- 图片 CAPTCHA 必须明确提示本人在本工具打开的官方浏览器登录窗口点击；AI 不选择图片、不解图或绕过。暂停自动交互/Binding 探测并保留同一会话，面板消失后继续本人发码/登录及精确身份核验；不自动重发短信，不把页面倒计时当成实际送达。Ctrl-C 取消、超时或窗口关闭停止；重复检测不刷屏。其他风险控制仍停止。
-- 遇身份冲突、认证失效、风险控制、限流、schema/来源漂移应停止；不绕过验证、不自动第三次采集。保持两次业务及来源覆盖比较、Decimal、lifecycle、名单/Build bijection 和完整安装验证。
-- 崩坏：星穹铁道暂时无法获取，请不要使用；保留 hsr 实现/格式/接口只供开发和既有数据解释，公开 login/sync 入口报 GAME_PAUSED；离线 init/inspect/recover 保留，不推断上游原因。原神目前不含圣遗物和完整属性面板；partial 表示字段覆盖有限，名单仍须闭合。绝区零保留代理人养成、音擎、驱动盘、面板和邦布的既有支持范围，仅满足闭合证据后 complete。不得为了成功放宽来源/完整度。
-- 默认结果集中在可核验的本项目源码仓库 data/（含 clone 后普通 pip install .），按游戏/UID 派生哈希隔离；不依赖 cwd。无源码安装回退用户目录，不写 site-packages。--storage-root 仅覆盖结果；Profile/key/认证指纹/节流和认证锁由 --auth-root 选择仓库外私有范围，不自动搬动/删除旧结果与 Profile。data/ 仅跟踪 .gitkeep，禁止提交个人结果；普通 gitignore 不保护已跟踪/强制 add/目录打包，提交前运行 python tools/check_private_data.py（只查索引路径）。正常同步不提交/上传。存储提交前失败保留旧 current；replace 后持久化未知保留所有可能引用代际；已提交的清理失败报告待办。恢复核验所有权、身份、当前引用和验证，不能按 UUID 盲删。
-- 一套游戏业务实现；平台差异集中 platform_io/windows_io，使用 portalocker 的安全打开后锁、platformdirs 系统用户目录和 Windows 条件导入 pywin32。Windows 仅本地固定 NTFS，SID/DACL 私有检查，拒绝 reparse/junction；不退化为 chmod 或跳过锁/刷新/权限失败。Windows 无普通用户目录 fsync 等价，不以 mock 消除实机和断电边界。尚未发布，不保留历史兼容分支，不实现迁移，绝不探索、删除、覆盖真实旧结果或认证目录。首次发现仅把本次新建且确认关闭的 Profile 放入一个明确发现的身份范围，目标已存在报 DISCOVERY_PROFILE_CONFLICT，保留新旧会话并停止，不复制凭据；其余角色独立登录。显式发现恢复只复用获证且实际关闭的本版本范围，不延续自动发码，见 local-use。仅清理本次 UUID 临时范围的元数据/文件树，不读取认证内容；关闭失败保留范围。仓库重建和隐私历史清理暂停。
-- 开发使用临时目录、合成身份和显式临时认证根（测试 fixture 替换路径提供者），不访问真实用户默认根，只替浏览器/网络。按变更范围运行定向 pytest 与受影响回归；运行 `python tools/platform_smoke.py` 验证本机权限/跨进程锁/保存恢复/CLI，不登录、不发短信。Windows mock/static 仅证明分支策略，必须单列 Windows 实机 NOT_RUN；影响扩大才有根据扩展。运行 `python -m ruff check src tests tools --select F`、`python -m ruff format --check src tests tools`、`python tools/validate_repository.py --require-empty-baseline` 与 `--self-test`。打包修改另跑 `python -m build` 和干净安装资源检查。
-- 向本人报告实际结果路径（RESULT_SCOPE、CURRENT_POINTER、有效时的 CURRENT_RESULT）及支持字段缺口；报告固定 SHA、实际命令及 PASS/FAIL/NOT_RUN，失败或未执行不得冒充成功，离线成功不等于真实账号验收。公开 PR/Issue 不含个人路径或数据。未经授权不改可见性、部署、合并、CI/Actions或私有数据仓库。
+- 四个业务模块：登录、原神、崩铁、绝区零。各游戏拥有身份核验、采集、标准化、校验和保存；公共桥接、锁、节流、JSON 与存储不是额外业务模块。游戏不得导入另一游戏实现；公共层只接受注入的游戏回调和契约。
+- 默认直接原神→绝区零。游戏先通过同一客户端会话读取自身官方 Binding；明确认证失效才调用登录。登录模块只打开官方页面、提示用户自行登录并主动询问是否完成；只沿用本次登录尝试的明确确认，不重复询问；认证再次失效开启新尝试并重新确认。确认后立即返回同一会话与页面，保留浏览器。登录模块不核验身份、不抓数据、不写结果。
+- 手机号、短信验证码、扫码、协议、图片验证均由用户在官方页面操作。AI 不索取或代填、不发短信、不代勾协议、不代提交，不读取输入值、Cookie/token 或浏览器数据库。客户端未提供能力时不以 HTTP、系统浏览器、隐藏状态或复制认证材料替代。
+- 客户端宿主持有活浏览器对象；私有双向管道仅传相关请求、确切业务来源 JSON 和固定状态，浏览器引用不落盘。session.attach、login.open、login.confirm、source.read 必须关联同一会话与递增请求 ID；错序、换会话、EOF、取消均明确终止；等待登录时关闭页面由下一次主动 pump 检测并终止。仅浏览器 ID 不能构成连接。普通终端不运行 --client-stdio。
+- 数据读取宿主必须来自客户端受支持接口。readSource 接收同一浏览器对象、AbortSignal 及已注册的游戏/来源；适配器须响应取消，在后续浏览器动作前检查 signal，返回原始 JSON 文本、来源 URL/方法/状态/跳转证明和必要的请求覆盖证据；不伪造数据，不凭空填充来源，不用浮点重编码精确数值。当前 Codex 两个官方页面没有 WebMCP 数据工具，工具也不暴露完整响应读取；没有读源适配时 CLIENT_SOURCE_UNAVAILABLE，不能称真实采集通过。
+- 用户确认只结束登录模块。当前游戏随后核验官方 game/UID/region；本机文件、Cookie 存在和公开角色目录不是身份或完整名单证据。已发现身份在任务内固定，重登后调用已注册的游戏核验回调，账号变化停止任务。多个身份与后续游戏复用同一会话。
+- 采集中明确认证失效时，丢弃未提交两轮采集，最多重登并重做当前游戏一次；不重抓已完成游戏，不混合会话版本。普通单游戏来源、schema 或保存失败继续其他游戏并汇总失败；身份冲突、认证恢复失败、风控、限流、管道损坏停止账号任务。
+- 每个游戏保留自己的双次业务及来源覆盖比较、Decimal、lifecycle、名单/Build bijection 和完整度判断，只加载本游戏契约。崩铁公开 login/discover/sync 返回 GAME_PAUSED；保留离线格式/维护，不推断上游原因。原神不含圣遗物和完整属性面板；partial 也须名单闭合。绝区零必须满足既有全部覆盖条件才 complete。
+- 结果默认在可核验本项目仓库 data/；无源码安装回退系统用户数据根 results/，不依赖 cwd、不写 site-packages。--storage-root 只覆盖结果；--runtime-root 选择仓库外的私有锁和节流元数据，使用 client-runtime-v1，不保存登录态。绝不探索、读取、迁移或删除真实旧认证和结果目录；没有兼容登录或迁移分支。
+- 保留存储所有权、身份、current 指针、候选与代际验证。提交前失败保留旧 current；替换后持久化未知保留全部可能引用代际；已提交清理失败独立报告待办。恢复不能按 UUID 盲删。请求和结果事务完成、锁实际释放后才能输出最终 PASS；共享浏览器继续保留。
+- 平台差异集中 platform_io/windows_io。POSIX 私有权限，Windows SID/DACL、本地固定 NTFS、拒绝 reparse/junction；不跳过锁、刷新和权限失败，不宣称 Windows 目录 fsync 或断电等价。客户端规则与 OS 无关不代表已验证所有平台。
+- 测试只用新临时范围与合成身份/来源，默认路径提供者同样指向临时根。保持游戏规范化、两轮、候选和提交真实运行；宿主/管道也须跨进程验证。检查 pytest、node --test tests/test_client_host.mjs、tools/platform_smoke.py、Ruff F/format、validate_repository.py 及 --self-test；改包时另跑 build、verify_distribution 和干净安装。真实验收与合成分开报告。
+- 凭据、原始响应、设备头、个人账号截图、UID 和昵称不输出到对话或日志；管道不在可见终端展示。只报告固定状态、脱敏数量和必要结果路径。正常同步不提交/上传个人结果；data/ 只跟踪 .gitkeep，提交前运行 tools/check_private_data.py。未经授权不发布、部署、合并或改 CI/Actions。
 
-本文件为项目代理规则权威；CLAUDE.md 仅指向本文件，README 面向用户保持简短，不在其他入口复制项目代理规则。按 [OpenAI AGENTS 指南](https://developers.openai.com/codex/guides/agents-md/)保留短且可执行的项目规则；可选技能仅在 .agents/skills 中提供入口，遵循 [skills 建议](https://developers.openai.com/codex/skills/)并避免复制规则。Dot/App 专属工具的存在不保证普通 CLI 环境具有这些能力。
+本文件为代理规则权威；CLAUDE.md 只指向本文件。skill 只提供执行入口，不复制整套规则。客户端进程重启保持、其他客户端及平台未验收不能写 PASS。

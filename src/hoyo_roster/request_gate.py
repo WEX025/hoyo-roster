@@ -1,4 +1,4 @@
-"""Persist throttling in the identity scope already protected by the workspace lock."""
+"""Persist throttling under the shared client-session metadata lock."""
 
 import asyncio
 import math
