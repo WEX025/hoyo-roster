@@ -1,5 +1,7 @@
 # Chromium Profile 跨模式修复验证
 
+> 历史归档：本文仅记录下述固定版本的实现和验证，不作为当前工作流或当前验收结论。按身份 Profile、发现后搬移、旧调度及旧人工登录步骤已被[当前四模块工作流](../workflow.md)取代。当前使用见[本机指南](../local-use.md)，历史测试数不代表最新源码已通过。
+
 本记录描述当时固定 Chromium 的修复与历史验收。当前按平台选择系统浏览器并固定会话选择，见[浏览器选择验证](browser-selection-validation.md)；历史 Mac 结果不代表新 Chrome 路径已实机验收。
 
 基线：已合并 main `0c9956781532d2dbf3d651048fbeab05ffa456e0`。本记录跟踪原神和绝区零持久 Context 的启动参数修复；同一分支随后补充的登录流程修复见 [登录流程验证记录](login-workflow-validation.md)。

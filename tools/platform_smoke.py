@@ -12,9 +12,7 @@ from unittest.mock import patch
 
 from hoyo_roster import platform_io as io
 from hoyo_roster.cli import CONTRACT_ROOT
-from hoyo_roster.config import Settings
-from hoyo_roster.auth import account_scope, AuthService
-from hoyo_roster.login_identity import LoginIdentityStore
+from hoyo_roster.auth import AuthService
 from hoyo_roster.storage.common import tree_digest
 from hoyo_roster.games.genshin.candidate import candidate_policy
 
@@ -32,9 +30,7 @@ def check() -> None:
             value = str(path)
             return Path(value[4:]) if os.name == "nt" and value.startswith("\\\\?\\") else path
 
-        config = direct_configuration(
-            "genshin", "123456789", storage_root=ordinary(result), auth_root=ordinary(auth)
-        )
+        config = direct_configuration("genshin", "123456789", storage_root=ordinary(result))
         store = LocalSnapshotStore(
             CONTRACT_ROOT, config, "genshin", candidate_policy=candidate_policy()
         )
@@ -82,9 +78,6 @@ except portalocker.exceptions.LockException:
             assert not store.cleanup_pending
             for item in (new, *new.rglob("*")):
                 assert io.private(item)
-            identity = LoginIdentityStore(Settings(external_root=account_scope(ordinary(auth))))
-            assert len(identity._key()) == 32
-            assert identity._key() == identity._key()
         assert (
             subprocess.run([sys.executable, "-c", code, str(lock)], capture_output=True).returncode
             == 0
@@ -133,7 +126,7 @@ except portalocker.exceptions.LockException:
         )
     print(f"NATIVE_PLATFORM={sys.platform}")
     print(
-        "PRIVATE_PERMISSIONS=PASS\nPROCESS_LOCK=PASS\nACCOUNT_PROFILE_LOCK=PASS\nSAVE_RECOVER=PASS\nIDENTITY_KEY=PASS\nCLI=PASS"
+        "PRIVATE_PERMISSIONS=PASS\nPROCESS_LOCK=PASS\nACCOUNT_PROFILE_LOCK=PASS\nSAVE_RECOVER=PASS\nCLI=PASS"
     )
     if os.name == "nt":
         print("WINDOWS_DIRECTORY_FSYNC=NOT_AVAILABLE\nPOWER_LOSS_ACCEPTANCE=NOT_RUN")

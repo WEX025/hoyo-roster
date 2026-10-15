@@ -14,17 +14,13 @@ SUPPORTED_GAMES = ("genshin", "zzz")
 async def run_task(args):
     if args.game == "hsr":
         raise WorkspaceError("GAME_PAUSED")
-    if getattr(args, "resume_discovery", None) is not None:
-        raise WorkspaceError("DISCOVERY_RESUME_UNSUPPORTED")
     games = SUPPORTED_GAMES if args.game in {None, "all"} else (args.game,)
     if args.uid is not None and args.game is None:
         raise WorkspaceError("GAME_REQUIRED")
     if args.uid is not None and len(games) != 1:
         raise WorkspaceError("ARGUMENTS_INVALID")
     if args.uid is not None:
-        direct_configuration(
-            args.game, args.uid, storage_root=args.storage_root, auth_root=args.auth_root
-        )
+        direct_configuration(args.game, args.uid, storage_root=args.storage_root)
     if args.run_id is not None:
         raise WorkspaceError("UNEXPECTED_CANDIDATE_RUN_ID")
     if args.generation is not None:

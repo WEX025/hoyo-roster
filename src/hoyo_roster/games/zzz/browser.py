@@ -1,20 +1,12 @@
-"""Persistent browser session handling without credential export."""
+"""ZZZ page and transient request headers in the account-owned browser context."""
 
 from __future__ import annotations
 
 import asyncio
-import os
-from ... import platform_io as io
-import stat
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from hoyo_roster.browser import navigate_login_page
-from hoyo_roster.config import (
-    resolve_private_profile_path,
-)
-from hoyo_roster.errors import DiagnosticProfileOverlap
 from hoyo_roster.request_gate import RequestGate
 from playwright.async_api import (
     BrowserContext,
@@ -36,47 +28,6 @@ _CAPTURED_RPC_HEADERS = (
 _RISK_CONTROL_MARKERS = ("验证码", "设备验证", "风险验证", "captcha", "geetest")
 
 
-def _assert_diagnostic_profile_authority(candidate: Path) -> Path:
-    try:
-        return resolve_private_profile_path(candidate)
-    except DiagnosticProfileOverlap as error:
-        raise ConfigurationError(str(error)) from None
-
-
-def resolve_browser_profile(repo_root: Path, browser_profile: Path) -> Path:
-    """Create a private real directory outside the repository."""
-
-    root = io.filesystem_path(repo_root).resolve()
-    profile = io.filesystem_path(browser_profile)
-    _assert_diagnostic_profile_authority(profile)
-    if os.path.lexists(profile):
-        try:
-            metadata = profile.lstat()
-        except OSError as error:
-            raise ConfigurationError("browser profile inspection failed") from error
-        if io.is_redirect(metadata) or not stat.S_ISDIR(metadata.st_mode):
-            raise ConfigurationError("browser profile must be a real directory")
-    resolved_profile = profile.resolve(strict=False)
-    if resolved_profile == root or resolved_profile.is_relative_to(root):
-        raise ConfigurationError("browser profile must be outside repo-root")
-    try:
-        from ...storage.common import secure_private_directory
-
-        secure_private_directory(profile)
-        metadata = profile.lstat()
-    except OSError as error:
-        raise ConfigurationError("browser profile could not be secured") from error
-    if (
-        io.is_redirect(metadata)
-        or not stat.S_ISDIR(metadata.st_mode)
-        or not io.private(profile, 0o700)
-    ):
-        raise ConfigurationError("browser profile mode must be 0700")
-    resolved_profile = profile.resolve()
-    _assert_diagnostic_profile_authority(resolved_profile)
-    return resolved_profile
-
-
 @dataclass
 class BrowserSession:
     """Browser objects plus device headers captured only in process memory."""
@@ -94,20 +45,6 @@ def _capture_rpc_headers(session: BrowserSession, request: Request) -> None:
         value = headers.get(key)
         if value:
             session.rpc_headers[key] = value
-
-
-async def open_login_page(
-    session: BrowserSession,
-    *,
-    request_gate: RequestGate | None,
-    requested_min_interval: float,
-) -> None:
-    await prepare_login_or_session(
-        page=session.page,
-        headed=session.headed,
-        request_gate=request_gate,
-        requested_min_interval=requested_min_interval,
-    )
 
 
 async def prepare_login_or_session(

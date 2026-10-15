@@ -1,6 +1,6 @@
 # 平台适配与验收边界
 
-下文保留此前平台适配验收记录；当前系统浏览器策略及 Windows Edge/Chromium 原生离线证据见[浏览器选择验证](browser-selection-validation.md)。系统浏览器真实账号验收仍需另行完成，不能由历史 Chromium 结果推断。
+下文保留此前平台适配验收记录；当前系统浏览器策略及 Windows Edge/Chromium 原生离线证据见[浏览器选择验证](history/browser-selection-validation.md)。系统浏览器真实账号验收仍需另行完成，不能由历史 Chromium 结果推断。
 
 以下平台适配阶段快照的基线为 main `0c2a3a7a39474ef80ecc07cec911e9d8c04f1832`，当时 Windows 本人实机端到端仍待验收。当前 Windows Chromium 的本人真实流程曾通过，Edge 仅有原生离线证据，默认系统浏览器真实流程仍待验收，不能宣布跨平台正式可用。一套游戏采集、验证与代际恢复状态机保留，平台 I/O 与共享浏览器选择各有独立边界。星铁仍暂停；原神仍不含圣遗物与完整面板。
 
@@ -43,19 +43,18 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe tools\platform_smoke.py
 ```
 
-smoke 只创建新临时根，运行真实 SID/DACL、身份 key、安全打开、跨进程锁、刷新错误保留 current、提交后清理失败与恢复及 CLI 检查，结束清理自己新建的临时数据。**先确认 PLATFORM_SMOKE=PASS**；失败请报告版本、平台、固定错误代码，不附本机路径或认证材料，不通过提权/放宽权限修复。
+smoke 只创建新临时根，运行真实 SID/DACL、安全打开、跨进程结果锁与账号锁、刷新错误保留 current、提交后清理失败与恢复及 CLI 检查，结束清理自己新建的临时数据。**先确认 PLATFORM_SMOKE=PASS**；失败请报告版本、平台、固定错误代码，不附本机路径或认证材料，不通过提权/放宽权限修复。
 
-然后由本人分别对原神与绝区零执行：
+随后直接运行默认双游戏流程，再核验重启后的会话复用：
 
 ```powershell
-.\.venv\Scripts\python.exe -m hoyo_roster --operation login
 .\.venv\Scripts\python.exe -m hoyo_roster
 .\.venv\Scripts\python.exe -m hoyo_roster --headless
 ```
 
-首次先登录，由官方 Binding 自动发现本人 UID，不要求事先提供；这与 macOS/Linux 的公共入口一致。需要新登录时应先看到权限说明与二维码/手机号/取消选择；本人完成扫码或手机号、协议确认和图片 CAPTCHA。确认主要阶段提示、准确身份核验、两次采集、SAVED/UNCHANGED、实际 CURRENT_RESULT 内容和字段限制。关闭程序后再次运行，核验会话复用；无变化应保留业务时间戳。不要上传结果、Profile、验证码、截图或完整路径。离线 smoke 通过后仍需这些真实端到端步骤，才讨论正式支持声明。此 PR 保持 draft，本轮不合并。
+各游戏先检查同一账号会话，仅在缺失或失效时登录，再由官方 Binding 发现本人 UID，无需事先提供或单独执行 login；这与 macOS/Linux 的公共入口一致。需要新登录时先显示说明与二维码/手机号/取消选择；获授权的辅助手机号与验证码由程序代填，二维码确认、图片 CAPTCHA 与协议阅读由本人完成。确认主要阶段提示、准确身份核验、两次采集、SAVED/UNCHANGED、实际 CURRENT_RESULT 内容和字段限制。关闭程序后再次运行，核验会话复用；无变化应保留业务时间戳。不要上传结果、Profile、验证码、截图或完整路径。离线 smoke 通过后仍需这些真实端到端步骤，才讨论正式支持声明。此 PR 保持 draft，本轮不合并。
 
-## 本轮开发证据
+## 历史平台适配开发证据
 
 实际运行平台为 macOS arm64/Python 3.12；使用临时合成身份和认证根。最终命令、统计及准确交付 SHA 在 PR 交付记录中列出。
 
@@ -80,4 +79,4 @@ smoke 只创建新临时根，运行真实 SID/DACL、身份 key、安全打开�
 
 另一次较早开发回归为 363 passed / 10 skipped；它发生在后续安全读取和常量/句柄细化前，只作开发记录，不冒充最终提交逐项重跑。Git 索引 diff 检查最初将原样保留的 Windows 上游许可证 CRLF/行尾空白报告为格式错误；已在仓库 .gitattributes 仅为这些许可证声明保留上游空白，未改全局设置或改写许可证。早期失败均已修正，最终上述命令无未解决失败。没有 CI/Actions、独立审计、合并、仓库重建或隐私历史清理；提交仅含代码、合成测试和公开文档/许可证。
 
-合并后的固定基线 `2dd590ef2a6f991506114c4313ca240a65b864ba` 上的后续架构整理与实际验证见 [架构验证记录](architecture-validation.md)。该轮保留平台 I/O 与 Windows 原生策略，Windows 本人实机仍为 NOT_RUN，不能用新增离线回归替代端到端验收。
+合并后的固定基线 `2dd590ef2a6f991506114c4313ca240a65b864ba` 上的后续架构整理与实际验证见 [架构验证记录](history/architecture-validation.md)。该轮保留平台 I/O 与 Windows 原生策略，Windows 本人实机仍为 NOT_RUN，不能用新增离线回归替代端到端验收。

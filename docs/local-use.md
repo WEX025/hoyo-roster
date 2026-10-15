@@ -10,7 +10,7 @@
 
 按 README 安装 Python 3.12 和项目；浏览器选择及 Chromium 备用安装见下节。源码运行及从本地克隆执行 `pip install .` / `pip install -e .` 后，结果默认在已核验的本项目仓库 `data/`。定位依据是代码所在源码或安装元数据中的本地源码地址，不依赖 cwd；从仓库子目录或其他目录执行也不会把结果写到其他仓库。直接安装 wheel、源码目录已删除或无法核验时，回退到 platformdirs 系统用户数据根的 `results/`，不会静默写入 `site-packages`。
 
-`--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、认证 key/指纹、节流与认证锁按游戏/UID 隔离；不同结果根共用同一认证范围时仍由认证锁互斥。
+`--storage-root /absolute/private/results` **只选择结果根**，不改变浏览器会话位置；相对路径被拒绝。仓库内覆盖只能位于已核验的本项目 `data/` 下。`--auth-root /absolute/private/auth` 单独选择认证根，默认使用 platformdirs 系统用户数据根（各平台位置见 [README](../README.md#输出与隐私)）；必须在所有 Git 仓库和包源码之外并通过当前用户的私有权限检查。Profile、节流与认证锁由账号共享；结果按游戏/UID 隔离。不同结果根使用同一认证根时仍由账号锁互斥；原神和绝区零不创建认证 key/指纹。
 
 结果范围为 `<结果根>/game-results-v3/<scope>/<game>/<hash>/`；认证范围为 `<认证根>/account-session-v1/`，共享 Profile 位于其 `browser-profile/`，账号锁保护整个上下文生命周期。scope/hash 由身份确定，不含明文 UID。Windows 文件系统内部使用受检的长路径命名空间，而传给 Chromium 的 user-data-dir 使用普通盘符路径；认证根应尽量短，为浏览器内部数据库留出路径空间。程序显示 `RESULT_SCOPE` 与 `CURRENT_POINTER`；存在有效当前结果时显示 `CURRENT_RESULT`，即 `<结果范围>/<当前代际>/data/<游戏名称>/`，含 `profile.json`、`roster.json`、`builds/` 和绝区零 `bangboos.json`。`current.json` 指向当前代际，保留既有名单/build/bangboo 快照、无变化时间戳和原子保存语义。
 
@@ -47,11 +47,11 @@ hoyo-roster --game genshin --non-interactive --login-method qr --allow-login
 
 本人勾选或按单独授权代勾后，程序至多点击一次“获取验证码”，显示 `SMS_SUBMITTING`，此时**尚未证明请求提交或短信发送**。发送控件不确定显示 `SMS_ACTION_UNCERTAIN`，不重试；结束前仍未观察到 POST 会显示 `SMS_REQUEST_NOT_OBSERVED`。同一命令跨游戏及逐身份阶段复用授权；一次自动发码额度用完后不会因重登自动恢复：交互终端只询问是否额外允许一次填号及发码，明确允许后继续原登录窗口；拒绝则取消。非交互模式报 SMS_AUTHORIZATION_REQUIRED 后停止，须先补充本人授权。仍有效的登录方式及协议授权不重复询问。图片 CAPTCHA 由本人完成；辅助流程的本次短信验证码在 `OTP_INPUT_REQUIRED` 后通过隐藏输入临时交给程序代填，不提前收集或复用；需要重新运行的超时/取消不自动延续旧发码操作。
 
-只有观察到实际官方 POST 才输出 `SMS_REQUESTING`；回执须为 HTTP 200、整数 retcode=0、布尔 `data.sent_new` 和非负整数 `data.countdown`。`SMS_ACCEPTED` 表示官方接受新发码，不证明手机送达；`SMS_COOLDOWN` 表示已有验证码/倒计时，未新发短信。点击、倒计时或单独 retcode=0 都不能证明发码。网络失败、畸形回执或请求后 30 秒仍无回执报 `SMS_RECEIPT_UNKNOWN`，读取单次回执最多 5 秒；不重试。官方拒绝或同一命令又观察到发码请求报 `SMS_REQUEST_REJECTED`，风险/限流保留原错误码。手动 CAPTCHA 期间不推进身份探测，清除后再检查已观察的回执。回执未知时停止本次流程并做既有关闭/清理，不以再次点击试探；固定状态不能替代手机送达确认。已观察发码请求时，即使同轮精确 Binding 已通过，也须在请求后 30 秒和剩余登录期限内完成回执判定；重复、未知、拒绝及风控/限流不会被身份通过掩盖，不取消未决回执后报登录成功。
+只有观察到实际官方 POST 才输出 `SMS_REQUESTING`；回执须为 HTTP 200、整数 retcode=0、布尔 `data.sent_new` 和非负整数 `data.countdown`。`SMS_ACCEPTED` 表示官方接受新发码，不证明手机送达；`SMS_COOLDOWN` 表示已有验证码/倒计时，未新发短信。点击、倒计时或单独 retcode=0 都不能证明发码。网络失败、畸形回执或请求后 30 秒仍无回执报 `SMS_RECEIPT_UNKNOWN`，读取单次回执最多 5 秒；不重试。官方拒绝报 `SMS_REQUEST_REJECTED`，同一命令观察到重复发码请求报 `SMS_DUPLICATE_REQUEST`，风险/限流保留原错误码。手动 CAPTCHA 期间不推进身份探测，清除后再检查已观察的回执。回执未知时停止本次流程并做既有关闭/清理，不以再次点击试探；固定状态不能替代手机送达确认。已观察发码请求时，即使同轮精确 Binding 已通过，也须在请求后 30 秒和剩余登录期限内完成回执判定；重复、未知、拒绝及风控/限流不会被身份通过掩盖，不取消未决回执后报登录成功。
 
 图片 CAPTCHA 显示 `WAITING_FOR_MANUAL_CAPTCHA`，请本人在本工具打开的对应官方浏览器窗口点击图片或操作滑块：原神为 `act.mihoyo.com/ys/event/calculator/`，绝区零为 `www.miyoushe.com/zzz/`。星铁暂时无法获取，请不要使用其保留的登录/采集接口。AI 不自动选择、不解图、不绕过验证。程序只读取可见验证面板或图片/滑块操作提示，不读取图片、答案或输入值；等待期间保留同一登录页面、Context 和 Profile，暂停自动 Binding 探测，不自动发码或重复发送短信。本人操作官方页面仍可继续。
 
-面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；本人继续完成发码、输入验证码及确认，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入本人登录总预算 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
+面板消失显示一次 `CAPTCHA_CLEARED`，只恢复原有等待/核验流程；随后继续所选登录流程：辅助手机号在本次新发码确认后询问验证码并代填提交；手动模式由本人完成剩余动作，精确 Binding 通过才算登录成功。面板取消/消失、短信倒计时均不能证明验证通过或短信实际送达，程序不自动重发。持续显示期间提示不随轮询重复，重新出现则提示新一轮等待；操控短暂超时在原阶段期限内恢复。图片验证等待计入本人登录总预算 `--login-timeout`，到期报 `LOGIN_TIMEOUT`，持续操控故障或窗口关闭报 `LOGIN_CONTROL_UNAVAILABLE`；Ctrl-C 取消并做既有清理，Profile 不删除。未知验证 UI 可能无法被识别；官方 Binding 风控/限流、未知协议和额外权限仍按原规则停止，不能为通过验收扩大请求白名单。
 
 ## 会话中断与恢复
 
@@ -173,9 +173,9 @@ hoyo-roster --game genshin --uid YOUR_UID --operation cleanup-candidate --run-id
 
 卸载代码：`python -m pip uninstall hoyo-roster`；这不删除任何个人结果或 Playwright 浏览器。需要彻底清理时，关闭所有本工具进程，按 privacy 文档核对范围后自行删除选定身份范围；保留数据或先做私有备份。不要把整个共享父目录作为清理目标。
 
-可见登录与 `--headless` 会话复用使用同一个已选定的完整浏览器 channel，避免两个浏览器混用同一 Profile。历史 Mac Chromium 合成交接证据见 [Profile 验证记录](browser-profile-validation.md)，系统浏览器选择验证见 [浏览器选择验证](browser-selection-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。
+可见登录与 `--headless` 会话复用使用同一个已选定的完整浏览器 channel，避免两个浏览器混用同一 Profile。历史 Mac Chromium 合成交接证据见 [Profile 验证记录](history/browser-profile-validation.md)，系统浏览器选择验证见 [浏览器选择验证](history/browser-selection-validation.md)；它不延长官方 Cookie 期限，也不自动恢复已失效认证。
 
-本轮登录流程的公开静态证据、合成回归及真实验收边界见 [登录流程验证记录](login-workflow-validation.md)。
+当前流程与验收边界见[四模块工作流](workflow.md)和[当前验证状态](release-validation.md)；旧登录流程的固定版本证据见[历史登录记录](history/login-workflow-validation.md)。
 
 ## 固定版本验收预检
 

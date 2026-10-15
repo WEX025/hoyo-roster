@@ -1,4 +1,4 @@
-"""Owned-role onboarding with synthetic network, real coordinator and native storage."""
+"""Owned-role discovery with synthetic network, real coordinator and native storage."""
 
 import asyncio
 import copy
@@ -206,7 +206,7 @@ def test_native_sid_and_long_private_paths(tmp_path):
 @pytest.mark.parametrize("path", [r"\\server\share\auth", r"\\.\C:\auth", r"\\?\C:\auth"])
 def test_user_device_namespace_stays_rejected(path):
     from pathlib import Path
-    from hoyo_roster.user_workspace import direct_configuration
+    from hoyo_roster.auth import account_scope
 
     with pytest.raises(WorkspaceError, match="UNSUPPORTED_PRIVATE_FILESYSTEM"):
-        direct_configuration("genshin", UID_A, auth_root=Path(path))
+        account_scope(Path(path))

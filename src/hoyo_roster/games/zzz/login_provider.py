@@ -24,12 +24,10 @@ from .errors import (
     RiskControlError,
 )
 from .ids import parse_role_uid
-from hoyo_roster.jsonio import load_json
 from .transport import BrowserTransport
 
 GAME = "zzz"
 GAME_BIZ = "nap_cn"
-PROFILE_PATH = Path("data/zenless-zone-zero/profile.json")
 EXPECTED_REGION = "prod_gf_cn"
 
 
@@ -83,33 +81,7 @@ class ZzzLoginProvider:
                     region=EXPECTED_REGION,
                 ),
             )
-        payload = load_json(repo_root / PROFILE_PATH)
-        if not isinstance(payload, dict) or payload.get("game") != "zenless-zone-zero":
-            raise ConfigurationError("formal ZZZ Profile contract was invalid")
-        account = payload.get("account")
-        if not isinstance(account, dict):
-            raise ConfigurationError("formal ZZZ account was invalid")
-        raw_uid = account.get("uid")
-        raw_region = account.get("server")
-        if raw_uid is None and raw_region is None:
-            return ExpectedIdentity(game=self.game, digest=None)
-        if raw_uid is None or raw_region is None:
-            raise ConfigurationError("formal ZZZ identity was incomplete")
-        uid = parse_role_uid(raw_uid, error_type=ConfigurationError)
-        if not isinstance(raw_region, str) or not raw_region.strip():
-            raise ConfigurationError("formal ZZZ region was invalid")
-        region = raw_region
-        self._expected_uid = uid
-        self._expected_region = region
-        return ExpectedIdentity(
-            game=self.game,
-            digest=identity_digest(
-                game=self.game,
-                game_biz=GAME_BIZ,
-                uid=uid,
-                region=region,
-            ),
-        )
+        return ExpectedIdentity(game=self.game, digest=None)
 
     async def initialize_session(self) -> None:
         if self.request_gate is not None:

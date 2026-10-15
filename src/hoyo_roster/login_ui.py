@@ -154,12 +154,7 @@ async def choose_method() -> str | None:
         if not interactive:
             raise AuthenticationRequired("Use --login-method qr|phone|cancel when login is needed")
         emit("LOGIN_CHOICE_REQUIRED")
-        phone = (
-            "手机号（填写并获取一次验证码）"
-            if options.phone_assistance_available
-            else "手机号（恢复发现：本人填写和发码）"
-        )
-        prompt = f"允许上述操作并选择登录方式 [1 二维码/2 {phone}/3 取消]："
+        prompt = "允许上述操作并选择登录方式 [1 二维码/2 手机号（填写并获取一次验证码）/3 取消]："
     elif options.allow_login:
         await choose_terms(options, interactive)
         options.consent_given = True
@@ -181,12 +176,7 @@ async def choose_method() -> str | None:
         emit("CANCELLED")
         raise LoginCancelled("User cancelled login")
     await choose_terms(options, interactive)
-    if (
-        interactive
-        and options.method == "phone"
-        and options.phone_input is None
-        and options.phone_assistance_available
-    ):
+    if interactive and options.method == "phone" and options.phone_input is None:
         options.phone_input = PhoneInput()
     options.consent_given = True
     return options.method

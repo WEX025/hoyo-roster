@@ -70,9 +70,7 @@ def sync_setup(request, tmp_path, monkeypatch):
         "--headless",
         "--non-interactive",
     ]
-    config = direct_configuration(
-        game, UID_A, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-    )
+    config = direct_configuration(game, UID_A, storage_root=tmp_path / "results")
     store = LocalSnapshotStore(
         cli.CONTRACT_ROOT, config, game, candidate_policy=candidate_policy_for(game)
     )
@@ -225,9 +223,7 @@ def test_lock_release_failure_prevents_final_success(sync_setup, monkeypatch, ca
 def test_valid_prepare_changes_neither_generation_nor_bytes(tmp_path):
     store = LocalSnapshotStore(
         cli.CONTRACT_ROOT,
-        direct_configuration(
-            "genshin", UID_A, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-        ),
+        direct_configuration("genshin", UID_A, storage_root=tmp_path / "results"),
         "genshin",
     )
     with store.locked():
@@ -261,9 +257,7 @@ def test_hsr_decimal_offline_commit_inspect_recover(tmp_path):
     expected = Decimal("0.051234567890123456789")
     store = LocalSnapshotStore(
         cli.CONTRACT_ROOT,
-        direct_configuration(
-            "hsr", UID_A, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-        ),
+        direct_configuration("hsr", UID_A, storage_root=tmp_path / "results"),
         "hsr",
         candidate_policy=candidate_policy_for("hsr"),
     )

@@ -57,9 +57,7 @@ def test_game_uid_isolates_results_without_initializing_auth(tmp_path, source):
     stores = [
         LocalSnapshotStore(
             source,
-            direct_configuration(
-                game, uid, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-            ),
+            direct_configuration(game, uid, storage_root=tmp_path / "results"),
             game,
             candidate_policy=candidate_policy_for(game),
         )

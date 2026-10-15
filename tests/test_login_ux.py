@@ -65,19 +65,6 @@ def test_interactive_terms_permission_is_separate(
         OPTIONS.reset(token)
 
 
-def test_interactive_resume_does_not_enable_automatic_sms(monkeypatch):
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    answers = iter(("2", "n"))
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
-    options = LoginOptions(phone_assistance_available=False)
-    token = OPTIONS.set(options)
-    try:
-        assert asyncio.run(choose_method()) == "phone"
-        assert options.phone_input is None
-    finally:
-        OPTIONS.reset(token)
-
-
 @pytest.mark.parametrize("game", ("genshin", "zzz", "hsr"))
 def test_cancel_does_not_open_official_login(tmp_path, source, game, capsys):
     root = tmp_path / "workspace"

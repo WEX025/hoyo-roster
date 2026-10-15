@@ -138,9 +138,7 @@ def argv(tmp_path, *extra):
 def store_for(tmp_path, game):
     return LocalSnapshotStore(
         cli.CONTRACT_ROOT,
-        direct_configuration(
-            game, UID_A, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-        ),
+        direct_configuration(game, UID_A, storage_root=tmp_path / "results"),
         game,
         candidate_policy=candidate_policy_for(game),
     )
@@ -229,9 +227,7 @@ def test_unrelated_contract_damage_does_not_block_game(tmp_path, game):
     prevalidate(source)
     store = LocalSnapshotStore(
         source,
-        direct_configuration(
-            game, UID_A, storage_root=tmp_path / "results", auth_root=tmp_path / "auth"
-        ),
+        direct_configuration(game, UID_A, storage_root=tmp_path / "results"),
         game,
         candidate_policy=candidate_policy_for(game),
     )

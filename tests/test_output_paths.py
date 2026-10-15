@@ -69,7 +69,6 @@ def test_defaults_are_anchored_to_verified_project(
         build_parser().parse_args(["--game", "genshin", "--uid", UID])
     )
     assert config.storage_root == checkout / "data"
-    assert config.auth_root.expanduser() == paths.default_private_root()
 
 
 @pytest.mark.parametrize("missing", ["wheel", "removed", "wrong-project", "not-git"])
@@ -173,11 +172,11 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
         error = "UNSAFE_PRIVATE_DIRECTORY"
         auth.symlink_to(checkout / "data", target_is_directory=True)
     with pytest.raises(WorkspaceError, match=error):
-        if kind.startswith("auth-"):
+        if kind.startswith("auth-") or kind == "relative-auth":
             from hoyo_roster.auth import account_scope
 
             account_scope(auth)
-        config = direct_configuration("genshin", UID, storage_root=result, auth_root=auth)
+        config = direct_configuration("genshin", UID, storage_root=result)
         LocalSnapshotStore(
             source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
         )
@@ -195,7 +194,7 @@ def test_old_data_and_profile_are_preserved_without_migration(
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
     store = LocalSnapshotStore(
         source,
-        direct_configuration("genshin", UID, auth_root=tmp_path / "auth"),
+        direct_configuration("genshin", UID),
         "genshin",
         candidate_policy=candidate_policy_for("genshin"),
     )

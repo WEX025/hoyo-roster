@@ -1,7 +1,7 @@
 # hoyo-roster
 
 Python 3.12 单包；唯一用户入口 `hoyo-roster` / `python -m hoyo_roster`。
-先读 [README.md](README.md)、[本机使用](docs/local-use.md) 的安装与环境说明；数据格式见 [docs/data-format.md](docs/data-format.md)，隐私见 [docs/privacy.md](docs/privacy.md)。核对 Python 3.12、项目依赖及所选 Edge/Chrome/Playwright Chromium；浏览器策略集中 browser_runtime，首次选择后固定复用，启动备用不跨目录复用登录材料。平台范围及实际验收记录见 [docs/platform-support.md](docs/platform-support.md) 与 [浏览器选择验证](docs/browser-selection-validation.md)，本分支不宣称正式跨平台可用；安装/依赖/环境失败须明确报告阻塞，不冒充可用。CLI 参数以 [src/hoyo_roster/cli.py](src/hoyo_roster/cli.py) 和实际 `hoyo-roster --help` 为准。
+先读 [README.md](README.md)、[本机使用](docs/local-use.md) 的安装与环境说明；数据格式见 [docs/data-format.md](docs/data-format.md)，隐私见 [docs/privacy.md](docs/privacy.md)。核对 Python 3.12、项目依赖及所选 Edge/Chrome/Playwright Chromium；浏览器策略集中 browser_runtime，首次选择后固定复用，启动备用不跨目录复用登录材料。平台范围及实际验收记录见 [docs/platform-support.md](docs/platform-support.md) 与[浏览器选择历史验证](docs/history/browser-selection-validation.md)，本分支不宣称正式跨平台可用；安装/依赖/环境失败须明确报告阻塞，不冒充可用。CLI 参数以 [src/hoyo_roster/cli.py](src/hoyo_roster/cli.py) 和实际 `hoyo-roster --help` 为准。
 
 - 游戏实现位于 src/hoyo_roster/games/{genshin,zzz,hsr}；contracts 的 schema、空基线、验证器是格式权威。四个业务模块为登录、原神、崩铁、绝区零；共享层提供锁、节流、候选、精确 JSON 与原子存储工具，各游戏拥有自己的保存入口；游戏 collector/normalize/lifecycle 保持独立。入口注入候选策略，存储不导入具体游戏；业务层返回操作结果，不修改存储提交/清理状态，浏览器关闭且锁释放后由公共入口输出最终 PASS。
 - 默认直接按原神→绝区零顺序调用游戏模块；每个游戏入口通过 AuthService 检查账号级共享会话，有效则继续、缺失或失效才走登录流程。无需先提供 UID；各游戏从官方 Binding 发现本人身份并精确核验 game/UID/region，选择缓存、文件存在和 Cookie 存在都不是认证证据。显式游戏/UID 只处理该身份。登录模块持有一个账号 Profile/Context，各游戏仅借用独立页面和请求客户端，不搬移或复制 Profile。多角色及跨游戏正常只登录一次；账号认证互斥保持到实际关闭，游戏结果锁独立。只登录/发现不初始化业务快照。

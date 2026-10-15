@@ -168,15 +168,15 @@ def select_configuration(args):
         except ValueError:
             raise WorkspaceError(invalid) from None
     return (
-        direct_configuration(
-            args.game, args.uid, storage_root=args.storage_root, auth_root=args.auth_root
-        ),
+        direct_configuration(args.game, args.uid, storage_root=args.storage_root),
         args.game,
         args.operation,
     )
 
 
 async def run(args) -> int:
+    if getattr(args, "resume_discovery", None) is not None:
+        raise WorkspaceError("DISCOVERY_RESUME_UNSUPPORTED")
     if getattr(args, "allow_terms", False) and (
         not args.allow_login
         or args.headless
@@ -184,16 +184,6 @@ async def run(args) -> int:
         or args.login_method not in {"qr", "phone"}
     ):
         raise WorkspaceError("INVALID_TERMS_LOGIN_OPTIONS")
-    if getattr(args, "resume_discovery", None) is not None and (
-        args.uid is not None
-        or args.game not in {"genshin", "zzz"}
-        or args.operation not in {"discover", "login", "sync"}
-    ):
-        raise WorkspaceError("INVALID_DISCOVERY_RESUME")
-    if getattr(args, "resume_discovery", None) is not None and (
-        getattr(args, "phone_stdin", False) or getattr(args, "allow_sms", False)
-    ):
-        raise WorkspaceError("DISCOVERY_RESUME_SMS_DISABLED")
     phone_stdin, allow_sms = getattr(args, "phone_stdin", False), getattr(args, "allow_sms", False)
     if phone_stdin != allow_sms or (
         phone_stdin
@@ -319,10 +309,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run(args))
     except WorkspaceError as error:
         hint = "执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
-        if str(error) == "DISCOVERY_PROFILE_CONFLICT":
-            hint = "新发现会话与已有身份会话均保留，未覆盖或继续登录；先核验已有身份会话，参阅 local-use 的发现恢复步骤。"
-        elif str(error) in {"DISCOVERY_RESUME_UNPROVEN", "DISCOVERY_RESUME_SMS_DISABLED"}:
-            hint = "保留发现范围；只能显式复用已获证且确认关闭的会话，不能沿用自动发码或忽略未知关闭状态，参阅 local-use。"
+        if str(error) == "DISCOVERY_RESUME_UNSUPPORTED":
+            hint = "旧发现恢复已停用，旧目录保持原地；请移除 --resume-discovery，重新运行正常命令。"
         print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示={hint}")
         return 1
     except OperationError as error:

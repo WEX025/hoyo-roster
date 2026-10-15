@@ -79,7 +79,6 @@ class LoginOptions:
     consent_given: bool = False
     phone_input: PhoneInput | None = field(default=None, repr=False)
     allow_terms: bool = False
-    phone_assistance_available: bool = True
 
 
 def options_from_args(args) -> LoginOptions:
@@ -96,7 +95,6 @@ def options_from_args(args) -> LoginOptions:
         args.allow_login,
         phone_input=phone_input,
         allow_terms=getattr(args, "allow_terms", False),
-        phone_assistance_available=not getattr(args, "resume_discovery", None),
     )
 
 

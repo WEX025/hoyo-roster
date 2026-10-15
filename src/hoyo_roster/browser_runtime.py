@@ -59,7 +59,7 @@ def saved_channel(profile: Path) -> str | None:
 
 
 async def launch_profile(playwright, profile: Path, *, headed: bool, args=()):
-    """Caller owns the identity lock and closes the returned context.
+    """Caller owns the account authentication lock and closes the returned context.
 
     First launch may fall back only before any official navigation. Each engine
     has its own directory; even a failed launch never shares files with the fallback.

@@ -76,7 +76,6 @@ class UserConfiguration:
     user: str
     storage_root: Path
     uids: dict[str, str] = field(repr=False)
-    auth_root: Path = field(default_factory=paths.default_private_root)
 
     def uid(self, game: str) -> str:
         if game not in self.uids:
@@ -89,7 +88,6 @@ def direct_configuration(
     uid: str,
     *,
     storage_root: Path | None = None,
-    auth_root: Path | None = None,
 ) -> UserConfiguration:
     """Resolve an explicit selector without reading or writing any config file."""
     if game not in GAMES:
@@ -97,16 +95,13 @@ def direct_configuration(
     if not isinstance(uid, str) or not _UID.fullmatch(uid):
         raise WorkspaceError("INVALID_UID")
     storage_root = paths.default_storage_root() if storage_root is None else storage_root
-    auth_root = paths.default_private_root() if auth_root is None else auth_root
     if not storage_root.expanduser().is_absolute():
         raise WorkspaceError("INVALID_STORAGE_ROOT")
-    if not auth_root.expanduser().is_absolute():
-        raise WorkspaceError("INVALID_AUTH_ROOT")
-    if io.WINDOWS and any(str(path).startswith("\\\\") for path in (storage_root, auth_root)):
+    if io.WINDOWS and str(storage_root).startswith("\\\\"):
         raise WorkspaceError("UNSUPPORTED_PRIVATE_FILESYSTEM")
     digest = hashlib.sha256(f"direct:v1:{game}:{uid}".encode()).hexdigest()
     alias = f"direct-{game}-{digest[:48]}"
-    return UserConfiguration(alias, storage_root, {game: uid}, auth_root)
+    return UserConfiguration(alias, storage_root, {game: uid})
 
 
 def validate_workspace(root: Path, game: str | None = None) -> None:

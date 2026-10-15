@@ -1,5 +1,7 @@
 # 辅助短信验证码输入验证
 
+> 历史归档：本文仅记录下述固定版本的实现和验证，不作为当前工作流或当前验收结论。按身份 Profile、发现后搬移、旧调度及旧人工登录步骤已被[当前四模块工作流](../workflow.md)取代。当前使用见[本机指南](../local-use.md)，历史测试数不代表最新源码已通过。
+
 基线：main `d2b70ac6f3c55dce1bf3dc088a0e66f449845995`。用户要求提供手机号后主动询问本次验证码，由工具代填同一官方网页。旧的“短信验证码必须本人在网页输入”规则已同步修改，图片 CAPTCHA 仍本人操作。
 
 ## 行为
@@ -15,7 +17,7 @@
 - Chrome 原生合成 DOM：17 passed，包含原神/绝区零新的发码→隐藏输入→填入→提交一次流程。命令：`HOYO_NATIVE_LOGIN_SMOKE=1 HOYO_TEST_BROWSER_CHANNEL=chrome PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_login_dom.py`。使用新 Context、拦截所有请求，无真实短信或个人会话。
 - Ruff F、全目录 format check、空基线验证、validator self-test、Git 索引隐私检查：PASS。
 
-官方公开前端源码证据见 [login-contract.md](login-contract.md)，不包含真实验证码或私有响应。当前变更的真实短信验证码端到端、真实账号采集、Windows/Linux 实机：NOT_RUN。后续真实流程应另行记录，不得用合成验证代替。
+官方公开前端源码证据见 [login-contract.md](../login-contract.md)，不包含真实验证码或私有响应。当前变更的真实短信验证码端到端、真实账号采集、Windows/Linux 实机：NOT_RUN。后续真实流程应另行记录，不得用合成验证代替。
 
 ## 普通登录控件适配简化（2026-10-15）
 

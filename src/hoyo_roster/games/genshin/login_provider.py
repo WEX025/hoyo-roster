@@ -25,12 +25,10 @@ from .errors import (
     RequestTransportError,
     RiskControlError,
 )
-from hoyo_roster.jsonio import load_json
-from .normalize import nonempty_string, positive_id, select_binding
+from .normalize import positive_id, select_binding
 
 GAME = "genshin"
 GAME_BIZ = "hk4e_cn"
-PROFILE_PATH = Path("data/genshin-impact/profile.json")
 SUPPORTED_REGIONS = frozenset({"cn_gf01", "cn_qd01"})
 
 
@@ -90,37 +88,7 @@ class GenshinLoginProvider:
                 f"genshin-login-bootstrap:v1:{GAME_BIZ}:{uid}".encode()
             ).hexdigest()
             return ExpectedIdentity(game=self.game, digest=self._bootstrap_digest)
-        payload = load_json(repo_root / PROFILE_PATH)
-        if not isinstance(payload, dict) or payload.get("game") != "genshin-impact":
-            raise ConfigurationError("formal Genshin Profile contract was invalid")
-        account = payload.get("account")
-        if not isinstance(account, dict):
-            raise ConfigurationError("formal Genshin account was invalid")
-        raw_uid = account.get("uid")
-        raw_region = account.get("server")
-        if raw_uid is None and raw_region is None:
-            return ExpectedIdentity(game=self.game, digest=None)
-        if raw_uid is None or raw_region is None:
-            raise ConfigurationError("formal Genshin identity was incomplete")
-        uid = positive_id(raw_uid, label="formal Genshin UID")
-        region = nonempty_string(raw_region, label="formal Genshin region")
-        if region not in SUPPORTED_REGIONS:
-            raise ConfigurationError("formal Genshin region was unsupported")
-        if self.expected_region_override is not None and region != self.expected_region_override:
-            raise ConfigurationError("discovered Genshin region did not match formal Profile")
-        if self.expected_uid_override is not None and uid != self.expected_uid_override:
-            raise ConfigurationError("requested Genshin UID did not match formal Profile")
-        self._expected_uid = uid
-        self._expected_region = region
-        return ExpectedIdentity(
-            game=self.game,
-            digest=identity_digest(
-                game=self.game,
-                game_biz=GAME_BIZ,
-                uid=uid,
-                region=region,
-            ),
-        )
+        return ExpectedIdentity(game=self.game, digest=None)
 
     async def initialize_session(self) -> None:
         await self.collector.reserve_navigation()

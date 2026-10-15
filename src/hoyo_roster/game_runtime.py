@@ -115,9 +115,7 @@ async def execute_roles(args, auth, roles, *, game, candidate_policy, sync, sync
         return GameResult(game, "PASS", tuple(RoleResult(role, "VERIFIED") for role in roles))
     results = []
     for role in roles:
-        config = direct_configuration(
-            game, role.uid, storage_root=args.storage_root, auth_root=args.auth_root
-        )
+        config = direct_configuration(game, role.uid, storage_root=args.storage_root)
         store = None
         try:
             store = LocalSnapshotStore(
@@ -133,8 +131,6 @@ async def execute_roles(args, auth, roles, *, game, candidate_policy, sync, sync
                     expected_region=role.region,
                     headed=auth.headed,
                     request_interval=2.0,
-                    login_check_only=False,
-                    login_wait_seconds=args.login_timeout,
                 )
                 operation = await sync(
                     domain, snapshot_store=store, request_gate_override=auth.gate, auth_service=auth

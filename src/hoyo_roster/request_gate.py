@@ -1,4 +1,4 @@
-"""Persist throttling in the identity scope already protected by the workspace lock."""
+"""Persist throttling in the account scope protected by the authentication lock."""
 
 import asyncio
 import math

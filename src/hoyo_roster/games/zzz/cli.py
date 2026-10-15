@@ -1,4 +1,4 @@
-"""Command-line entrypoint with dry-run and headed mode as safe defaults."""
+"""ZZZ collection and saving through the shared account service."""
 
 from __future__ import annotations
 
@@ -65,12 +65,11 @@ def _prevalidate_formal_repository(repo_root: Path) -> None:
 async def _binding_with_login(
     endpoints: EndpointClient,
     *,
-    repo_root: Path,
     browser_session: BrowserSession,
     uid: str | None,
     request_gate: RequestGate | None,
     request_interval: float,
-    auth_service=None,
+    auth_service,
     allow_login=True,
 ) -> dict[str, Any]:
     provider = create_routine_login_provider(
@@ -95,7 +94,7 @@ async def _run_sync_once(
     *,
     snapshot_store: SnapshotStore,
     request_gate_override: RequestGate | None = None,
-    auth_service=None,
+    auth_service,
 ) -> OperationResult:
     repo_root = await run_blocking(_repo_root, args.repo_root)
     await run_blocking(
@@ -122,7 +121,6 @@ async def _run_sync_once(
         endpoints = EndpointClient(transport)
         binding = await _binding_with_login(
             endpoints,
-            repo_root=repo_root,
             browser_session=browser_session,
             uid=args.uid,
             request_gate=request_gate,
@@ -144,7 +142,6 @@ async def _run_sync_once(
         emit("COLLECTING_2")
         second_binding = await _binding_with_login(
             endpoints,
-            repo_root=repo_root,
             browser_session=browser_session,
             uid=args.uid,
             request_gate=request_gate,

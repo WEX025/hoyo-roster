@@ -1,6 +1,8 @@
 # 架构整理与定向验证
 
-本轮固定基线：main `2dd590ef2a6f991506114c4313ca240a65b864ba`。独立新工作树开发；交付 head 的完整 SHA、草稿 PR 和开发结果评论以 PR 交付记录为准。项目代理规则仍仅以 [AGENTS.md](../AGENTS.md) 为权威，本文记录改动和实际证据。
+> 历史归档：本文仅记录下述固定版本的实现和验证，不作为当前工作流或当前验收结论。按身份 Profile、发现后搬移、旧调度及旧人工登录步骤已被[当前四模块工作流](../workflow.md)取代。当前使用见[本机指南](../local-use.md)，历史测试数不代表最新源码已通过。
+
+本轮固定基线：main `2dd590ef2a6f991506114c4313ca240a65b864ba`。独立新工作树开发；交付 head 的完整 SHA、草稿 PR 和开发结果评论以 PR 交付记录为准。项目代理规则仍仅以 [AGENTS.md](../../AGENTS.md) 为权威，本文记录改动和实际证据。
 
 ## 行为与边界
 
@@ -44,7 +46,7 @@ macOS arm64 / Python 3.12.15。仅新临时合成身份、结果根和认证根�
 | `python -m build --no-isolation`；`python tools/verify_distribution.py`；`python -O tools/verify_distribution.py` | PASS：实际 wheel/sdist，89 个包资源；复用已安装的锁定 hatchling 后端 |
 | 两个独立临时 venv 分别 pip install 实际 wheel/sdist；从 /tmp 导入三游戏 cli/candidate/lifecycle/normalize、验证 installed contracts、精确 Decimal、CLI help | PASS：导入及 contracts 确认位于各自安装环境 |
 | `python tools/check_private_data.py`；`git diff --check` | PASS：仅索引路径和公开 diff；data/ 无新增跟踪个人文件 |
-| Windows 实机 SID/DACL/原生句柄/锁/替换/Chromium/本人端到端，Linux/WSL，断电持久化 | NOT_RUN：macOS mock 不替代本人 Windows 验收；参见 [平台支持](platform-support.md) |
+| Windows 实机 SID/DACL/原生句柄/锁/替换/Chromium/本人端到端，Linux/WSL，断电持久化 | NOT_RUN：macOS mock 不替代本人 Windows 验收；参见 [平台支持](../platform-support.md) |
 | 真实账号登录/同步、短信、HSR 采集 | NOT_RUN；本轮未授权真实操作，HSR 继续暂停 |
 
 开发期间出现的错误均未计为通过：受沙箱网络限制，首次依赖安装和隔离构建失败，改用获准的依赖下载及已安装后端；重构初期固定 SyncError 导出、ZZZ 关闭包装接入与合成清理故障注入随后修正。验证器正向 fixture 仍写浮点末尾零，已改用同一精确规范 writer；存储故障测试发现预检失败保留上次 COMMITTED，已把提交状态重置放回预检前，并以最后 17 项通过验证。受影响的最终分组已重跑，无未解决失败。Windows 实机保留 NOT_RUN，不宣称正式跨平台可用；本轮交付草稿 PR，暂不合并。

@@ -14,7 +14,7 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 | 绝区零 | 代理人等级、晋阶、影画、技能、音擎、驱动盘、面板和邦布 | 只有名单、养成名单、逐角色详情、批量详情和邦布的覆盖条件全部满足，才输出 `complete`；不表示账号的所有信息 |
 | 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的接口和历史测试不是使用建议 |
 
-开发与安装的历史验收平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配；Windows 11 x64 上 Chromium 的本人真实流程曾通过，系统 Edge 的原生离线复用通过，**当前默认 Edge 的真实端到端、macOS 系统 Chrome 及 Linux/WSL 实机验收仍未完成，不宣称跨平台正式可用**。Windows 当前目标为 Python 3.12、已安装的 Edge（Chromium 备用）、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)及[系统浏览器验证](docs/browser-selection-validation.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
+开发与安装的历史验收平台为 macOS arm64、Python 3.12。本分支已加入原生 Windows 适配；Windows 11 x64 上 Chromium 的本人真实流程曾通过，系统 Edge 的原生离线复用通过，**当前默认 Edge 的真实端到端、macOS 系统 Chrome 及 Linux/WSL 实机验收仍未完成，不宣称跨平台正式可用**。Windows 当前目标为 Python 3.12、已安装的 Edge（Chromium 备用）、本地固定 NTFS 盘，不支持网络共享、FAT/exFAT、reparse/junction 或云同步目录。详见[平台边界与验收](docs/platform-support.md)及[系统浏览器验证](docs/history/browser-selection-validation.md)。当前可用游戏仅支持明确允许的中国大陆区服：原神 `cn_gf01` / `cn_qd01`、绝区零 `prod_gf_cn`。国际服、其他区服和其他登录提供方不在当前支持范围内。
 
 更详细的字段、数据格式和完整度说明见[数据格式和完整度](docs/data-format.md)。
 
@@ -88,7 +88,7 @@ hoyo-roster --game zzz --non-interactive --allow-login --login-method phone
 
 遇到图片验证码（CAPTCHA）时，程序显示 `WAITING_FOR_MANUAL_CAPTCHA`，并说明对应的官方浏览器登录窗口：原神养成计算器或绝区零米游社。**请本人自己点击图片或操作滑块，AI 不自动选择、不解图、不绕过验证。**
 
-保持该窗口和命令运行。等待期间，程序保留同一会话，暂停自动身份探测，不自动发码或重发短信。验证面板消失后显示 `CAPTCHA_CLEARED`，随后继续等待本人完成发码、登录和精确身份核验。**面板消失不代表验证或登录成功，页面倒计时也不代表短信实际送达。**
+保持该窗口和命令运行。等待期间，程序保留同一会话，暂停自动身份探测，不自动发码或重发短信。验证面板消失后显示 `CAPTCHA_CLEARED`，随后继续所选辅助或手动登录流程，再完成精确身份核验。**面板消失不代表验证或登录成功，页面倒计时也不代表短信实际送达。**
 
 等待期间可按 Ctrl-C 取消。各登录等待阶段默认上限为 900 秒，可用 `--login-timeout` 设置，范围为大于 0 且不超过 3600 秒；图片验证等待计入所在阶段。超时或窗口关闭会停止本次操作，保留会话目录供重新运行时核验复用。其他风控和限流仍按原规则停止。
 

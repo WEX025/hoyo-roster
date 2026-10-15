@@ -182,7 +182,7 @@ class NetworkGate:
 
     def __init__(self, root):
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.settings = Settings(external_root=root, test_mode=True)
+        self.settings = Settings(external_root=root)
         self.count = 0
 
     async def reserve(self, **kwargs):
@@ -396,10 +396,10 @@ def test_genshin_no_explicit_identity_fails_clearly_instead_of_assertion(tmp_pat
             _binding_with_login(
                 collector,
                 session,
-                repo_root=root,
                 uid=None,
                 request_gate=gate,
                 request_interval=2,
+                auth_service=object(),
             )
         )
     assert context.request.count == 0

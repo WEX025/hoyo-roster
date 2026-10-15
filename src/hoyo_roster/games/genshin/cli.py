@@ -59,12 +59,11 @@ async def _binding_with_login(
     collector: OfficialCollector,
     session: BrowserSession,
     *,
-    repo_root: Path,
     uid: str,
     request_gate: RequestGate | None,
     request_interval: float,
     expected_region: str | None = None,
-    auth_service=None,
+    auth_service,
     allow_login=True,
 ) -> dict[str, Any]:
     if uid is None:
@@ -90,19 +89,17 @@ async def _pass(
     collector: OfficialCollector,
     session: BrowserSession,
     *,
-    repo_root: Path,
     uid: str,
     request_gate: RequestGate | None,
     request_interval: float,
     expected_region: str | None = None,
     pass_number: int = 1,
-    auth_service=None,
+    auth_service,
 ) -> tuple[Snapshot, int]:
     start = collector.request_count
     binding_data = await _binding_with_login(
         collector,
         session,
-        repo_root=repo_root,
         uid=uid,
         request_gate=request_gate,
         request_interval=request_interval,
@@ -125,7 +122,7 @@ async def _run_sync_once(
     *,
     snapshot_store: SnapshotStore,
     request_gate_override: RequestGate | None = None,
-    auth_service=None,
+    auth_service,
 ) -> OperationResult:
     repo_root = await run_blocking(_repo_root, args.repo_root)
     await run_blocking(
@@ -148,7 +145,6 @@ async def _run_sync_once(
         first, first_requests_after_binding = await _pass(
             collector,
             session,
-            repo_root=repo_root,
             uid=args.uid,
             request_gate=request_gate,
             request_interval=args.request_interval,
@@ -158,7 +154,6 @@ async def _run_sync_once(
         second, second_requests = await _pass(
             collector,
             session,
-            repo_root=repo_root,
             uid=args.uid,
             request_gate=request_gate,
             request_interval=args.request_interval,
