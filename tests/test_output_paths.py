@@ -101,8 +101,8 @@ def test_no_verified_source_falls_back_to_user_directory(checkout, monkeypatch, 
     assert paths.default_storage_root().expanduser() == paths.default_private_root() / "results"
 
 
-def test_explicit_results_and_shared_auth_roots(checkout, tmp_path, monkeypatch, source):
-    from hoyo_roster.auth import account_scope
+def test_explicit_results_and_shared_runtime_roots(checkout, tmp_path, monkeypatch, source):
+    from hoyo_roster.auth import runtime_scope
 
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
     stores = [
@@ -120,8 +120,8 @@ def test_explicit_results_and_shared_auth_roots(checkout, tmp_path, monkeypatch,
     for store in stores:
         assert store.root.is_relative_to(checkout / "data/game-results-v3")
         assert store.root.stat().st_mode & 0o777 == 0o700
-    shared = account_scope(tmp_path / "auth")
-    assert shared == account_scope(tmp_path / "auth")
+    shared = runtime_scope(tmp_path / "auth")
+    assert shared == runtime_scope(tmp_path / "auth")
     assert not shared.is_relative_to(checkout)
     assert (checkout / "data").stat().st_mode & 0o777 == 0o755
 
@@ -143,7 +143,7 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
     monkeypatch.setattr(paths, "project_repository", lambda: checkout)
     result = checkout / "data"
     auth = tmp_path / "auth"
-    error = "UNSAFE_AUTH_ROOT"
+    error = "UNSAFE_RUNTIME_ROOT"
     if kind == "auth-repo":
         auth = checkout / "private"
     elif kind == "auth-other-repo":
@@ -167,15 +167,15 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
         error = "INVALID_STORAGE_ROOT"
     elif kind == "relative-auth":
         auth = Path("auth")
-        error = "INVALID_AUTH_ROOT"
+        error = "INVALID_RUNTIME_ROOT"
     elif kind == "auth-symlink":
         error = "UNSAFE_PRIVATE_DIRECTORY"
         auth.symlink_to(checkout / "data", target_is_directory=True)
     with pytest.raises(WorkspaceError, match=error):
         if kind.startswith("auth-") or kind == "relative-auth":
-            from hoyo_roster.auth import account_scope
+            from hoyo_roster.auth import runtime_scope
 
-            account_scope(auth)
+            runtime_scope(auth)
         config = direct_configuration("genshin", UID, storage_root=result)
         LocalSnapshotStore(
             source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
@@ -185,7 +185,7 @@ def test_unsafe_or_relative_roots_are_rejected(checkout, tmp_path, monkeypatch, 
 def test_old_data_and_profile_are_preserved_without_migration(
     checkout, tmp_path, monkeypatch, source
 ):
-    from hoyo_roster.auth import account_scope
+    from hoyo_roster.auth import runtime_scope
     from hoyo_roster.storage.common import secure_private_directory
 
     old = secure_private_directory(tmp_path / "auth/users/legacy/genshin")
@@ -199,7 +199,7 @@ def test_old_data_and_profile_are_preserved_without_migration(
         candidate_policy=candidate_policy_for("genshin"),
     )
     assert store.current() is None
-    account_scope(tmp_path / "auth")
+    runtime_scope(tmp_path / "auth")
     with store.locked():
         store.prepare()
     assert tree_digest(old) == before
@@ -266,37 +266,6 @@ def test_cli_reports_current_json_location(checkout, monkeypatch, local_tool, ca
     assert (Path(current) / "roster.json").is_file()
     assert (Path(current) / "bangboos.json").is_file()
     assert UID not in output
-
-
-def test_logout_removes_shared_auth_and_retains_results_and_old_profiles(tmp_path, source):
-    import asyncio
-    from hoyo_roster.auth import AuthService
-    from hoyo_roster.storage.common import secure_private_directory, atomic_write_metadata
-
-    store = LocalSnapshotStore(
-        source,
-        direct_configuration("zzz", UID, storage_root=tmp_path / "results"),
-        "zzz",
-        candidate_policy=candidate_policy_for("zzz"),
-    )
-    with store.locked():
-        current = store.prepare()
-    before = tree_digest(current)
-    service = AuthService(tmp_path / "auth", headed=False, timeout=1)
-    profile = secure_private_directory(service.profile)
-    (profile / "synthetic-state").write_text("synthetic")
-    atomic_write_metadata(service.scope / "request-state.json", {"next_allowed_at": 1234})
-    legacy = secure_private_directory(tmp_path / "auth/users/legacy")
-    (legacy / "synthetic-state").write_text("preserved")
-
-    async def run():
-        async with service:
-            service.logout()
-
-    asyncio.run(run())
-    assert not profile.exists() and (service.scope / "request-state.json").exists()
-    assert (legacy / "synthetic-state").read_text() == "preserved"
-    assert tree_digest(current) == before
 
 
 def test_misplaced_legacy_profile_is_rejected_and_preserved(checkout, monkeypatch, source):

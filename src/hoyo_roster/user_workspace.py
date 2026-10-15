@@ -201,7 +201,7 @@ class LocalSnapshotStore:
 
     @contextmanager
     def locked(self) -> Iterator[LocalSnapshotStore]:
-        # Only this game's result scope; the auth service owns the account/Profile lock.
+        # Result scopes share a workspace lock; SessionService separately locks runtime metadata.
         with self._lock_directory(self.user_root):
             self._locked = True
             try:

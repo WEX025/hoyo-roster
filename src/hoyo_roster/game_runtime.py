@@ -11,9 +11,6 @@ from .models import OwnedRole
 from .errors import (
     OperationError,
     WrongAccount,
-    LoginBindingFailed,
-    LoginNetworkError,
-    LoginSessionInitializationFailed,
 )
 from .progress import emit
 from .sync import OperationResult
@@ -30,25 +27,21 @@ ACCOUNT_STOP_CODES = frozenset(
         "RISK_CONTROL",
         "RISK_CONTROL_ERROR",
         "AUTHENTICATION_REQUIRED",
-        "BROWSER_CONTEXT_UNAVAILABLE",
-        "BROWSER_CLOSE_FAILED",
-        "BROWSER_UNAVAILABLE",
-        "BROWSER_PROFILE_INVALID",
+        "AUTH_RECOVERY_FAILED",
+        "CLIENT_PROTOCOL_ERROR",
+        "CLIENT_BROWSER_REQUIRED",
+        "CLIENT_BROWSER_UNAVAILABLE",
+        "CLIENT_PAGE_UNAVAILABLE",
         "USER_WORKSPACE_BUSY",
         "REQUEST_SCHEDULE_INVALID",
+        "LOGIN_CANCELLED",
+        "LOGIN_TIMEOUT",
     }
 )
 
 
 def stops_account(error, code):
-    # A target game's service/Binding contract failure does not invalidate the
-    # shared browser. Other games still perform their own official session check.
-    game_service_failure = isinstance(
-        error, (LoginBindingFailed, LoginNetworkError, LoginSessionInitializationFailed)
-    )
-    return code in ACCOUNT_STOP_CODES or (
-        isinstance(error, OperationError) and not game_service_failure
-    )
+    return getattr(error, "stop_account", False) or code in ACCOUNT_STOP_CODES
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -103,7 +96,7 @@ class GameResult:
                 role.operation.report()
 
 
-async def execute_roles(args, auth, roles, *, game, candidate_policy, sync, sync_error):
+async def execute_roles(args, session, roles, *, game, candidate_policy, sync, sync_error):
     """Called by a game's public module; only injected game policies execute here."""
     if args.uid is not None:
         roles = tuple(role for role in roles if role.uid == args.uid)
@@ -111,7 +104,7 @@ async def execute_roles(args, auth, roles, *, game, candidate_policy, sync, sync
             raise WrongAccount("Requested role was not bound to the current official account")
     if not roles:
         return GameResult(game, "NO_ROLES")
-    if args.operation in {"discover", "login"}:
+    if args.operation == "discover":
         return GameResult(game, "PASS", tuple(RoleResult(role, "VERIFIED") for role in roles))
     results = []
     for role in roles:
@@ -129,12 +122,8 @@ async def execute_roles(args, auth, roles, *, game, candidate_policy, sync, sync
                     repo_root=workspace,
                     uid=role.uid,
                     expected_region=role.region,
-                    headed=auth.headed,
-                    request_interval=2.0,
                 )
-                operation = await sync(
-                    domain, snapshot_store=store, request_gate_override=auth.gate, auth_service=auth
-                )
+                operation = await sync(domain, snapshot_store=store, session=session)
                 current = store.current()
                 result = RoleResult(
                     role,

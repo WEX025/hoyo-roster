@@ -12,7 +12,7 @@ from hoyo_roster.storage.common import (
     atomic_write_metadata,
     AtomicWriteError,
 )
-from tests.test_login_flow import UID_A
+from tests.fixtures import UID_A
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-"""Persist throttling in the account scope protected by the authentication lock."""
+"""Persist throttling under the shared client-session metadata lock."""
 
 import asyncio
 import math

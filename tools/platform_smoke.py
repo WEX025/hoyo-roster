@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import asyncio
 import subprocess
 import sys
 import tempfile
@@ -12,7 +11,7 @@ from unittest.mock import patch
 
 from hoyo_roster import platform_io as io
 from hoyo_roster.cli import CONTRACT_ROOT
-from hoyo_roster.auth import AuthService
+from hoyo_roster.auth import runtime_scope
 from hoyo_roster.storage.common import tree_digest
 from hoyo_roster.games.genshin.candidate import candidate_policy
 
@@ -83,23 +82,21 @@ except portalocker.exceptions.LockException:
             == 0
         )
 
-        async def check_account_lock():
-            async with AuthService(ordinary(auth), headed=False, timeout=1) as service:
-                auth_lock = service.scope / "account.lock"
-                assert (
-                    subprocess.run(
-                        [sys.executable, "-c", code, str(auth_lock)], capture_output=True
-                    ).returncode
-                    == 23
-                )
+        runtime = runtime_scope(ordinary(auth))
+        runtime_lock = runtime / "session.lock"
+        with io.exclusive_lock(runtime_lock):
             assert (
                 subprocess.run(
-                    [sys.executable, "-c", code, str(auth_lock)], capture_output=True
+                    [sys.executable, "-c", code, str(runtime_lock)], capture_output=True
                 ).returncode
-                == 0
+                == 23
             )
-
-        asyncio.run(check_account_lock())
+        assert (
+            subprocess.run(
+                [sys.executable, "-c", code, str(runtime_lock)], capture_output=True
+            ).returncode
+            == 0
+        )
         args = [
             sys.executable,
             "-m",
@@ -110,8 +107,6 @@ except portalocker.exceptions.LockException:
             "123456789",
             "--storage-root",
             str(ordinary(result)),
-            "--auth-root",
-            str(ordinary(auth)),
             "--operation",
             "inspect",
         ]
@@ -126,7 +121,7 @@ except portalocker.exceptions.LockException:
         )
     print(f"NATIVE_PLATFORM={sys.platform}")
     print(
-        "PRIVATE_PERMISSIONS=PASS\nPROCESS_LOCK=PASS\nACCOUNT_PROFILE_LOCK=PASS\nSAVE_RECOVER=PASS\nCLI=PASS"
+        "PRIVATE_PERMISSIONS=PASS\nPROCESS_LOCK=PASS\nCLIENT_SESSION_LOCK=PASS\nSAVE_RECOVER=PASS\nCLI=PASS"
     )
     if os.name == "nt":
         print("WINDOWS_DIRECTORY_FSYNC=NOT_AVAILABLE\nPOWER_LOSS_ACCEPTANCE=NOT_RUN")

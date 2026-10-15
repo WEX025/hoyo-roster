@@ -19,6 +19,13 @@ def main() -> int:
         for path in source.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
     ]
+    expected_inventory = {path.relative_to(source).as_posix() for path in required}
+    actual_inventory = {
+        path.relative_to(installed).as_posix()
+        for path in installed.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+    }
+    unexpected = actual_inventory - expected_inventory
     mismatches = 0
     for path in required:
         target = installed / path.relative_to(source)
@@ -35,7 +42,7 @@ def main() -> int:
         ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, timeout=5
     )
     clean = status.returncode == 0 and not status.stdout
-    matched = bool(required) and mismatches == 0
+    matched = bool(required) and mismatches == 0 and not unexpected
     result = {
         "source_sha": revision.stdout.strip() if revision.returncode == 0 else None,
         "source_worktree_clean": clean,
@@ -43,6 +50,7 @@ def main() -> int:
         "python_executable": sys.executable,
         "checked_package_files": len(required),
         "mismatched_files": mismatches,
+        "unexpected_installed_files": len(unexpected),
         "installation_matches_source": matched,
     }
     print(json.dumps(result, indent=2))

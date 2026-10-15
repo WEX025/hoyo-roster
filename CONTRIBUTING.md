@@ -1,53 +1,26 @@
 # 开发与反馈
 
-先读 AGENTS.md。项目是 Python 3.12 单包、单用户命令；游戏源码在 `src/hoyo_roster/games/{genshin,zzz,hsr}`，共享登录/存储层只协调，不把不同游戏或身份混成同一 authority。contracts 内的 schema、空基线和验证器随 wheel/sdist 分发。
+先读 [AGENTS.md](AGENTS.md) 和[四模块工作流](docs/workflow.md)。Python 3.12 包保存数据与运行游戏逻辑，client_host.mjs 运行在 AI 客户端并借用其内置浏览器；不得新增独立登录浏览器或认证材料搬运。
 
-当前产品边界：崩坏：星穹铁道暂时无法获取，请不要使用；保留实现/格式仅供开发和既有数据解释。原神目前不含圣遗物和完整属性面板，名单仍须闭合；绝区零已支持能力保持。技术模块、合成测试或历史安装验证存在不构成星铁可用承诺，不推断上游原因。
+    python -m pip install -e '.[dev]'
+    python -m pytest -q
+    node --test tests/test_client_host.mjs
+    python tools/platform_smoke.py
+    python -m ruff check src tests tools --select F
+    python -m ruff format --check src tests tools
+    python tools/validate_repository.py --require-empty-baseline
+    python tools/validate_repository.py --self-test
+    python tools/check_workflow.py
+    python tools/check_private_data.py
+    python -m build
+    python tools/verify_distribution.py
 
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
-python tools/platform_smoke.py
-# 按变更选择受影响的 tests/test_*.py
-python -m pytest -q tests/test_platform_io.py
-python -m ruff check src tests tools --select F
-python -m ruff format --check src tests tools
-python tools/validate_repository.py --require-empty-baseline
-python tools/validate_repository.py --self-test
-python tools/check_private_data.py
-python -m build
-python tools/verify_distribution.py
-```
+Node 宿主跨进程测试使用项目虚拟环境中的 Python；跨平台时选择该平台实际虚拟环境解释器。合成身份、来源、结果根和 runtime 根均为新临时范围，测试不得读取本人旧认证/结果目录。
 
-禁止提交个人结果。源码 `data/` 只允许跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略；认证目录必须在仓库外。提交前运行 `python tools/check_private_data.py`，它只检查 Git 索引路径、不读取私人内容，只要 data/ 内跟踪了其他文件就报错。检查失败时先保留本机文件，再从索引取消跟踪（例如 `git rm --cached -- PATH`），重新检查；已经上传的个人数据还须私下处理暴露与历史，不能认为后续忽略就能撤回。`.gitignore` 不保护已跟踪文件、强制 add 或整个目录打包。此检查是手动本地命令，不安装 hooks，也不新增 CI/workflow。
+测试只替换客户端接口与官方来源，登录协调、身份发现、两轮比较、normalize、lifecycle、candidate、store 和管道应运行真实代码。删除旧流程测试时保留适用的文件系统、恢复、精确数值及存储故障回归，并为新交接状态补齐测试。覆盖启动失败后的重试、挂起读取/SDK 的取消与迟到结果、等待时关页、过期确认及恢复核验失败后停止后续游戏。check_workflow 仅检查列明的静态规则和链接，不替代行为回归，也不能单独证明无历史残留。
 
-测试使用临时目录与合成身份，默认路径提供者/--auth-root 同样指向临时私有根，不能依赖导入时冻结的 HOME。按改动范围运行定向测试及受影响回归；只有影响扩大时才有根据地扩展，不以默认全仓测试替代边界判断。
+真实登录由用户在内置浏览器自行完成；AI 主动询问后继续。真实来源验收要求客户端提供受支持的完整读取能力。不能以合成来源、公开页面或用户确认代替真实业务数据证明；当前 Codex 读取限制见[客户端桥接](docs/client-bridge.md)。
 
-合成回归只替换浏览器、网络及其时间等待，业务 Provider、协调器、双次采集、normalize、lifecycle、candidate 和 store 应运行真实代码。增加关键失败/恢复测试；不要以单个函数 stub 的成功证明完整链路。资源验证须从干净 wheel/sdist 安装运行，包含三游戏模块、schema 和验证器。
+只报告固定错误和脱敏步骤，不附账号、凭据、原始响应、个人截图或 JSON。data/ 只跟踪 .gitkeep；提交前检查索引路径。正常同步不上传个人结果，不新增发布、合并、部署、后台服务或 CI/Actions。
 
-修改官方请求契约时引用官方公开静态源码并保留 URL/哈希/日期；静态证据与真实账号验收分开。真实账号测试需明确授权；获授权的手机号/短信验证码由辅助登录流程临时代填，二维码确认和图片 CAPTCHA 由本人完成，未知协议或额外权限另行询问。真实未执行记录 NOT_RUN，不能把离线通过称为发布验收通过。
-
-报告注明固定源码 SHA、实际命令、通过/失败/未执行和平台。PR 写清问题、行为变化和验证；不要附个人路径、真实账号、凭据或响应。提交问题时提供版本、操作系统/Python版本、固定错误代码、脱敏步骤及预期行为；完整数据和浏览器状态无需上传。发现隐私漏洞时先使用仓库所有者可用的私密联系渠道，不在公开 Issue 放入秘密。
-
-跨平台 I/O、Windows 本人验收及目录刷新边界见 [平台支持](docs/platform-support.md)。Windows 原语须实机验证；macOS mock 不能替代。历史合成回归保留其 POSIX 假设，不把全套 pytest 当成 Windows 平台通过；Windows 优先运行独立 native smoke。
-
-本项目采用 MIT；新增依赖先核实实际版本许可证并更新 THIRD_PARTY_NOTICES，不引入未授权游戏素材。不添加 CI/Actions、部署、合并或后台服务作为常规修改的一部分。
-
-当前模块边界见[四模块工作流](docs/workflow.md)；固定旧版本的架构整理和定向自测历史证据见 [架构验证记录](docs/history/architecture-validation.md)；Windows 实机边界仍见平台支持文档。
-
-原生浏览器检查统一使用以下入口，先检查安装，再固定同一个浏览器运行；Windows 优先 Edge、macOS 优先 Chrome，缺失时仅检查 Chromium 是否已安装，不通过试启动探测。显式 `--channel chrome|msedge|chromium` 缺失时直接报 BLOCKED，不自动安装或切换。
-
-```bash
-python -m tools.native_browser --check-only
-python -m tools.native_browser --suite login
-python -m tools.native_browser --suite profile
-# 已安装 Chromium 时可显式检查备用路径：
-python -m tools.native_browser --suite profile --channel chromium
-```
-
-`--check-only` 不启动 Chrome，只证明程序文件存在，不证明系统允许浏览器启动。实际原生检查须在允许启动系统浏览器的终端/执行环境运行；代理遇到工具沙箱限制时，直接使用工具提供的获准执行环境，不先在已知受限环境试启动。启动异常或崩溃属于失败，立即停止本组，不在同一环境重复启动、重发命令或自动换浏览器。登录组带 pytest `-x`；DOM、Ctrl-C 子进程和 Profile 检查均固定所选 channel，临时 Profile 提前保存选择，因此启动失败不走产品备用浏览器重试。纯合成的浏览器选择/回退策略仍由 `tests/test_browser_runtime.py` 覆盖。
-
-这些检查只用新临时合成 Profile，所有页面/请求拦截为虚构响应或阻止，不登录、不访问官方服务、不读取真实认证。成功通过不能抵消首次崩溃记录，也不能替代真实账号验收。回执、超时与精确身份回归见 `tests/test_sms_receipt.py`、`tests/test_login_ux.py`、`tests/test_manual_captcha.py` 和 `tests/test_session_handoff.py`；固定旧版本证据见[历史登录记录](docs/history/login-workflow-validation.md)。
-
-macOS 离线 smoke 使用经过所有权与固定目标核验的系统临时别名 `/var`、`/tmp` 的真实路径；不放宽结果/认证根的符号链接保护，自定义 TMPDIR 或别名下的重定向仍拒绝。终端与一次发码回归见 `tests/test_terminal.py`、`tests/test_phone_login.py`；直接运行 opt-in pytest 时也须使用允许浏览器启动的环境并带 `-x`，统一入口会自动设置原生测试开关和浏览器选择。
+POSIX 与 Windows I/O、目录/权限及断电边界见[平台支持](docs/platform-support.md)。本项目使用 MIT；依赖版本和许可证见[第三方声明](THIRD_PARTY_NOTICES.md)。固定源码与工作区状态、实际命令、PASS/FAIL/NOT_RUN 必须分别记录。

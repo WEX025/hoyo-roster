@@ -1,17 +1,20 @@
-"""Sequential task orchestration over public game modules."""
+"""Sequential independent games over a host-attached client session."""
 
 import importlib
 
-from .auth import AuthService
-from .errors import OperationError
-from .progress import OPTIONS, options_from_args
+from .auth import SessionService
+from .client import ClientSession
+from .errors import OperationError, ClientBrowserRequired
+from .login import login
 from .user_workspace import WorkspaceError, direct_configuration
-from .game_runtime import ACCOUNT_STOP_CODES, GameResult, stops_account
+from .game_runtime import GameResult, stops_account
 
 SUPPORTED_GAMES = ("genshin", "zzz")
 
 
-async def run_task(args):
+async def run_task(args, client=None):
+    if args.operation not in {"sync", "discover", "login"}:
+        raise WorkspaceError("ARGUMENTS_INVALID")
     if args.game == "hsr":
         raise WorkspaceError("GAME_PAUSED")
     games = SUPPORTED_GAMES if args.game in {None, "all"} else (args.game,)
@@ -25,53 +28,52 @@ async def run_task(args):
         raise WorkspaceError("UNEXPECTED_CANDIDATE_RUN_ID")
     if args.generation is not None:
         raise WorkspaceError("UNEXPECTED_GENERATION")
-    token = OPTIONS.set(options_from_args(args))
+    if client is None:
+        raise ClientBrowserRequired()
+    if not isinstance(client, ClientSession):
+        raise ClientBrowserRequired()
     results = []
-    close_error = None
-    closed = False
     try:
-        try:
-            async with AuthService(
-                args.auth_root, headed=not args.headless, timeout=args.login_timeout
-            ) as auth:
-                for game in games:
-                    module = importlib.import_module(f"hoyo_roster.games.{game}.entry")
-                    try:
-                        result = await module.run(args, auth)
-                    except OperationError as error:
-                        # Identity/protection/login-interaction failures stop dependent games.
-                        result = GameResult(
-                            game,
-                            "FAIL",
-                            error_code=error.code,
-                            stop_account=stops_account(error, error.code),
-                        )
-                    except WorkspaceError as error:
-                        result = GameResult(
-                            game,
-                            "FAIL",
-                            error_code=str(error),
-                            stop_account=str(error) in ACCOUNT_STOP_CODES,
-                        )
-                    results.append(result)
-                    if result.stop_account:
-                        break
-            closed = True
-        except OperationError as error:
-            close_error = error
-    finally:
-        OPTIONS.reset(token)
-        # Committed business results remain visible even when browser close fails.
+        async with SessionService(client, args.runtime_root) as session:
+            if args.operation == "login":
+                await login(client)
+                print("LOGIN_STATUS=USER_CONFIRMED", flush=True)
+                return 0
+            # Data capability failure is an explicit boundary, not a second browser fallback.
+            client.require_source_reader()
+            for game in games:
+                module = importlib.import_module("hoyo_roster.games." + game + ".entry")
+                try:
+                    result = await module.run(args, session)
+                except OperationError as error:
+                    result = GameResult(
+                        game,
+                        "FAIL",
+                        error_code=error.code,
+                        stop_account=stops_account(error, error.code),
+                    )
+                except WorkspaceError as error:
+                    result = GameResult(
+                        game,
+                        "FAIL",
+                        error_code=str(error),
+                        stop_account=stops_account(error, str(error)),
+                    )
+                results.append(result)
+                if result.stop_account:
+                    break
+    except BaseException:
         for result in results:
-            result.report(finalized=closed)
-    if close_error:
-        raise close_error
+            result.report(finalized=False)
+        raise
+    for result in results:
+        result.report()
     success = (
         bool(results)
         and not any(r.failed for r in results)
         and any(r.status == "PASS" for r in results)
     )
-    print(f"TASK_STATUS={'PASS' if success else 'FAIL'}", flush=True)
-    if not success and results and all(r.status == "NO_ROLES" for r in results):
+    print("TASK_STATUS=" + ("PASS" if success else "FAIL"), flush=True)
+    if results and all(r.status == "NO_ROLES" for r in results):
         print("ERROR_CODE=NO_OWNED_ROLES\nCOLLECTION_STATUS=NOT_COLLECTED", flush=True)
     return 0 if success else 1

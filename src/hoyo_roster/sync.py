@@ -6,10 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 from .blocking import run_blocking
-from .browser import (
-    operation_browser as operation_browser,
-    BrowserCloseFailed as BrowserCloseFailed,
-)
 from .progress import emit
 from .user_workspace import SnapshotStore, WorkspaceError
 
@@ -31,12 +27,9 @@ class OperationResult:
 
     def report(self) -> None:
         print(f"GAME={self.game}\nOPERATION={self.operation}\nSTATUS=PASS\nSTABLE_CODE=PASS")
-        if self.operation == "login":
-            print("BINDING_STATUS=PASS")
-        else:
-            print(
-                f"REQUEST_COUNT={self.request_count}\nNO_OP={'YES' if self.no_op else 'NO'}\nDATA_MODIFIED={'YES' if self.data_modified else 'NO'}"
-            )
+        print(
+            f"REQUEST_COUNT={self.request_count}\nNO_OP={'YES' if self.no_op else 'NO'}\nDATA_MODIFIED={'YES' if self.data_modified else 'NO'}"
+        )
 
 
 async def publish_snapshot(
