@@ -1,17 +1,14 @@
-"""Optional ephemeral phone fill and one guarded SDK click; never accept terms."""
+"""Ephemeral phone fill, optional authorized terms check and one guarded SMS click."""
 
 import asyncio
 import re
 from time import monotonic
-from urllib.parse import urljoin, urlsplit
 from playwright.async_api import Error as PlaywrightError
 from .errors import LoginTimeout, PhoneInputInvalid
 from .login_ui import sdk_frame, visible_frames
 from .progress import emit
 from .terminal import read_terminal
-
-TERMS_TEXT = "已阅读并同意《米哈游用户协议》《米哈游隐私政策》，未注册的手机号验证通过将自动注册。"
-TERMS_LINKS = {"/agreement?hideBack=true", "/privacyAgreement?hideBack=true"}
+from .terms_login import TERMS_TEXT as TERMS_TEXT, TermsLoginAction, known_terms_checkbox
 
 
 async def read_phone() -> str:
@@ -27,13 +24,14 @@ async def read_phone() -> str:
 class PhoneLoginAction:
     """Only constructed after manual-login consent and explicit once-only SMS permission."""
 
-    def __init__(self, number, watch):
+    def __init__(self, number, watch, *, allow_terms=False):
         self._number = number
         self.watch = watch
         self.filled = False
         self.finished = False
         self.attempted = False
         self.waiting_for_terms = False
+        self.terms = TermsLoginAction() if allow_terms else None
 
     def handoff(self, code="PHONE_AUTOMATION_MANUAL"):
         self._number = None
@@ -64,36 +62,8 @@ class PhoneLoginAction:
                     return
                 frame = frames[0]
                 mobile = frame.locator("input#mobile")
-                agreement = frame.locator(".agree-checkbox")
-                checkbox = agreement.get_by_role("checkbox")
-                if (
-                    await mobile.count() != 1
-                    or not await mobile.is_visible()
-                    or await agreement.count() != 1
-                    or not await agreement.is_visible()
-                    or await checkbox.count() != 1
-                ):
-                    self.handoff()
-                    return
-                # Unknown terms/extra permission text never authorizes an automatic action.
-                text = re.sub(r"\s+", "", await agreement.inner_text())
-                links = await agreement.locator("a").all()
-                targets = set()
-                for link in links:
-                    url = urlsplit(urljoin(frame.url, await link.get_attribute("href") or ""))
-                    if (
-                        url.scheme != "https"
-                        or url.hostname != "user.mihoyo.com"
-                        or url.port not in (None, 443)
-                        or url.username is not None
-                        or url.password is not None
-                        or url.path != "/"
-                        or url.query
-                    ):
-                        self.handoff()
-                        return
-                    targets.add(url.fragment)
-                if text != TERMS_TEXT or len(links) != 2 or targets != TERMS_LINKS:
+                checkbox = await known_terms_checkbox(frame)
+                if await mobile.count() != 1 or not await mobile.is_visible() or checkbox is None:
                     self.handoff()
                     return
                 if not self.filled:
@@ -103,10 +73,15 @@ class PhoneLoginAction:
                     number = None
                     emit("PHONE_ENTERED")
                 if not await checkbox.is_checked():
-                    if not self.waiting_for_terms:
-                        emit("WAITING_FOR_TERMS")
-                        self.waiting_for_terms = True
-                    return
+                    if self.terms is not None:
+                        if not await self.terms.accept(checkbox):
+                            self.handoff()
+                            return
+                    else:
+                        if not self.waiting_for_terms:
+                            emit("WAITING_FOR_TERMS")
+                            self.waiting_for_terms = True
+                        return
                 send = frame.get_by_text("获取验证码", exact=True)
                 if (
                     await send.count() != 1
@@ -122,6 +97,8 @@ class PhoneLoginAction:
                 emit("SMS_SUBMITTING")
                 await send.click(timeout=1500)
         except (TimeoutError, PlaywrightError, ValueError):
+            if self.terms is not None and self.terms.attempted and not self.terms.finished:
+                self.terms.handoff()
             self.handoff("SMS_ACTION_UNCERTAIN" if self.attempted else "PHONE_AUTOMATION_MANUAL")
 
     def close(self):

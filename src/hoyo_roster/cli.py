@@ -109,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="authorize one automatic SMS click per command after the user checks official terms; requires --phone-stdin",
     )
     parser.add_argument(
+        "--allow-terms",
+        action="store_true",
+        help="explicitly authorize checking only the recognized official user agreement/privacy checkbox; unknown terms require manual review",
+    )
+    parser.add_argument(
         "--allow-login",
         action="store_true",
         help="authorize manual official login and local session reuse; new terms still need user review",
@@ -176,6 +181,13 @@ def select_configuration(args):
 
 
 async def run(args) -> int:
+    if getattr(args, "allow_terms", False) and (
+        not args.allow_login
+        or args.headless
+        or args.operation not in {"discover", "login", "sync"}
+        or args.login_method not in {"qr", "phone"}
+    ):
+        raise WorkspaceError("INVALID_TERMS_LOGIN_OPTIONS")
     if getattr(args, "resume_discovery", None) is not None and (
         args.uid is not None
         or args.game not in {"genshin", "zzz"}

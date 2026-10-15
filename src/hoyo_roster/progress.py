@@ -15,6 +15,10 @@ LABELS = {
     "WAITING_FOR_PHONE_AND_TERMS": "请本人在官方窗口输入手机号、阅读并确认协议、点击一次发送；程序不读输入值或自动发送",
     "PHONE_ENTERED": "已在本工具的官方手机号窗口填写临时号码；未发短信，不输出或保存号码",
     "WAITING_FOR_TERMS": "请本人在本工具打开的官方窗口阅读并勾选协议；程序不自动接受，勾选后至多点击一次已授权发码",
+    "LOGIN_CHOICE_REQUIRED": "会话缺失；请选择并允许二维码或手机号登录，可取消",
+    "TERMS_CHOICE_REQUIRED": "请明确是否允许程序代勾已识别的米哈游用户协议和隐私政策；拒绝时仍可本人勾选",
+    "TERMS_ACCEPTED": "已按本人明确授权勾选已核验的官方协议；尚未证明登录成功",
+    "TERMS_AUTOMATION_MANUAL": "官方协议或控件无法核验，或勾选结果不确定；停止自动勾选，请本人在同一窗口处理",
     "PHONE_AUTOMATION_MANUAL": "官方手机号/协议/发送控件未能唯一核验；停止自动操作，请在同一窗口本人处理，不猜坐标或重试",
     "PHONE_AUTHORIZATION_USED": "本命令的一次自动发码授权已使用；后续身份不再次读号码或自动发码",
     "SMS_SUBMITTING": "点击一次已授权发码控件；尚未确认实际请求或服务端接受，请勿重复点击",
@@ -68,6 +72,8 @@ class LoginOptions:
     allow_login: bool = False
     consent_given: bool = False
     phone_input: PhoneInput | None = field(default=None, repr=False)
+    allow_terms: bool = False
+    phone_assistance_available: bool = True
 
 
 def options_from_args(args) -> LoginOptions:
@@ -83,6 +89,8 @@ def options_from_args(args) -> LoginOptions:
         args.login_timeout,
         args.allow_login,
         phone_input=phone_input,
+        allow_terms=getattr(args, "allow_terms", False),
+        phone_assistance_available=not getattr(args, "resume_discovery", None),
     )
 
 

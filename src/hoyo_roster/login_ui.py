@@ -16,17 +16,21 @@ from .errors import (
     LoginControlUnavailable,
     LoginTimeout,
 )
-from .progress import OPTIONS, emit
+from .progress import OPTIONS, PhoneInput, emit
 from .terminal import read_terminal
 
 LOGIN_NOTICE = (
-    "登录前说明：二维码需本人扫码并确认；手机号默认由本人在官方页面输入、请求短信并输入验证码。"
+    "登录前说明：二维码需本人扫码并确认；交互选择手机号表示允许临时隐藏输入并填写号码、获取一次验证码。"
+    "非交互手机号默认由本人在官方页面输入、请求短信并输入验证码。"
     "显式选择 --phone-stdin --allow-sms 可从终端临时隐藏输入号码，待本人在官方窗口勾选协议后程序至多点一次发码；"
     "号码只在本次内存使用，不记录或输出，程序不读取浏览器输入值。"
     "允许本工具打开官方页面、等待本人登录、核验所选游戏/UID/区服，"
     "并在本机该身份独立 Profile 中保存及复用会话。浏览器与官方服务通信；"
-    "工具不接收验证码或输出凭据。必要的官方协议与隐私条款请本人阅读并在官方页面确认；"
-    "程序不会自动勾选。图片 CAPTCHA 必须由本人在本工具打开的官方浏览器窗口点击；"
+    "工具不接收验证码或输出凭据。请先阅读米哈游用户协议和隐私政策："
+    "https://user.mihoyo.com/#/agreement?hideBack=true 和 "
+    "https://user.mihoyo.com/#/privacyAgreement?hideBack=true；未注册的手机号验证通过将自动注册。"
+    "未获单独明确允许时程序不会自动勾选；可选择授权程序代勾已识别的上述协议，或由本人在官方页面确认。"
+    "图片 CAPTCHA 必须由本人在本工具打开的官方浏览器登录窗口点击；"
     "AI 不选择图片、不解图或绕过验证。等待期间保留会话，不重复发短信；"
     "页面倒计时不代表短信实际送达。若出现未知新协议、额外权限或其他风控，请暂停并另行确认，"
     "此次允许不涵盖它们。可随时 Ctrl-C 取消。"
@@ -143,8 +147,15 @@ async def choose_method() -> str | None:
     if options.method is None:
         if not interactive:
             raise AuthenticationRequired("Use --login-method qr|phone|cancel when login is needed")
-        prompt = "允许上述操作并选择登录方式 [1 二维码/2 手机号/3 取消]："
+        emit("LOGIN_CHOICE_REQUIRED")
+        phone = (
+            "手机号（填写并获取一次验证码）"
+            if options.phone_assistance_available
+            else "手机号（恢复发现：本人填写和发码）"
+        )
+        prompt = f"允许上述操作并选择登录方式 [1 二维码/2 {phone}/3 取消]："
     elif options.allow_login:
+        await choose_terms(options, interactive)
         options.consent_given = True
         return options.method
     elif not interactive:
@@ -163,8 +174,30 @@ async def choose_method() -> str | None:
     if options.method is None:
         emit("CANCELLED")
         raise LoginCancelled("User cancelled login")
+    await choose_terms(options, interactive)
+    if (
+        interactive
+        and options.method == "phone"
+        and options.phone_input is None
+        and options.phone_assistance_available
+    ):
+        options.phone_input = PhoneInput()
     options.consent_given = True
     return options.method
+
+
+async def choose_terms(options, interactive: bool) -> None:
+    if not interactive or options.allow_terms:
+        return
+    emit("TERMS_CHOICE_REQUIRED")
+    try:
+        answer = await read_terminal(
+            "是否允许代勾上述《米哈游用户协议》《米哈游隐私政策》"
+            "（未注册手机号验证通过将自动注册；未知协议仍需本人确认）？[y/N]："
+        )
+    except EOFError:
+        answer = ""
+    options.allow_terms = answer.strip().lower() in {"y", "yes"}
 
 
 def sdk_frame(frame) -> bool:
@@ -205,12 +238,13 @@ async def confirm_method_entry(
     deadline: float | None = None,
     authenticated: Callable[[], Awaitable[bool]] | None = None,
     poll_interval: float = 0.2,
+    terms_action=None,
 ) -> bool:
     if method is None:
         return False
     emit("WAITING_FOR_ENTRY")
     print(
-        "程序打开普通登录面板并选择方式；扫码、手机号、验证码、协议阅读和确认由本人完成。",
+        "程序打开普通登录面板并选择已授权方式；仅执行已获允许的填写、协议勾选和一次发码。扫码、图片验证和短信验证码由本人完成。",
         flush=True,
     )
     options = OPTIONS.get()
@@ -231,6 +265,8 @@ async def confirm_method_entry(
                 raise LoginControlUnavailable("Official login entry control timed out")
             raise LoginTimeout("Selected official entry was not observed before deadline")
         await captcha_wait.ready(page, deadline)
+        if terms_action is not None and not handed_off:
+            await terms_action.step(page, captcha_wait=captcha_wait, deadline=deadline)
         # Binding outranks disappeared/replaced UI after login, but never runs during CAPTCHA.
         if authenticated is not None and monotonic() >= next_probe:
             if await authenticated():

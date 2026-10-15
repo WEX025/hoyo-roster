@@ -53,8 +53,11 @@ class Control:
         if self.fail:
             raise PlaywrightError("synthetic uncertain dispatch")
 
-    async def check(self):
-        pytest.fail("product must never accept terms")
+    async def check(self, **kwargs):
+        self.clicks += 1
+        if self.fail:
+            raise PlaywrightError("synthetic uncertain terms check")
+        self.checked = True
 
 
 class Agreement(Control):
@@ -115,6 +118,7 @@ def test_fill_once_wait_for_user_terms_then_click_once(capsys):
     asyncio.run(step(action, page))
     assert page.mobile.fills == [NUMBER] and page.send.clicks == 0
     assert not page.agreement.checkbox.checked
+    assert page.agreement.checkbox.clicks == 0
     assert capsys.readouterr().out.count("PROGRESS=WAITING_FOR_TERMS") == 1
     page.agreement.checkbox.checked = True  # synthetic person, never product
     asyncio.run(step(action, page))
@@ -128,7 +132,8 @@ def test_fill_once_wait_for_user_terms_then_click_once(capsys):
 @pytest.mark.parametrize(
     "invalid", ("origin", "duplicate", "extra_terms", "foreign_link", "malformed_port", "cooldown")
 )
-def test_unknown_controls_or_terms_handoff_without_sending(invalid):
+@pytest.mark.parametrize("allow_terms", (False, True))
+def test_unknown_controls_or_terms_handoff_without_sending(invalid, allow_terms):
     page = Page()
     page.agreement.checkbox.checked = True
     if invalid == "origin":
@@ -143,10 +148,73 @@ def test_unknown_controls_or_terms_handoff_without_sending(invalid):
         page.agreement.links[0].href = "https://user.mihoyo.com:bad/#/agreement?hideBack=true"
     if invalid == "cooldown":
         page.send.amount = 0
-    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])))
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=allow_terms)
     asyncio.run(step(action, page))
     asyncio.run(step(action, page))
     assert action.finished and page.send.clicks == 0 and action._number is None
+    assert page.agreement.checkbox.clicks == 0
+
+
+def test_authorized_terms_checked_once_before_single_sms(capsys):
+    page = Page()
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=True)
+    asyncio.run(step(action, page))
+    asyncio.run(step(action, page))
+    assert page.mobile.fills == [NUMBER]
+    assert page.agreement.checkbox.checked and page.agreement.checkbox.clicks == 1
+    assert page.send.clicks == 1
+    output = capsys.readouterr().out
+    assert output.index("TERMS_ACCEPTED") < output.index("SMS_SUBMITTING")
+    assert NUMBER not in output
+
+
+def test_uncertain_terms_check_hands_off_without_sms_or_retry(capsys):
+    page = Page()
+    page.agreement.checkbox.fail = True
+    action = PhoneLoginAction(NUMBER, SmsReceiptWatch(Context([])), allow_terms=True)
+    asyncio.run(step(action, page))
+    asyncio.run(step(action, page))
+    assert page.agreement.checkbox.clicks == 1 and page.send.clicks == 0
+    output = capsys.readouterr().out
+    assert "TERMS_AUTOMATION_MANUAL" in output and "TERMS_ACCEPTED" not in output
+
+
+@pytest.mark.parametrize("already_checked", (False, True))
+def test_qr_terms_action_never_toggles_or_sends(already_checked):
+    from hoyo_roster.terms_login import TermsLoginAction
+
+    page = Page()
+    page.agreement.checkbox.checked = already_checked
+    action = TermsLoginAction()
+    asyncio.run(step(action, page))
+    asyncio.run(step(action, page))
+    assert page.agreement.checkbox.checked
+    assert page.agreement.checkbox.clicks == (0 if already_checked else 1)
+    assert page.mobile.fills == [] and page.send.clicks == 0
+
+
+def test_qr_terms_action_rejects_unknown_agreements():
+    from hoyo_roster.terms_login import TermsLoginAction
+
+    page = Page()
+    page.agreement.text += "unknown permission"
+    action = TermsLoginAction()
+    asyncio.run(step(action, page))
+    assert action.failed and page.agreement.checkbox.clicks == 0
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ["--allow-terms"],
+        ["--allow-terms", "--allow-login", "--login-method", "phone", "--headless"],
+        ["--allow-terms", "--allow-login", "--login-method", "cancel"],
+        ["--allow-terms", "--allow-login", "--login-method", "qr", "--operation", "inspect"],
+    ),
+)
+def test_terms_options_require_explicit_login_permission(arguments, capsys):
+    assert main(arguments) == 1
+    assert "ERROR_CODE=INVALID_TERMS_LOGIN_OPTIONS" in capsys.readouterr().out
 
 
 def test_manual_request_preempts_automation():
