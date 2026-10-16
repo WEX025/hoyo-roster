@@ -1,9 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPageBrowser } from "../src/hoyo_roster/client_page.mjs";
+import { runInNewContext } from "node:vm";
 import { dismissSchemeNotice, createZzzPageSource } from "../src/hoyo_roster/games/zzz/page_source.mjs";
 
 const URL = "https://act.mihoyo.com/ys/event/calculator/index.html#/character";
+
+test("observed anonymous game pages require manual login; hidden prompts and credentials are not read", async () => {
+  const ui = createPageBrowser({ tabs:{} });
+  for (const label of ["去登录", "你还没有登录哦", "需要先登录才能使用养成指南工具"]) {
+    for (const shown of [true,false]) {
+      const element = {innerText:label,children:[],getClientRects:()=>shown?[{}]:[]};
+      const credential = {getClientRects:()=>[],getAttribute:()=>"手机号"};
+      Object.defineProperty(credential,"value",{get:()=>assert.fail("must not read credentials")});
+      const tab = {playwright:{evaluate:async fn=>runInNewContext(`(${fn.toString()})()`,{
+        document:{querySelectorAll:selector=>selector==="input"?[credential]:[element]},getComputedStyle:()=>({visibility:"visible"})
+      }),locator:()=>({count:async()=>0})}};
+      assert.equal(await ui.authentication(tab,new AbortController().signal),shown);
+      if(shown) await assert.rejects(ui.authenticatedControl(tab,".account-center-icon",new AbortController().signal),{code:"AUTHENTICATION_REQUIRED"});
+    }
+  }
+});
 
 test("ZZZ retries only an explicit official error once, preserving the same page and auth errors", async () => {
   for (const scenario of ["recover", "still-fails", "unknown", "auth"]) {

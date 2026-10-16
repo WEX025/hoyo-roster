@@ -10,7 +10,17 @@ export function createGenshinPageSource(ui) {
   const measure = (name, signal, action) => ui.measure(name, signal, action);
   async function identity(tab, signal) {
     const role = await ui.identity(tab, signal, async () => {
-      await ui.wait(signal, () => tab.playwright.locator(".user-wrapper .switch").count(), n => n === 1);
+      await ui.wait(signal, async () => {
+        if (await ui.authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
+        return await ui.call(signal, () => tab.playwright.locator(".user-wrapper .switch").count()) === 1 ||
+          await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
+      }, Boolean);
+      // An anonymous calculator shows the public catalog without an account
+      // header. Its owned tab reveals the official login prompt, never a roster.
+      if (!(await ui.call(signal, () => tab.playwright.locator(".user-wrapper .switch").count()))) {
+        await ui.click(tab, tab.playwright.getByText("已拥有", { exact: true }), signal);
+      }
+      await ui.authenticatedControl(tab, ".user-wrapper .switch", signal);
       await ui.click(tab, tab.playwright.locator(".user-wrapper .switch"), signal);
     });
     const nickname = await ui.call(signal, () => tab.playwright.locator(".user-wrapper .nickname").innerText({ timeoutMs: 1500 }));
@@ -19,7 +29,6 @@ export function createGenshinPageSource(ui) {
   }
   async function owned(tab, signal, params) {
     await measure("genshin.reload", signal, () => tab.reload());
-    await ui.wait(signal, () => tab.playwright.evaluate(() => Boolean(document.querySelector(".user-wrapper .switch"))), Boolean);
     const role = await measure("genshin.identity", signal, () => identity(tab, signal));
     ui.assertIdentity(role, params);
     const hasOwned = await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());

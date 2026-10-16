@@ -260,7 +260,7 @@ def test_distribution_archive_positive_and_empty_controls(tmp_path, optimize, em
     (tmp_path / "dist").mkdir()
     script = tmp_path / "tools/verify_distribution.py"
     shutil.copyfile(ROOT / "tools/verify_distribution.py", script)
-    (tmp_path / "src/hoyo_roster/__init__.py").write_text("# synthetic public package\n")
+    (tmp_path / "src/hoyo_roster/__init__.py").write_bytes(b"# synthetic public package\n")
     (tmp_path / "third_party/NOTICE").write_bytes(b"synthetic notice")
     wheel = tmp_path / "dist/synthetic.whl"
     sdist = tmp_path / "dist/synthetic.tar.gz"

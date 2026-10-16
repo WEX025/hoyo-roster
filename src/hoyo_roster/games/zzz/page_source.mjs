@@ -51,7 +51,7 @@ export function createZzzPageSource(ui) {
   async function identity(tab, signal) {
     await dismissSchemeNotice(ui, tab, signal);
     return ui.identity(tab, signal, async () => {
-      await ui.wait(signal, () => tab.playwright.locator(".account-center-icon").count(), n => n === 1);
+      await ui.authenticatedControl(tab, ".account-center-icon", signal);
       await openPanel(tab, tab.playwright.locator(".account-center-icon"),
         () => tab.playwright.getByText("切换角色", { exact: true }).isVisible(), signal);
       await openPanel(tab, tab.playwright.getByText("切换角色", { exact: true }),

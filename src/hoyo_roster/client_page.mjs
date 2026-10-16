@@ -88,9 +88,18 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     // Only read rendered text and field presence, never any login input value.
     return call(signal, () => tab.playwright.evaluate(() => {
       const fields = Array.from(document.querySelectorAll("input"));
-      return fields.some(e => /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
-        Array.from(document.querySelectorAll("button,a,div,span")).some(e => !e.children.length && e.innerText?.trim() === "登录");
+      const visible = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
+      return fields.some(e => visible(e) && /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
+        Array.from(document.querySelectorAll("button,a,div,span,p")).some(e => visible(e) && !e.children.length &&
+          ["登录", "去登录", "立即登录", "你还没有登录哦", "登录后可查看已有角色数据",
+            "需要先登录才能使用养成指南工具"].includes(e.innerText?.trim()));
     }));
+  }
+  async function authenticatedControl(tab, selector, signal) {
+    return wait(signal, async () => {
+      if (await authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
+      return call(signal, () => tab.playwright.locator(selector).count());
+    }, count => count === 1);
   }
   async function identity(tab, signal, open) {
     if (await authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
@@ -137,5 +146,5 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
   return Object.freeze({ page: (url, signal) => measure("page.preflight", signal, () => page(url, signal)),
-    available, call, wait, click, authentication, identity, assertIdentity, record, release, measure });
+    available, call, wait, click, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
 }
