@@ -18,7 +18,9 @@ Codex 使用 Codex 内置浏览器；其他客户端使用自身内置浏览器�
 
 ## 客户端桥接与离线操作
 
-AI 依[客户端桥接](client-bridge.md)导入 client_runtime.mjs，调用 createRosterHost(browser) 后启动 host.startTask。该入口自动装配已移植的两游戏读源实现，无需用户编写 readSource。Python worker 通过私有双向管道将登录、读源及游戏服务初始化请求交给同一个活浏览器宿主。无宿主返回 CLIENT_BROWSER_REQUIRED；当前客户端缺少公开 CDP 能力时按游戏返回 CLIENT_SOURCE_UNAVAILABLE 和缺失来源，不改用另一个浏览器。单独登录仍可通过不依赖读源的 client_host.mjs 执行。不要把合成网络边界测试当作真实采集，也不要让用户反复登录来解决能力不足。
+AI 依[客户端桥接](client-bridge.md)调用 createRosterHost(browser) 和 host.startTask，入口已装配游戏 DOM/API 读源器，无需用户补回调。默认页面路径读取官方身份、拥有名单和当前详情，经两轮比较保存 partial 页面记录，不要求 CDP。DOM 不可用时才检查原 API 路径；两者均不可用时按游戏报告缺失来源，不让用户反复登录解决能力不足。无宿主返回 CLIENT_BROWSER_REQUIRED；单独登录仍不依赖读源器。
+
+页面输出固定报告 SNAPSHOT_KIND=OFFICIAL_PAGE、COLLECTION_STATUS=PARTIAL 和实际数量；CURRENT_RESULT 指向 page-observations-v1 内的 snapshot.json，可直接打开。字段范围见[页面记录](page-observations.md)。下文 init/inspect/recover/cleanup 的代际流程仅适用于原 API game-results-v3；页面记录使用完整文件原子替换，不创建 API current/候选代际。页面替换后持久化未知时保留文件、停止并核验，不执行 API recover 删除它。
 
 --client-stdio 只用于宿主连接，不在普通终端运行；源响应只在私有管道传递。--runtime-root 只选择仓库外 client-runtime-v1 的会话锁/节流元数据，不存浏览器状态。无需安装独立浏览器驱动。
 

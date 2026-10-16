@@ -14,21 +14,25 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 
 ## 当前实现状态
 
-**已移植历史采集代码，但当前 Codex 内置浏览器尚未开放适配器所需的 CDP 能力，完整真实采集仍未通过验收。**
+**默认通过内置浏览器的官方页面采集并保存 `partial` 页面记录；不要求 CDP。页面记录的字段范围与完整 API 快照不同。**
 
 [local-roster skill](.agents/skills/local-roster/SKILL.md) 通过包内 client_runtime.mjs 的 createRosterHost(browser) 装配游戏读源实现、客户端宿主和 Python 私有管道；Python 不自行启动浏览器。普通终端运行在线命令会报 CLIENT_BROWSER_REQUIRED。安装包不会自动获得客户端浏览器能力。
 
-原神读源实现迁移了历史官方请求/响应监听，绝区零迁移了请求签名、设备头准备与养成服务初始化。初始化及一次服务刷新由绝区零模块负责，共享账号登录仍由独立登录模块负责。浏览器事件边界的合成回归已驱动这些实际实现完成两游戏的校验、保存；这不等于真实账号采集已通过。适配器只访问所选客户端公开的能力，缺少所需能力时按游戏报告 CLIENT_SOURCE_UNAVAILABLE 和缺项；低层宿主未装配适配器才报 SOURCE_ADAPTER_MISSING。详见[客户端桥接](docs/client-bridge.md)和[验证状态](docs/release-validation.md)。
+页面路径读取官方角色面板身份、已拥有名单及对应当前详情。原神保存页面同步后的等级、三项技能和当前武器；绝区零保存等级及明确标为当前的音擎、技能、驱动盘区块，排除未拥有角色和推荐内容。两轮一致且身份稳定后原子保存；结果明确为 `OFFICIAL_PAGE / PARTIAL`，不生成未经证明的官方数字 ID，不覆盖 API 完整快照。[页面字段和保存格式](docs/page-observations.md)是此路径的范围说明。
 
-其他客户端、Windows/Linux 客户端浏览器、客户端重启保持和完整真实采集尚未验收。版本 0.1.0rc1 仍为发布候选。
+原有 API 读源器仍保留历史请求/响应监听、签名与绝区零游戏服务初始化；仅在客户端提供相应能力时运行，完整覆盖要求保持不变。游戏分别检查自身来源，缺少 CDP 不再阻断可用的页面路径。低层宿主未装配适配器报 SOURCE_ADAPTER_MISSING。详见[客户端桥接](docs/client-bridge.md)和[验证状态](docs/release-validation.md)。
 
-## 当前支持范围
+其他客户端、Windows/Linux 客户端浏览器、客户端重启保持和完整 API 采集尚未验收。版本 0.1.0rc1 仍为发布候选。
+
+## API 快照字段范围
 
 | 游戏 | 可保存的信息 | 能力边界 |
 |---|---|---|
 | 原神 | 来源支持的等级、突破、命座、好感、技能和当前武器等字段 | **不含圣遗物和完整属性面板**。`partial` 表示字段覆盖有限；角色名单仍须通过闭合核验，不能按残缺名单保存 |
 | 绝区零 | 代理人等级、晋阶、影画、技能、音擎、驱动盘、面板和邦布 | 只有名单、养成名单、逐角色详情、批量详情和邦布的覆盖条件全部满足，才输出 `complete`；不表示账号的所有信息 |
 | 崩坏：星穹铁道 | 当前不可用 | **暂时无法获取，请不要使用**。保留的离线格式和合成测试不代表采集能力 |
+
+此表描述原有 API 格式；默认页面采集的范围见[页面记录](docs/page-observations.md)，其状态始终为 `partial`。
 
 ## 安装与离线维护
 
@@ -45,11 +49,11 @@ Windows 可使用 py -3.12 -m venv .venv 与虚拟环境中的 Scripts/python.ex
 
 每次同步先核验所选游戏、UID 和区服，再采集两次；业务结果和来源覆盖一致、数据通过验证后才保存。不同游戏的字段范围见上方支持矩阵；只保存当前已支持的装备字段，不保存库存、货币、资源或推荐配装。
 
-从本项目 Git 仓库源码运行，或按上方步骤克隆后执行 `pip install .` / `pip install -e .`，结果默认集中在该仓库的 `data/`，按游戏和 UID 派生哈希隔离。程序从源码位置或安装时记录的本地源码地址核验本项目仓库；从仓库子目录或其他当前目录运行仍使用同一结果根，不选择当前目录里的任意仓库。单独安装 wheel、源码仓库已删除或无法核验时，结果回退到 系统用户数据目录下的 `hoyo-roster/results`（具体位置见下文），不会写入 `site-packages`。`--storage-root /absolute/private/results` 只覆盖结果位置。
+从本项目源码运行或安装，结果默认集中在仓库 `data/`，按游戏和 UID 派生哈希隔离。页面结果在 `page-observations-v1` 的私有 `snapshot.json`；API 结果仍在 `game-results-v3`，两者互不覆盖。程序核验源码仓库，不选择 cwd 中的任意仓库；独立 wheel 无可核验源码时回退到系统用户数据目录 `hoyo-roster/results`。不会写入 `site-packages`。`--storage-root /absolute/private/results` 只覆盖结果位置。
 
 系统用户数据根由 platformdirs 统一选择：macOS 为 `~/Library/Application Support/hoyo-roster`，Windows 为 `%LOCALAPPDATA%\hoyo-roster`，Linux 为 `$XDG_DATA_HOME/hoyo-roster`（未设置时 `~/.local/share/hoyo-roster`）。独立 wheel 的结果放在该根的 `results/` 下。
 
-终端显示 `RESULT_SCOPE`（身份结果目录）、`CURRENT_POINTER`（当前指针）和 `CURRENT_RESULT`（当前 JSON 所在目录），据此打开 `profile.json`、`roster.json`、`builds/` 及绝区零的 `bangboos.json`。结果仍是当前快照，哈希不是加密；完整本机路径也不要贴到公开反馈。
+页面结果报告 `RESULT_SCOPE` 和指向 `snapshot.json` 的 `CURRENT_RESULT`。API 路径另报告 `CURRENT_POINTER`，其结果目录包含 `profile.json`、`roster.json`、`builds/` 和绝区零的 `bangboos.json`。哈希不是加密，完整本机路径也不要贴到公开反馈。
 
 仓库只跟踪 `data/.gitkeep`，个人结果由 `.gitignore` 忽略。普通 `git add .` 不带出这些结果，但忽略规则不能保护已经跟踪或强制添加的文件，也不保护整个目录的打包分享。提交前运行 `python tools/check_private_data.py`，检查只读取 Git 路径列表，不读取私人内容；禁止提交个人结果。
 

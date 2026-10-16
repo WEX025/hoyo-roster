@@ -66,6 +66,7 @@ class ClientSession:
     port: ClientPort = field(repr=False)
     session_ref: str | None = field(default=None, init=False, repr=False)
     source_reader: bool = field(default=False, init=False)
+    page_reader: bool = field(default=False, init=False)
     _sequence: int = field(default=0, init=False)
 
     async def call(self, method: str, params: dict | None = None):
@@ -136,11 +137,19 @@ class ClientSession:
 
     async def attach(self):
         result = await self.call("session.attach")
-        if not isinstance(result, dict) or set(result) != {"browser", "source_reader"}:
+        if not isinstance(result, dict) or set(result) not in (
+            {"browser", "source_reader"},
+            {"browser", "source_reader", "page_reader"},
+        ):
             raise ClientProtocolError()
         if result["browser"] != "client-built-in" or type(result["source_reader"]) is not bool:
             raise ClientProtocolError()
         self.source_reader = result["source_reader"]
+        if type(result.get("page_reader", False)) is not bool:
+            raise ClientProtocolError()
+        self.page_reader = result.get("page_reader", False)
+        if self.page_reader and not self.source_reader:
+            raise ClientProtocolError()
 
     def require_source_reader(self):
         if not self.source_reader:

@@ -1,5 +1,7 @@
 # 数据格式和完整度
 
+默认页面采集使用独立的 `hoyo-roster-page-v1` 格式，固定为 `partial`，位于 `page-observations-v1`；其字段、身份、两轮检查及原子保存规则见[页面记录](page-observations.md)。以下 Profile/roster/builds、数字 ID、完整度及代际说明适用于原有 API 快照，不能要求 DOM 读取器伪造这些 API 字段，也不能用页面结果覆盖它们。
+
 **崩坏：星穹铁道暂时无法获取，请不要使用。原神目前不含圣遗物和完整属性面板。** 以下区分当前可用能力与保留的技术格式；星铁接口/格式继续存在，不是使用建议，也不推断上游原因。
 
 格式权威是发行包的 `src/hoyo_roster/contracts/schemas/`；验证器同时验证 schema、跨文件一致性、完整度、规范 JSON 和 roster/build 一一对应。`data/manifest.json` 列出三游戏文件。每个身份的当前 generation 只包含本游戏数据、本游戏 schema 和必要公共契约。运行时只验证本游戏；公共 manifest 保留固定格式映射，但不要求其他游戏文件存在。整仓三游戏空基线验证保留为开发发布检查。结果使用 game-results-v3 新命名空间，generation/transaction 归属标记升级为 v3，旧目录不自动读取或迁移。

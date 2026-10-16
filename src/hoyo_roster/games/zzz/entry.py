@@ -35,6 +35,17 @@ def owned_roles(data):
 
 
 async def run(args, session):
+    if session.client.page_reader:
+        from hoyo_roster.errors import ClientSourceUnavailable
+        from hoyo_roster.page_source import PAGE_SOURCES
+        from .page import run as run_page
+
+        try:
+            await session.client.require_sources("zzz", PAGE_SOURCES)
+        except ClientSourceUnavailable:
+            pass
+        else:
+            return await run_page(args, session)
     required = (BINDING.name,) if args.operation == "discover" else tuple(ENDPOINT_REGISTRY)
     await session.client.require_sources("zzz", required)
     collector = EndpointClient(ClientTransport(session))
