@@ -36,6 +36,7 @@ def verified_repository(candidate: Path) -> Path | None:
         result = subprocess.run(
             repository_git(candidate, "-C", str(candidate), "rev-parse", "--show-toplevel"),
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             check=False,
             timeout=5,
         )

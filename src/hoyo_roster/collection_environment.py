@@ -13,7 +13,14 @@ from .paths import repository_git
 
 def command(args, *, cwd=None, timeout=120):
     try:
-        result = subprocess.run(args, cwd=cwd, capture_output=True, timeout=timeout, check=False)
+        result = subprocess.run(
+            args,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
         if result.returncode:
             raise WorkspaceError("WORKFLOW_PREPARATION_FAILED")
         return result.stdout.decode("utf-8")

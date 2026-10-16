@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 
-from hoyo_roster import cli
+from hoyo_roster import cli, platform_io as io
 from hoyo_roster.errors import SourceDataInvalid
 from hoyo_roster.games.genshin.page import normalize as normalize_genshin, PAGE as GENSHIN_PAGE
 from hoyo_roster.games.zzz.page import normalize as normalize_zzz, PAGE as ZZZ_PAGE
@@ -135,7 +135,7 @@ def arguments(tmp_path, *extra):
 
 
 def snapshots(tmp_path):
-    return sorted((tmp_path / "results").rglob("snapshot.json"))
+    return sorted(io.filesystem_path(tmp_path / "results").rglob("snapshot.json"))
 
 
 def test_page_default_shares_session_login_and_saves_two_partial_snapshots(tmp_path, capsys):

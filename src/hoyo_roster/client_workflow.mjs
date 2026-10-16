@@ -47,9 +47,10 @@ async function ensureDependencies(python, options) {
 }
 
 export function createWorkflowDriver({ directory, control, startSession, initial }) {
-  let data = initial, session = null, browser = null, inFlight = null, cancelling = false;
+  let data = initial, session = null, browser = null, inFlight = null, cancelling = false, progress = [];
   const view = () => ({ ...data.status,
     nextAction: data.status.state === "WAITING_BROWSER" && browser ? "CONTINUE" : data.status.nextAction,
+    progress,
     ...(data.status.state === "SUCCEEDED" ? { report: { json: join(directory, "report/summary.json"), markdown: join(directory, "report/summary.md") } } : {}) });
   const call = async (action, extra = {}) => { data = await control(action, extra); return data; };
   async function advance(attachedBrowser, { launchMs = 180000 } = {}) {
@@ -74,6 +75,7 @@ export function createWorkflowDriver({ directory, control, startSession, initial
         if (["COLLECTING", "WAITING_LOGIN"].includes(data.status.state)) {
           if (!session) throw failure("WORKFLOW_RECONNECT_REQUIRED");
           const state = await session.advance({ launchMs });
+          progress = state.progress ?? [];
           if (cancelling) { await call("cancel"); return view(); }
           if (state.done) await call("finish");
           else await call("observe", { attempt: state.question?.attempt ?? null });
