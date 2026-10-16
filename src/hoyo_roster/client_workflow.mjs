@@ -7,7 +7,8 @@ import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const execute = promisify(execFile);
+const executeFile = promisify(execFile);
+const execute = (file, args, options = {}) => executeFile(file, args, { ...options, windowsHide: true });
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const live = globalThis[Symbol.for("hoyo-roster.workflows")] ??= new Map();
 const failure = code => Object.assign(new Error(code), { code });
@@ -41,7 +42,7 @@ async function ensureDependencies(python, options) {
     if (stdout.trim()) throw failure("WORKFLOW_SOURCE_DIRTY");
   }
   try {
-    await execute(python, ["-m", "pip", "install", target], { timeout: 180000, maxBuffer: 65536 });
+    await execute(python, ["-m", "pip", "install", "--no-cache-dir", target], { timeout: 180000, maxBuffer: 65536 });
   } catch { throw failure("WORKFLOW_ENVIRONMENT_INSTALL_FAILED"); }
 }
 
@@ -139,6 +140,16 @@ export function createWorkflowControl(python, directory, owner) {
   };
 }
 
+export async function resolveWorkflowOwner(python) {
+  // No process global is required in the client sandbox. The platform layer
+  // recognizes the one verified Windows venv redirector on both launch paths.
+  const probe = "import sys; sys.path.insert(0,sys.argv[1]); from hoyo_roster.platform_io import launch_parent_pid; print(launch_parent_pid())";
+  const { stdout } = await execute(python, ["-I", "-c", probe, dirname(moduleDirectory)], { timeout: 10000 });
+  const owner = { pid: Number(stdout.trim()), token: randomUUID() };
+  if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) throw failure("WORKFLOW_OWNER_UNAVAILABLE");
+  return owner;
+}
+
 export async function openCollectionWorkflow({ directory, python: selectedPython, ...options }) {
   const started = performance.now(), start_at = new Date().toISOString();
   if (typeof directory !== "string" || !directory || directory.includes("\0")) throw failure("WORKFLOW_OPTIONS_INVALID");
@@ -157,11 +168,7 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
   if (exists && Object.keys(options).length) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
   const python = await selectPython(selectedPython);
   await ensureDependencies(python, options);
-  // The client sandbox need not expose Node's process global. The same
-  // child-process boundary used by the worker supplies its real parent PID.
-  const { stdout: parentPid } = await execute(python, ["-I", "-c", "import os; print(os.getppid())"], { timeout: 10000 });
-  const owner = { pid: Number(parentPid.trim()), token: randomUUID() };
-  if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) throw failure("WORKFLOW_OWNER_UNAVAILABLE");
+  const owner = await resolveWorkflowOwner(python);
   const control = createWorkflowControl(python, directory, owner);
   const initial = await control(exists ? "claim" : "create", exists ? { owner } : { owner, options,
     bootstrap: { start_at, end_at: new Date().toISOString(), duration_ms: performance.now() - started } });

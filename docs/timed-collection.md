@@ -74,6 +74,16 @@ console.log(await workflow.advance(browser));
 
 ## 验证边界
 
+### Windows
+
+Windows 使用同一入口和 `parallelGames:true`，Python 由所选虚拟环境的 `Scripts/python.exe` 提供。`platform_io.launch_parent_pid()` 在 Windows 只跳过与 `sys.executable` 精确匹配的一个 venv redirector，使用进程句柄核对存活、映像和创建时间；控制器与 worker 都走此函数，仍拒绝不同控制器。无法核验时停止，不枚举任意祖先进程来放行。Node 启动辅助进程使用 `windowsHide:true`，不弹出额外终端。
+
+客户端沙箱 SID 可能与显式选择的源码仓库所有者不同。Git 命令只在本次调用信任模块所锚定的确切 checkout，不写全局 `safe.directory`；来源无法核验或要求更新却没有源码时明确失败。普通安装通过 PEP 610 核验本地源码后同样记录 SHA，并逐文件比较安装内容。
+
+工作流安装与修复不复用 pip 缓存，避免前一次由另一 Windows 身份生成的缓存阻断重装。快照检查点与最终验证在平台层统一内部路径前缀，支持普通入口路径与 NTFS 长路径表示之间的比较，不改变相对检查点格式或放宽目录边界。
+
+Windows 回归须包含真实 venv 的 Node→控制进程→worker→双轮→保存→验证→报告，测试不同游戏实际交叠、同游戏串行和共享两秒节流；恢复测试另验证已提交快照不重抓。合成来源通过后，再通过当前客户端内置浏览器进行本人官网采集，并在验收记录中分别标注。其他 OS 的实机验证不能由 Windows 结果替代。
+
 `tests/test_collection_workflow.py` 运行实际身份、双轮、规范化与保存，覆盖恢复、账号/快照变化、状态机和收尾门槛。`tests/test_client_workflow_driver.mjs` 检查单入口、人工等待、取消及离线报告衔接。`tests/test_client_workflow_integration.mjs` 使用真实控制进程、worker、管道和保存，在第一个游戏提交后退出控制进程，再由另一个进程恢复；只替换官方来源为合成数据。
 
 真实官网验收应单独记录源码版本、平台、阶段计时、角色数量和结果范围。合成进程恢复测试不等于真实桌面客户端重启验收。所有个人产物仅存本机；不因工作流完成而自动创建 PR、推送、发布或合并。

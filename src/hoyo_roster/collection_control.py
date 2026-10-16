@@ -10,7 +10,7 @@ import sys
 from .collection_environment import prepare, inventory
 from .collection_state import RunStore, TERMINAL, utc
 from .errors import WorkspaceError
-from .paths import default_private_root, verified_repository
+from .paths import default_private_root, verified_repository, project_repository
 from .storage.common import load_metadata
 from .user_workspace import private_directory
 
@@ -55,7 +55,14 @@ def config_options(options):
         if key in options and type(options[key]) is not bool:
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
     package = Path(__file__).resolve().parent
-    repository = verified_repository(package.parents[1]) if package.parent.name == "src" else None
+    source = package.parent.name == "src"
+    repository = verified_repository(package.parents[1]) if source else project_repository()
+    if source and repository is None:
+        raise WorkspaceError("WORKFLOW_SOURCE_UNVERIFIED")
+    if options.get("update") and repository is None:
+        raise WorkspaceError("WORKFLOW_UPDATE_SOURCE_REQUIRED")
+    if repository is not None:
+        package = repository / "src/hoyo_roster"
     absolute = (
         lambda key: str(Path(options[key]).expanduser().absolute()) if options.get(key) else None
     )

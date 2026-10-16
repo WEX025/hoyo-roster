@@ -186,7 +186,7 @@ class CollectionCheckpoint:
             if (
                 value["state"] != "COLLECTING"
                 or not value["attempts"]
-                or value["owner"]["pid"] != os.getppid()
+                or value["owner"]["pid"] != io.launch_parent_pid()
             ):
                 raise WorkspaceError("WORKFLOW_OWNER_MISMATCH")
             from .collection_environment import inventory
@@ -221,7 +221,9 @@ class CollectionCheckpoint:
         entry = value["completed"].get(game)
         if entry is None:
             return False
-        relative = path.relative_to(self.store.root).as_posix()
+        relative = (
+            io.filesystem_path(path).relative_to(io.filesystem_path(self.store.root)).as_posix()
+        )
         if (
             relative != entry["snapshot"]
             or sha256(io.read_regular(path, require_private=True)).hexdigest() != entry["sha256"]
@@ -239,7 +241,9 @@ class CollectionCheckpoint:
 
     def commit(self, game, path):
         # run_page_game invokes this only after both passes, validation and store.save.
-        relative = path.relative_to(self.store.root).as_posix()
+        relative = (
+            io.filesystem_path(path).relative_to(io.filesystem_path(self.store.root)).as_posix()
+        )
         if not relative.startswith("results/page-observations-v1/"):
             raise WorkspaceError("WORKFLOW_CHECKPOINT_CHANGED")
         digest = sha256(io.read_regular(path, require_private=True)).hexdigest()

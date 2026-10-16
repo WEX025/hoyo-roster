@@ -8,6 +8,7 @@ import sys
 
 from .errors import WorkspaceError
 from .user_workspace import private_directory
+from .paths import repository_git
 
 
 def command(args, *, cwd=None, timeout=120):
@@ -35,17 +36,17 @@ def prepare(store):
     repository = Path(config["repository"]) if config["repository"] else None
     source_sha = None
     if repository:
-        if command(["git", "status", "--porcelain"], cwd=repository, timeout=5).strip():
+
+        def git(*args, timeout=5):
+            return command(repository_git(repository, *args), cwd=repository, timeout=timeout)
+
+        if git("status", "--porcelain").strip():
             raise WorkspaceError("WORKFLOW_SOURCE_DIRTY")
         if config["update"] and value["version"] is None:
-            upstream = command(
-                ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-                cwd=repository,
-                timeout=5,
-            ).strip()
-            command(["git", "fetch", "origin"], cwd=repository, timeout=30)
-            command(["git", "merge", "--ff-only", upstream], cwd=repository, timeout=15)
-        source_sha = command(["git", "rev-parse", "HEAD"], cwd=repository, timeout=5).strip()
+            upstream = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").strip()
+            git("fetch", "origin", timeout=30)
+            git("merge", "--ff-only", upstream, timeout=15)
+        source_sha = git("rev-parse", "HEAD").strip()
     expected = inventory(package)
     if not expected:
         raise WorkspaceError("WORKFLOW_PACKAGE_MISSING")
@@ -75,6 +76,7 @@ print(json.dumps({f.relative_to(p).as_posix(): hashlib.sha256(f.read_bytes()).he
                 "-m",
                 "pip",
                 "install",
+                "--no-cache-dir",
                 "--no-deps",
                 "--no-build-isolation",
                 "--force-reinstall",

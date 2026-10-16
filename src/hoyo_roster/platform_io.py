@@ -22,6 +22,11 @@ class UnsafePath(ValueError):
     """A fixed, privacy-safe filesystem rejection."""
 
 
+def launch_parent_pid() -> int:
+    """The process that launched Python, accounting for a Windows venv redirector."""
+    return backend.launch_parent_pid() if WINDOWS else os.getppid()
+
+
 def process_alive(pid: int) -> bool:
     if type(pid) is not int or pid <= 0:
         return False

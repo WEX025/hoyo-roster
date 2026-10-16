@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 import msvcrt
@@ -17,6 +18,88 @@ import win32con
 import win32file
 import win32process
 import win32security
+
+
+def _process_parent(handle) -> int:
+    # The documented ProcessBasicInformation layout is pointer-sized on both
+    # Windows architectures. Query this exact open handle, not a guessed PID.
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicInformation(ctypes.Structure):
+        _fields_ = [
+            ("reserved1", ctypes.c_void_p),
+            ("peb", ctypes.c_void_p),
+            ("reserved2", ctypes.c_void_p * 2),
+            ("pid", ctypes.c_size_t),
+            ("parent", ctypes.c_size_t),
+        ]
+
+    query = ctypes.WinDLL("ntdll").NtQueryInformationProcess
+    query.argtypes = [
+        wintypes.HANDLE,
+        wintypes.ULONG,
+        ctypes.c_void_p,
+        wintypes.ULONG,
+        ctypes.POINTER(wintypes.ULONG),
+    ]
+    query.restype = wintypes.LONG
+    info, length = BasicInformation(), wintypes.ULONG()
+    if query(int(handle), 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(length)) < 0:
+        raise OSError("PROCESS_PARENT_UNAVAILABLE")
+    if length.value != ctypes.sizeof(info) or info.parent <= 0:
+        raise OSError("PROCESS_PARENT_UNAVAILABLE")
+    return info.parent
+
+
+def _process_image(handle) -> Path:
+    import ctypes
+    from ctypes import wintypes
+
+    query = ctypes.WinDLL("kernel32", use_last_error=True).QueryFullProcessImageNameW
+    query.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    query.restype = wintypes.BOOL
+    buffer, length = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+    if not query(int(handle), 0, buffer, ctypes.byref(length)):
+        raise OSError("PROCESS_PARENT_UNAVAILABLE")
+    return Path(buffer.value).resolve()
+
+
+def launch_parent_pid() -> int:
+    """Skip exactly one verified CPython venv launcher; never search ancestors."""
+    parent = os.getppid()
+    if sys.prefix == sys.base_prefix:
+        return parent
+    try:
+        handle = win32api.OpenProcess(0x1000, False, parent)
+        try:
+            if _process_image(handle) != Path(sys.executable).resolve():
+                return parent  # A direct interpreter launch has no redirector.
+            if win32process.GetExitCodeProcess(handle) != 259:
+                raise OSError("PROCESS_PARENT_UNAVAILABLE")
+            created = win32process.GetProcessTimes(handle)["CreationTime"]
+            if created > win32process.GetProcessTimes(win32api.GetCurrentProcess())["CreationTime"]:
+                raise OSError("PROCESS_PARENT_UNAVAILABLE")
+            controller = _process_parent(handle)
+            owner = win32api.OpenProcess(0x1000, False, controller)
+            try:
+                if (
+                    win32process.GetExitCodeProcess(owner) != 259
+                    or win32process.GetProcessTimes(owner)["CreationTime"] > created
+                ):
+                    raise OSError("PROCESS_PARENT_UNAVAILABLE")
+            finally:
+                owner.Close()
+            return controller
+        finally:
+            handle.Close()
+    except pywintypes.error:
+        raise OSError("PROCESS_PARENT_UNAVAILABLE") from None
 
 
 def process_alive(pid: int) -> bool:

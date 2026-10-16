@@ -311,7 +311,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       if (BROWSER_TASKS.has(browser)) throw failure("USER_WORKSPACE_BUSY");
       BROWSER_TASKS.add(browser);
       let child;
-      try { child = spawn(python, args, { cwd, stdio: ["pipe", "pipe", "pipe"] }); }
+      try { child = spawn(python, args, { cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }); }
       catch {
         BROWSER_TASKS.delete(browser);
         throw failure("CLIENT_REQUEST_FAILED");

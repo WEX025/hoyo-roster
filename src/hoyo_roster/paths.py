@@ -16,6 +16,13 @@ def default_private_root() -> Path:
     return user_data_path("hoyo-roster", appauthor=False, roaming=False)
 
 
+def repository_git(candidate: Path, *args: str) -> list[str]:
+    # The caller has explicitly selected this local source checkout. Client tools
+    # may use a sandbox SID different from its owner. Trust only this invocation
+    # and exact anchored checkout; never change global safe.directory settings.
+    return ["git", "-c", f"safe.directory={candidate.resolve().as_posix()}", *args]
+
+
 def verified_repository(candidate: Path) -> Path | None:
     candidate = candidate.resolve()
     try:
@@ -27,7 +34,7 @@ def verified_repository(candidate: Path) -> Path | None:
         if not (candidate / ".git").exists():
             return None
         result = subprocess.run(
-            ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
+            repository_git(candidate, "-C", str(candidate), "rev-parse", "--show-toplevel"),
             capture_output=True,
             check=False,
             timeout=5,
