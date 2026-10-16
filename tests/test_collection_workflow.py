@@ -161,6 +161,10 @@ def test_terminal_cancel_and_retry_rules(prepared):
 
 
 def test_prepare_rejects_dirty_source_before_install_or_browser(prepared, monkeypatch):
+    # Exercise a source checkout even when the suite imports the installed wheel.
+    # Git is mocked below, so this synthetic repository need not exist on disk.
+    with prepared.edit() as value:
+        value["config"]["repository"] = str(prepared.root.parent / "repository")
     calls = []
 
     def command(args, **kwargs):
