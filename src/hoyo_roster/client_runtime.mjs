@@ -6,11 +6,13 @@ import { createZzzSource, sourceNames as zzzNames } from "./games/zzz/client_sou
 import { createPageBrowser, pageSourceNames } from "./client_page.mjs";
 import { createGenshinPageSource } from "./games/genshin/page_source.mjs";
 import { createZzzPageSource } from "./games/zzz/page_source.mjs";
+import { createMetrics } from "./client_metrics.mjs";
 
 export function createRosterHost(browser) {
+  const metrics = createMetrics();
   const network = createClientNetwork(browser);
   const sources = { genshin: createGenshinSource(network), zzz: createZzzSource(network) };
-  const ui = createPageBrowser(browser);
+  const ui = createPageBrowser(browser, metrics);
   const pages = { genshin: createGenshinPageSource(ui), zzz: createZzzPageSource(ui) };
   const host = createClientHost(browser, {
     pageReader: true,
@@ -18,12 +20,14 @@ export function createRosterHost(browser) {
     serviceSources: { zzz: { cultivate: "cultivate:badge-login" } },
     checkSources: query => sourceStep(query, active =>
       active.sources.every(name => name.startsWith("page:")) ? pages[active.game].available(active) : sources[active.game].available(active)),
-    readSource: query => sourceStep(query, active =>
+    readSource: query => metrics.measure("source.read", () => sourceStep(query, active =>
       (active.source.startsWith("page:") ? pages : sources)[active.game].read(active)),
+      { game: query.game, source: query.source }),
     prepareService: query => sourceStep(query, active => sources[active.game].prepare(active)),
   });
   const startTask = host.startTask.bind(host);
   host.releasePageSettings = ui.release;
+  host.drainMetrics = metrics.drain;
   host.startTask = options => {
     const task = startTask(options);
     const pump = task.pump.bind(task);

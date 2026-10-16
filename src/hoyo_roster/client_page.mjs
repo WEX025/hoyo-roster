@@ -1,9 +1,10 @@
 // Public UI operations only; this layer has no game imports or authentication storage.
 import { checkSignal, sourceFailure } from "./client_network.mjs";
+import { createMetrics } from "./client_metrics.mjs";
 
 export const pageSourceNames = Object.freeze(["page:identity", "page:roster", "page:detail"]);
 
-export function createPageBrowser(browser) {
+export function createPageBrowser(browser, metrics = createMetrics()) {
   const retained = new Map();
   let viewportLease = false;
   async function call(signal, action) {
@@ -15,14 +16,15 @@ export function createPageBrowser(browser) {
   async function page(url, signal) {
     const tabs = await call(signal, () => browser.tabs.list());
     const expected = new URL(url);
-    let found = tabs.find(t => t.id === retained.get(url));
+    const prior = retained.get(url);
+    let found = tabs.find(t => t.id === prior?.id);
     const matches = value => {
       try { const u = new URL(value); return u.origin === expected.origin && u.pathname === expected.pathname; }
       catch { return false; }
     };
     if (found && !matches(found.url)) throw sourceFailure("SOURCE_DATA_INVALID");
     found ??= tabs.filter(t => matches(t.url)).at(-1);
-    let tab = await call(signal, () => found ? browser.tabs.get(found.id) : browser.tabs.new());
+    let tab = await call(signal, () => found ? (found.id === prior?.id ? prior : browser.tabs.get(found.id)) : browser.tabs.new());
     if (![tab.playwright?.evaluate, tab.playwright?.domSnapshot, tab.playwright?.locator,
       tab.playwright?.getByText].every(f => typeof f === "function")) {
       if (!found) await call(signal, () => tab.close());
@@ -56,8 +58,8 @@ export function createPageBrowser(browser) {
       if (!repaired.width || !repaired.height) throw sourceFailure("CLIENT_PAGE_UNAVAILABLE");
     }
     if (!matches(await call(signal, () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
-    await call(signal, () => tab.markHandoff());
-    retained.set(url, tab.id);
+    if (tab !== prior) await call(signal, () => tab.markHandoff());
+    retained.set(url, tab);
     return tab;
   }
   async function available(url, signal) {
@@ -78,9 +80,9 @@ export function createPageBrowser(browser) {
     }
     throw sourceFailure("SOURCE_REQUEST_NOT_OBSERVED");
   }
-  async function click(tab, locator, signal) {
+  async function click(tab, locator, signal, { snapshot = true } = {}) {
     await call(signal, () => locator.click({ timeoutMs: 2500 }));
-    return call(signal, () => tab.playwright.domSnapshot());
+    if (snapshot) return call(signal, () => tab.playwright.domSnapshot());
   }
   async function authentication(tab, signal) {
     // Only read rendered text and field presence, never any login input value.
@@ -105,7 +107,17 @@ export function createPageBrowser(browser) {
         nickname: e.querySelector(".role-name")?.textContent?.trim(),
         region: e.querySelector(".role-region")?.textContent?.trim(),
       }))), rows => rows.length > 0);
-    await click(tab, tab.playwright.locator(".mhy-game-role-message-box-header-close-icon"), signal);
+    await click(tab, tab.playwright.locator(".mhy-game-role-message-box-header-close-icon"), signal, { snapshot: false });
+    const panelVisible = () => tab.playwright.locator(".game-role-list").isVisible();
+    try { await wait(signal, panelVisible, visible => !visible, { timeoutMs: 750 }); }
+    catch (error) {
+      if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
+      if (await call(signal, panelVisible)) {
+        await metrics.measure("page.identity-close-repair", () =>
+          click(tab, tab.playwright.locator(".mhy-game-role-message-box-header-close-icon"), signal, { snapshot: false }));
+      }
+      await wait(signal, panelVisible, visible => !visible, { timeoutMs: 3000 });
+    }
     if (roles.length !== 1 || roles.some(r => !/^[1-9][0-9]{0,31}$/.test(r.uid ?? "") ||
       !r.nickname || !r.region)) throw sourceFailure("WRONG_ACCOUNT");
     return roles[0];
@@ -123,5 +135,6 @@ export function createPageBrowser(browser) {
       viewportLease = false;
     }
   }
-  return Object.freeze({ page, available, call, wait, click, authentication, identity, assertIdentity, record, release });
+  const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
+  return Object.freeze({ page, available, call, wait, click, authentication, identity, assertIdentity, record, release, measure });
 }

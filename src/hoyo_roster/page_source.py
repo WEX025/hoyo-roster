@@ -1,6 +1,8 @@
 """Honest rendered-page observations; these are never API response envelopes."""
 
 from urllib.parse import urlsplit
+import json
+import time
 
 from .errors import ClientProtocolError, SourceDataInvalid
 from .jsonio import loads_json
@@ -17,19 +19,51 @@ class PageSource:
             "detail": detail_surface,
         }
         self.fragments = tuple(fragments) if fragments is not None else (urlsplit(url).fragment,)
+        self.sequence = 0
 
     async def read(self, operation, params=None):
+        self.sequence += 1
+        sequence = self.sequence
         await self.session.gate.reserve(requested_min_interval=2.0)
-        print(f"PAGE_SOURCE={self.game}:{operation}", flush=True)
-        result = await self.session.client.call(
-            "source.read",
-            {
-                "game": self.game,
-                "source": "page:" + operation,
-                "params": params or {},
-                "body": None,
-            },
+        print(
+            "PAGE_TIMING="
+            + json.dumps(
+                {
+                    "game": self.game,
+                    "request": sequence,
+                    "operation": operation,
+                    "phase": "gate",
+                    **getattr(self.session.gate, "last_reservation", {}),
+                }
+            ),
+            flush=True,
         )
+        print(f"PAGE_SOURCE={self.game}:{operation}", flush=True)
+        started = time.monotonic()
+        try:
+            result = await self.session.client.call(
+                "source.read",
+                {
+                    "game": self.game,
+                    "source": "page:" + operation,
+                    "params": params or {},
+                    "body": None,
+                },
+            )
+        finally:
+            print(
+                "PAGE_TIMING="
+                + json.dumps(
+                    {
+                        "game": self.game,
+                        "request": sequence,
+                        "operation": operation,
+                        "phase": "source_roundtrip",
+                        "duration_ms": (time.monotonic() - started) * 1000,
+                    }
+                ),
+                flush=True,
+            )
         if not isinstance(result, dict) or set(result) != {"json", "origin", "evidence"}:
             raise ClientProtocolError()
         origin, evidence = result["origin"], result["evidence"]
