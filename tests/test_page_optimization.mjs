@@ -7,7 +7,7 @@ import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 function fixture() {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
   const counts = { reload: 0, back: 0 };
-  let edit = false, nickname = "Synthetic", current;
+  let edit = false, nickname = "Synthetic", current, blocker = "none";
   const role = { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };
   const inputs = value => [{ value: String(value) }, { value: "90" }];
   const cards = names.map(name => ({
@@ -26,9 +26,9 @@ function fixture() {
     })),
   }));
   const document = { querySelector: () => ({}), querySelectorAll: selector => selector === ".character-item" ? cards : containers() };
-  const target = name => ({ text: name, isVisible: async () => !edit,
+  const target = name => ({ text: name, evaluate: async () => ({hover:blocker === "hover",blocked:blocker !== "none"}), isVisible: async () => !edit,
     evaluate: async () => true,
-    click: async () => { if (selected.has(name)) selected.delete(name); else selected.add(name); } });
+    click: async () => { if (name === "选择角色") { blocker = "none"; return; } if (selected.has(name)) selected.delete(name); else selected.add(name); } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; },
     url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit ? "/edit" : ""),
@@ -54,7 +54,7 @@ function fixture() {
   };
   const reader = createGenshinPageSource(ui);
   const query = (source, extra = {}, generation = 0) => ({ source, params: { uid: role.uid, region: role.region, ...extra }, body: null, generation, signal: new AbortController().signal });
-  return { counts, reader, query, selected, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
+  return { counts, reader, query, selected, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
 }
 
 test("Genshin reuses only the current round, reconciles selected cards and returns the requested details", async () => {
@@ -164,4 +164,16 @@ test("ZZZ reuses a round roster but reads fresh details for each selected owned 
   assert.equal(second.details[0].name, "Beta"); assert.equal(second.details[0].display_name, "Beta");
   assert.ok(second.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
+});
+
+
+test("Genshin dismisses an observed character hover but refuses an unknown overlay", async () => {
+  for (const kind of ["hover", "unknown"]) {
+    const f = fixture();
+    await f.reader.read(f.query("page:roster"));
+    f.setBlocker(kind);
+    const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+    if (kind === "hover") assert.equal((await read).details[0].name, "Alpha");
+    else { await assert.rejects(read, { code: "SOURCE_DATA_INVALID" }); assert.equal(f.selected.size, 0); }
+  }
 });

@@ -75,10 +75,29 @@ export function createGenshinPageSource(ui) {
       Array.from(document.querySelectorAll(".character-item")).filter(e => e.querySelector(".gt-avatar-selected"))
         .map(e => e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim())));
     let selected = await selectedNames();
-    async function selectLabel(name, operation) {
-      const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
+    async function visibleLabel(card, name) {
       const label = card.getByText(name, { exact: true });
       if (!(await ui.call(signal, () => label.isVisible()))) throw sourceFailure("SOURCE_DATA_INVALID");
+      const covered = () => label.evaluate(e => {
+        const r = e.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return { hover: Boolean(hit?.closest(".character-popper")),
+          blocked: Boolean(hit && !e.closest(".character-item").contains(hit)) };
+      });
+      let state = await ui.call(signal, covered);
+      if (state.hover) {
+        // Only the observed official character hover is dismissed. No generic
+        // dialog handling or forced clicks through unknown overlays.
+        await measure("genshin.dismiss-hover", signal, () =>
+          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 400 }));
+        state = await ui.wait(signal, covered, value => !value.hover, { timeoutMs: 1500 });
+      }
+      if (state.blocked) throw sourceFailure("SOURCE_DATA_INVALID");
+      return label;
+    }
+    async function selectLabel(name, operation) {
+      const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
+      const label = await visibleLabel(card, name);
       // Selection reorders the cards. Keep ordinary actionability checks, but
       // bound each label action instead of waiting 2.5s for card movement.
       // A timeout is accepted only when the requested state was actually observed.
@@ -96,7 +115,7 @@ export function createGenshinPageSource(ui) {
     for (const name of params.names.filter(n => !selected.includes(n))) {
       const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
       if (name.includes("奇偶")) {
-        const state = await ui.click(tab, card.getByText(name, { exact: true }), signal);
+        const state = await ui.click(tab, await visibleLabel(card, name), signal);
         if (state.includes(UNSUPPORTED)) unavailable.push({ name, status: "unsupported", reason: UNSUPPORTED });
       } else await selectLabel(name, "genshin.select");
     }
@@ -107,7 +126,8 @@ export function createGenshinPageSource(ui) {
     for (const name of new Set([...selected, ...params.names])) {
       if (!unavailable.some(u => u.name === name) && selected.includes(name) !== params.names.includes(name)) {
         const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
-        const state = await ui.click(tab, card.getByText(name, { exact: true }), signal);
+        const state = name.includes("奇偶") ? await ui.click(tab, await visibleLabel(card, name), signal) :
+          (await selectLabel(name, params.names.includes(name) ? "genshin.select" : "genshin.deselect"), "");
         if (params.names.includes(name) && name.includes("奇偶") && state.includes(UNSUPPORTED)) {
           unavailable.push({ name, status: "unsupported", reason: UNSUPPORTED });
         }
