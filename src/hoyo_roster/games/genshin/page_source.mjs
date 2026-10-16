@@ -82,7 +82,8 @@ export function createGenshinPageSource(ui) {
         const r = e.getBoundingClientRect();
         const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
         return { hover: Boolean(hit?.closest(".character-popper")),
-          blocked: Boolean(hit && !e.closest(".character-item").contains(hit)) };
+          blocked: Boolean(hit?.closest('[role="dialog"],[aria-modal="true"],.gt-dialog,.gt-modal') &&
+            !e.closest(".character-item").contains(hit)) };
       });
       let state = await ui.call(signal, covered);
       if (state.hover) {
@@ -105,7 +106,9 @@ export function createGenshinPageSource(ui) {
       catch (error) {
         if (error.name !== "TimeoutError") throw error;
         const observed = await selectedNames();
-        if (observed.includes(name) !== (operation === "genshin.select")) throw error;
+        // The batch's observed-set reconciliation below gives a missed action
+        // one repair; a missing target can never pass the final set check.
+        if (observed.includes(name) !== (operation === "genshin.select")) return;
       }
     }
     for (const name of selected.filter(n => !params.names.includes(n))) {
