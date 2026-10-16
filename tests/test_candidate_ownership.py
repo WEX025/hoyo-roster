@@ -60,9 +60,9 @@ def protocol(tmp_path):
 @pytest.mark.parametrize("shape", ("empty", "temporary", "unrelated", "legacy-v2"))
 def test_uuid_or_temporary_shape_never_proves_ownership(protocol, shape):
     policy, _ = protocol
-    policy.candidate_base.mkdir(mode=0o700)
+    io.mkdir_private(policy.candidate_base)
     root = policy.candidate_base / str(uuid.uuid4())
-    root.mkdir(mode=0o700)
+    io.mkdir_private(root)
     if shape == "temporary":
         path = root / f".candidate-state.json.{uuid.uuid4()}.tmp"
         path.write_text("unrelated synthetic evidence")
@@ -267,7 +267,7 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     )
     with foreign_store.locked():
         foreign_current = foreign_store.prepare()
-    foreign_store.candidate_base.mkdir(mode=0o700)
+    io.mkdir_private(foreign_store.candidate_base)
     foreign = foreign_store.candidate_base / item.run_id
     shutil.copytree(candidate, foreign)
     before = tree_digest(foreign)

@@ -105,7 +105,18 @@ export function createGenshinPageSource(ui) {
           tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 400 }));
         state = await ui.wait(signal, covered, value => !value.hover, { timeoutMs: 1500 });
       }
-      if (state.blocked) throw sourceFailure("SOURCE_DATA_INVALID");
+      if (state.blocked) {
+        // A returned selector may already be visible while its old modal is
+        // finishing a closing transition. Wait for real hit-test readiness;
+        // never dismiss an unknown dialog or click through an overlay.
+        try {
+          state = await measure("genshin.wait-overlay", signal, () =>
+            ui.wait(signal, covered, value => !value.blocked && !value.hover, { timeoutMs: 1500 }));
+        } catch (error) {
+          if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
+          throw sourceFailure("SOURCE_DATA_INVALID");
+        }
+      }
       return label;
     }
     async function selectLabel(name, operation) {

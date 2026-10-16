@@ -26,7 +26,12 @@ function fixture() {
     })),
   }));
   const document = { querySelector: () => ({}), querySelectorAll: selector => selector === ".character-item" ? cards : containers() };
-  const target = name => ({ text: name, evaluate: async () => name === "已拥有" ? true : ({hover:blocker === "hover",blocked:blocker !== "none"}), isVisible: async () => !edit,
+  const target = name => ({ text: name, evaluate: async () => {
+    if(name === "已拥有")return true;
+    const state={hover:blocker === "hover",blocked:blocker !== "none"};
+    if(blocker === "closing")blocker="none";
+    return state;
+  }, isVisible: async () => !edit,
     click: async () => { if (name === "选择角色") { blocker = "none"; return; } if (selected.has(name)) selected.delete(name); else selected.add(name); } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; },
@@ -47,7 +52,7 @@ function fixture() {
     assertIdentity: (a, b) => { if (a.uid !== b.uid || a.region !== b.region) throw Object.assign(new Error(), { code: "WRONG_ACCOUNT" }); },
     call: async (signal, action) => { signal.throwIfAborted(); const result = await action(); signal.throwIfAborted(); return result; },
     measure: async (_name, signal, action) => ui.call(signal, action),
-    wait: async (signal, read, accept) => { const value = await ui.call(signal, read); assert.ok(accept(value)); return value; },
+    wait: async (signal, read, accept) => { const value = await ui.call(signal, read); if(!accept(value))throw Object.assign(new Error("synthetic wait"),{code:"SOURCE_REQUEST_NOT_OBSERVED"}); return value; },
     click: async (_tab, locator, signal) => { await ui.call(signal, locator.click); return "Synthetic state"; },
     record: (_game, _url, _surface, data) => data,
   };
@@ -89,6 +94,14 @@ test("Genshin refreshes the official identity page after shared login instead of
   assert.equal(role.uid,"123456789");
   assert.equal(f.counts.reload,1);
   await assert.rejects(f.reader.read(f.query("page:detail",{names:["Alpha"]},1)),{code:"SOURCE_DATA_INVALID"});
+});
+
+test("Genshin waits for a closing overlay without dismissing it or accepting a persistent blocker", async () => {
+  const f=fixture();
+  await f.reader.read(f.query("page:roster"));
+  f.setBlocker("closing");
+  const result=await f.reader.read(f.query("page:detail",{names:["Alpha"]}));
+  assert.equal(result.details.length,1);
 });
 
 test("cancelling a cached round prevents any later navigation or returned details", async () => {

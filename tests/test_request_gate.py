@@ -5,11 +5,12 @@ import time
 
 from hoyo_roster.config import Settings
 from hoyo_roster.request_gate import RequestGate
+from hoyo_roster import platform_io as io
 
 
 def test_concurrent_reservations_keep_two_second_spacing_and_queue_metrics(tmp_path):
     root = tmp_path / "runtime"
-    root.mkdir(mode=0o700)
+    io.mkdir_private(root)
 
     async def run():
         gate = RequestGate(Settings(external_root=root))

@@ -152,7 +152,7 @@ def test_invalid_pointer_inspect_and_verified_explicit_recovery(store):
 def test_uuid_is_not_cleanup_or_recovery_authority(store):
     current = store._install(None)
     unowned = store.root / str(uuid.uuid4())
-    unowned.mkdir(mode=0o700)
+    io.mkdir_private(unowned)
     with pytest.raises((workspace.WorkspaceError, ValueError)):
         store.recover(unowned.name)
     assert unowned.exists() and store.current() == current
@@ -244,7 +244,7 @@ def test_explicit_cleanup_never_deletes_current_or_unowned(store):
     with pytest.raises(workspace.WorkspaceError, match="CURRENT_GENERATION_PROTECTED"):
         store.cleanup_generation(current.name)
     unowned = store.root / str(uuid.uuid4())
-    unowned.mkdir(mode=0o700)
+    io.mkdir_private(unowned)
     with pytest.raises((workspace.WorkspaceError, ValueError)):
         store.cleanup_generation(unowned.name)
     assert unowned.exists() and store.current() == current
