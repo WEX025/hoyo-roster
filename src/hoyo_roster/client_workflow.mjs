@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { access } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -13,9 +14,9 @@ const failure = code => Object.assign(new Error(code), { code });
 const safeCode = error => /^[A-Z][A-Z_]{1,80}$/.test(error?.code ?? error?.message ?? "") ? (error.code ?? error.message) : "WORKFLOW_EXECUTION_FAILED";
 
 async function selectPython(selected) {
-  const venv = join(dirname(dirname(moduleDirectory)), ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const venv = join(dirname(dirname(moduleDirectory)), ".venv", platform() === "win32" ? "Scripts/python.exe" : "bin/python");
   const installedVenv = dirname(moduleDirectory).endsWith("site-packages")
-    ? join(moduleDirectory, ...(process.platform === "win32" ? ["..", "..", "..", "Scripts", "python.exe"] : ["..", "..", "..", "..", "bin", "python"])) : null;
+    ? join(moduleDirectory, ...(platform() === "win32" ? ["..", "..", "..", "Scripts", "python.exe"] : ["..", "..", "..", "..", "bin", "python"])) : null;
   const candidates = selected ? [selected] : [installedVenv, venv, "python3.12", "python"].filter(Boolean);
   for (const candidate of candidates) {
     try {
@@ -156,7 +157,11 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
   if (exists && Object.keys(options).length) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
   const python = await selectPython(selectedPython);
   await ensureDependencies(python, options);
-  const owner = { pid: process.pid, token: randomUUID() };
+  // The client sandbox need not expose Node's process global. The same
+  // child-process boundary used by the worker supplies its real parent PID.
+  const { stdout: parentPid } = await execute(python, ["-I", "-c", "import os; print(os.getppid())"], { timeout: 10000 });
+  const owner = { pid: Number(parentPid.trim()), token: randomUUID() };
+  if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) throw failure("WORKFLOW_OWNER_UNAVAILABLE");
   const control = createWorkflowControl(python, directory, owner);
   const initial = await control(exists ? "claim" : "create", exists ? { owner } : { owner, options,
     bootstrap: { start_at, end_at: new Date().toISOString(), duration_ms: performance.now() - started } });
