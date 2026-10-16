@@ -130,3 +130,18 @@ test("a replaced retained tab at an unexpected origin fails before any UI action
   await assert.rejects(f.ui.page(URL, new AbortController().signal), { code: "SOURCE_DATA_INVALID" });
   assert.deepEqual(f.calls, ["retain"]);
 });
+
+test("identity closes an observed still-open panel with one bounded repair", async () => {
+  let opened = true, clicks = 0;
+  const ui = createPageBrowser({ tabs: {} });
+  const tab = { playwright: {
+    evaluate: async fn => fn.toString().includes('const fields') ? false :
+      [{ uid: "123456789", nickname: "Synthetic", region: "Synthetic" }],
+    locator: selector => ({ isVisible: async () => opened, click: async () => {
+      assert.equal(selector, '.mhy-game-role-message-box-header-close-icon');
+      clicks++; if (clicks === 2) opened = false;
+    } }),
+  } };
+  const role = await ui.identity(tab, new AbortController().signal, async () => assert.fail('already open'));
+  assert.equal(role.uid, '123456789'); assert.equal(clicks, 2); assert.equal(opened, false);
+});

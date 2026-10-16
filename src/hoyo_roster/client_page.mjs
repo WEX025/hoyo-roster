@@ -108,7 +108,16 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
         region: e.querySelector(".role-region")?.textContent?.trim(),
       }))), rows => rows.length > 0);
     await click(tab, tab.playwright.locator(".mhy-game-role-message-box-header-close-icon"), signal, { snapshot: false });
-    await wait(signal, () => tab.playwright.locator(".game-role-list").isVisible(), visible => !visible);
+    const panelVisible = () => tab.playwright.locator(".game-role-list").isVisible();
+    try { await wait(signal, panelVisible, visible => !visible, { timeoutMs: 750 }); }
+    catch (error) {
+      if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
+      if (await call(signal, panelVisible)) {
+        await metrics.measure("page.identity-close-repair", () =>
+          click(tab, tab.playwright.locator(".mhy-game-role-message-box-header-close-icon"), signal, { snapshot: false }));
+      }
+      await wait(signal, panelVisible, visible => !visible, { timeoutMs: 3000 });
+    }
     if (roles.length !== 1 || roles.some(r => !/^[1-9][0-9]{0,31}$/.test(r.uid ?? "") ||
       !r.nickname || !r.region)) throw sourceFailure("WRONG_ACCOUNT");
     return roles[0];
