@@ -194,6 +194,9 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
         recovered = await session.recover(verify_current=check)
         role, profile = recovered
     session.pin(game, (role,), lambda: _role_tuple(pinned_check))
+    checkpoint = getattr(args, "_collection_checkpoint", None)
+    if checkpoint is not None:
+        checkpoint.pin(game, role)
     if args.uid is not None and args.uid != role.uid:
         raise WrongAccount()
     if args.operation == "discover":
@@ -240,6 +243,21 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
     except (MetadataError, io.UnsafePath, OSError):
         raise WorkspaceError("UNSAFE_STORAGE_ROOT") from None
     with store.locked():
+        if checkpoint is not None and checkpoint.completed(game, store.current_file, normalize):
+            print(f"PAGE_GAME_REUSED={game}", flush=True)
+            return GameResult(
+                game,
+                "PASS",
+                (
+                    RoleResult(
+                        role,
+                        "UNCHANGED",
+                        result_scope=store.root,
+                        current_result=store.current_file,
+                        commit_state="COMMITTED",
+                    ),
+                ),
+            )
         for attempt in range(2):
             try:
                 print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)
@@ -266,6 +284,8 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                 )
                 save_started = time.monotonic()
                 changed = store.save(second)
+                if checkpoint is not None:
+                    checkpoint.commit(game, store.current_file)
                 print(
                     "PAGE_TIMING="
                     + json.dumps(

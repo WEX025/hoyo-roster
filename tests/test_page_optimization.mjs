@@ -117,7 +117,7 @@ test("active runner pumps only single requests and hands back login questions im
   assert.equal(pumps, 1);
 });
 
-test("ZZZ reuses a round roster but reads fresh details for each selected owned card", async () => {
+test("ZZZ reuses a roster and verifies both changed and already-active owned cards", async () => {
   const { createZzzPageSource } = await import("../src/hoyo_roster/games/zzz/page_source.mjs");
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
   let opened = false, currentName = "Initial", scans = 0;
@@ -140,6 +140,7 @@ test("ZZZ reuses a round roster but reads fresh details for each selected owned 
       getByRole: () => ({ isVisible: async () => false }), getByText: target,
       locator: () => ({ click: async () => { opened = true; }, filter: ({ has }) => ({
         isVisible: async () => opened, innerText: async () => "Lv.50 " + has.text,
+        evaluate: async () => has.text === currentName,
         getByText: target,
       }) }),
     } };
@@ -162,6 +163,9 @@ test("ZZZ reuses a round roster but reads fresh details for each selected owned 
   assert.equal(first.details[0].name, "Alpha"); assert.equal(first.details[0].display_name, "Alpha");
   assert.equal(second.details[0].name, "Beta"); assert.equal(second.details[0].display_name, "Beta");
   assert.ok(second.details[0].current_skills.includes("Beta"));
+  const repeated = await source.read(query("detail", ["Beta"]));
+  assert.equal(repeated.details[0].display_name, "Beta");
+  assert.ok(repeated.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
 });
 

@@ -102,7 +102,7 @@ export function createGenshinPageSource(ui) {
       // Selection reorders the cards. Keep ordinary actionability checks, but
       // bound each label action instead of waiting 2.5s for card movement.
       // A timeout is accepted only when the requested state was actually observed.
-      try { await measure(operation, signal, () => label.click({ timeoutMs: 400 })); }
+      try { await measure(operation, signal, () => label.click({ timeoutMs: 200 })); }
       catch (error) {
         if (error.name !== "TimeoutError") throw error;
         const observed = await selectedNames();
@@ -122,12 +122,13 @@ export function createGenshinPageSource(ui) {
         if (state.includes(UNSUPPORTED)) unavailable.push({ name, status: "unsupported", reason: UNSUPPORTED });
       } else await selectLabel(name, "genshin.select");
     }
-    await ui.call(signal, () => tab.playwright.domSnapshot());
     selected = await selectedNames();
     // Reconcile an observed missed click once, using the name label as the hit
     // target. Never toggle a card again without first reading its selected state.
+    let repaired = false;
     for (const name of new Set([...selected, ...params.names])) {
       if (!unavailable.some(u => u.name === name) && selected.includes(name) !== params.names.includes(name)) {
+        repaired = true;
         const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
         const state = name.includes("奇偶") ? await ui.click(tab, await visibleLabel(card, name), signal) :
           (await selectLabel(name, params.names.includes(name) ? "genshin.select" : "genshin.deselect"), "");
@@ -136,7 +137,7 @@ export function createGenshinPageSource(ui) {
         }
       }
     }
-    selected = await selectedNames();
+    if (repaired) selected = await selectedNames();
     const expected = params.names.filter(n => !unavailable.some(u => u.name === n));
     if (selected.length !== expected.length || selected.some(n => !expected.includes(n))) throw sourceFailure("SOURCE_DATA_INVALID");
     if (!expected.length) return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: unavailable }, generation);

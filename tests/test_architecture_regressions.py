@@ -275,6 +275,10 @@ def test_distribution_archive_positive_and_empty_controls(tmp_path, optimize, em
         "AGENTS.md",
         "CLAUDE.md",
         ".agents/skills/local-roster/SKILL.md",
+        "docs/timed-collection.md",
+        "tools/timed_collection.mjs",
+        "tools/analyze_collection.py",
+        "tools/verify_installation.py",
         "data/.gitkeep",
     ]
     with tarfile.open(sdist, "w:gz") as archive:

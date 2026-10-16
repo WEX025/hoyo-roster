@@ -41,6 +41,8 @@ async def run(args, session):
         try:
             await session.client.require_sources("genshin", PAGE_SOURCES)
         except ClientSourceUnavailable:
+            if session.parallel or getattr(args, "_collection_checkpoint", None) is not None:
+                raise
             pass
         else:
             return await run_page(args, session)

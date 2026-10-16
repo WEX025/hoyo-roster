@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import threading
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -45,20 +48,81 @@ class StdioPort:
 
     def __init__(self, reader, writer):
         self.reader, self.writer = reader, writer
+        self.pending = {}
+        self.loop = None
+        self.failed = False
+
+    def _receive(self, raw):
+        try:
+            if not raw or len(raw) > MAX_FRAME_BYTES or not raw.endswith(b"\n"):
+                raise ClientProtocolError()
+            reply = loads_json(raw.decode("utf-8"))
+            request_id = reply.get("id") if isinstance(reply, dict) else None
+            if type(request_id) is not int or request_id not in self.pending:
+                raise ClientProtocolError()
+            self.pending.pop(request_id).set_result(reply)
+        except Exception:
+            self.failed = True
+            for future in self.pending.values():
+                if not future.done():
+                    future.set_exception(ClientProtocolError())
+            self.pending.clear()
+
+    def _read(self):
+        # This daemon only reads the private pipe; browser work remains in active pumps.
+        try:
+            descriptor = self.reader.fileno()
+        except (AttributeError, OSError):
+            descriptor = None
+        buffer = b""
+        while True:
+            try:
+                if descriptor is None:
+                    raw = self.reader.readline(MAX_FRAME_BYTES + 1)
+                else:
+                    # Do not hold BufferedReader's lock while awaiting private-pipe
+                    # input: a daemon holding it would block interpreter shutdown.
+                    while b"\n" not in buffer and len(buffer) <= MAX_FRAME_BYTES:
+                        chunk = os.read(descriptor, min(65536, MAX_FRAME_BYTES + 1 - len(buffer)))
+                        if not chunk:
+                            break
+                        buffer += chunk
+                    if b"\n" in buffer:
+                        raw, buffer = buffer.split(b"\n", 1)
+                        raw += b"\n"
+                    else:
+                        raw, buffer = buffer, b""
+            except Exception:
+                raw = b""
+            try:
+                self.loop.call_soon_threadsafe(self._receive, raw)
+            except RuntimeError:
+                return
+            if not raw:
+                return
 
     async def exchange(self, message):
         encoded = json_bytes(message, compact=True)
         if len(encoded) > MAX_FRAME_BYTES:
             raise ClientProtocolError()
+        if self.failed or message["id"] in self.pending or len(self.pending) >= 2:
+            raise ClientProtocolError()
+        future = asyncio.get_running_loop().create_future()
+        self.pending[message["id"]] = future
         self.writer.write(encoded.rstrip(b"\n") + b"\n")
         self.writer.flush()
-        raw = self.reader.readline(MAX_FRAME_BYTES + 1)
-        if not raw or len(raw) > MAX_FRAME_BYTES or not raw.endswith(b"\n"):
-            raise ClientProtocolError()
+        if self.loop is None:
+            self.loop = asyncio.get_running_loop()
+            threading.Thread(target=self._read, daemon=True).start()
         try:
-            return loads_json(raw.decode("utf-8"))
-        except (ValueError, UnicodeError):
-            raise ClientProtocolError() from None
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
+            raise
+
+    async def drain(self):
+        if self.pending:
+            await asyncio.gather(*tuple(self.pending.values()), return_exceptions=True)
 
 
 @dataclass(repr=False)
@@ -71,9 +135,10 @@ class ClientSession:
 
     async def call(self, method: str, params: dict | None = None):
         self._sequence += 1
+        request_id = self._sequence
         message = {
             "version": PROTOCOL_VERSION,
-            "id": self._sequence,
+            "id": request_id,
             "method": method,
             "session": self.session_ref,
             "params": params or {},
@@ -85,7 +150,7 @@ class ClientSession:
             or type(reply["version"]) is not int
             or reply["version"] != PROTOCOL_VERSION
             or type(reply["id"]) is not int
-            or reply["id"] != self._sequence
+            or reply["id"] != request_id
         ):
             raise ClientProtocolError()
         if method == "session.attach":

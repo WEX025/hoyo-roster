@@ -81,8 +81,8 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     throw sourceFailure("SOURCE_REQUEST_NOT_OBSERVED");
   }
   async function click(tab, locator, signal, { snapshot = true } = {}) {
-    await call(signal, () => locator.click({ timeoutMs: 2500 }));
-    if (snapshot) return call(signal, () => tab.playwright.domSnapshot());
+    await metrics.measure("page.click", () => call(signal, () => locator.click({ timeoutMs: 2500 })));
+    if (snapshot) return metrics.measure("page.snapshot", () => call(signal, () => tab.playwright.domSnapshot()));
   }
   async function authentication(tab, signal) {
     // Only read rendered text and field presence, never any login input value.
@@ -136,5 +136,6 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     }
   }
   const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
-  return Object.freeze({ page, available, call, wait, click, authentication, identity, assertIdentity, record, release, measure });
+  return Object.freeze({ page: (url, signal) => measure("page.preflight", signal, () => page(url, signal)),
+    available, call, wait, click, authentication, identity, assertIdentity, record, release, measure });
 }

@@ -22,6 +22,20 @@ class UnsafePath(ValueError):
     """A fixed, privacy-safe filesystem rejection."""
 
 
+def process_alive(pid: int) -> bool:
+    if type(pid) is not int or pid <= 0:
+        return False
+    if WINDOWS:
+        return backend.process_alive(pid)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def filesystem_path(path: Path) -> Path:
     """Use the local extended namespace internally, without resolving redirects."""
     path = path.expanduser().absolute()

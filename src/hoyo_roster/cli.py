@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument(
+        "--parallel-games", action="store_true", help="同一任务内交叠两游戏；共享会话锁和两秒节流"
+    )
+    parser.add_argument(
         "--storage-root",
         type=Path,
         help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为系统用户数据根的 results/；不改变客户端浏览器会话",
@@ -81,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--client-stdio", action="store_true", help="客户端宿主专用双向管道；不要在普通终端运行"
     )
+    parser.add_argument("--collection-run", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--run-id", help="owned candidate UUID for explicit cleanup")
     parser.add_argument(
         "--generation", help="verified generation UUID for recovery or non-current cleanup"
@@ -229,6 +233,14 @@ async def run_locked(args, config, game, operation, store):
 
 def main(argv: list[str] | None = None, *, client=None) -> int:
     args = build_parser().parse_args(argv)
+    if args.collection_run is not None and (
+        not args.client_stdio
+        or args.operation != "sync"
+        or args.game != "all"
+        or args.uid is not None
+    ):
+        print("LOCAL_WORKSPACE=FAIL\nERROR_CODE=WORKFLOW_OPTIONS_INVALID")
+        return 1
     if args.client_stdio and args.operation not in {"sync", "discover", "login"}:
         print("LOCAL_WORKSPACE=FAIL\nERROR_CODE=ARGUMENTS_INVALID")
         return 1
