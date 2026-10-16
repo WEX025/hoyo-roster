@@ -75,9 +75,17 @@ export function createGenshinPageSource(ui) {
       Array.from(document.querySelectorAll(".character-item")).filter(e => e.querySelector(".gt-avatar-selected"))
         .map(e => e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim())));
     let selected = await selectedNames();
-    for (const name of selected.filter(n => !params.names.includes(n))) {
+    async function selectLabel(name, operation) {
       const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
-      await ui.call(signal, () => card.click({ timeoutMs: 2500 }));
+      const label = card.getByText(name, { exact: true });
+      if (!(await ui.call(signal, () => label.isVisible()))) throw sourceFailure("SOURCE_DATA_INVALID");
+      // Selection reorders the cards. The public SDK's stability wait can spend
+      // the full click timeout on that movement even after the click succeeded.
+      // Address the visible label; verify the complete selected set below.
+      await measure(operation, signal, () => label.click({ timeoutMs: 2500, force: true }));
+    }
+    for (const name of selected.filter(n => !params.names.includes(n))) {
+      await selectLabel(name, "genshin.deselect");
     }
     const unavailable = [];
     for (const name of params.names.filter(n => !selected.includes(n))) {
@@ -85,7 +93,7 @@ export function createGenshinPageSource(ui) {
       if (name.includes("奇偶")) {
         const state = await ui.click(tab, card.getByText(name, { exact: true }), signal);
         if (state.includes(UNSUPPORTED)) unavailable.push({ name, status: "unsupported", reason: UNSUPPORTED });
-      } else await ui.call(signal, () => card.click({ timeoutMs: 2500 }));
+      } else await selectLabel(name, "genshin.select");
     }
     await ui.call(signal, () => tab.playwright.domSnapshot());
     selected = await selectedNames();
