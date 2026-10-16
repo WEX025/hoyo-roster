@@ -37,7 +37,8 @@ const driver = createWorkflowDriver({ directory, initial, control, startSession:
     } });
 } });
 let status;
-do { status = await driver.advance({ synthetic: true }); }
+const attachedBrowser = { synthetic: true };
+do { status = await driver.advance(attachedBrowser); }
 while (!status.done && status.nextAction !== "CONFIRM_LOGIN");
 if (status.state !== "SUCCEEDED") throw Error("synthetic workflow failed: " + status.errorCode);
 console.log(JSON.stringify({ state: status.state, reads }));
