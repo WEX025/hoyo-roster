@@ -1,10 +1,10 @@
 # 开发与反馈
 
-先读 [AGENTS.md](AGENTS.md) 和[四模块工作流](docs/workflow.md)。Python 3.12 包保存数据与运行游戏逻辑，client_host.mjs 运行在 AI 客户端并借用其内置浏览器；不得新增独立登录浏览器或认证材料搬运。
+先读 [AGENTS.md](AGENTS.md) 和[四模块工作流](docs/workflow.md)。Python 3.12 包保存数据与运行游戏逻辑；client_runtime.mjs 在 AI 客户端装配各游戏读源插件，client_host.mjs 借用同一个内置浏览器。不得新增独立登录浏览器或认证材料搬运；公共宿主/网络层不导入游戏实现。
 
     python -m pip install -e '.[dev]'
     python -m pytest -q
-    node --test tests/test_client_host.mjs
+    node --test tests/test_client_host.mjs tests/test_client_sources.mjs
     python tools/platform_smoke.py
     python -m ruff check src tests tools --select F
     python -m ruff format --check src tests tools
@@ -17,7 +17,7 @@
 
 Node 宿主跨进程测试使用项目虚拟环境中的 Python；跨平台时选择该平台实际虚拟环境解释器。合成身份、来源、结果根和 runtime 根均为新临时范围，测试不得读取本人旧认证/结果目录。
 
-测试只替换客户端接口与官方来源，登录协调、身份发现、两轮比较、normalize、lifecycle、candidate、store 和管道应运行真实代码。删除旧流程测试时保留适用的文件系统、恢复、精确数值及存储故障回归，并为新交接状态补齐测试。覆盖启动失败后的重试、挂起读取/SDK 的取消与迟到结果、等待时关页、过期确认及恢复核验失败后停止后续游戏。check_workflow 仅检查列明的静态规则和链接，不替代行为回归，也不能单独证明无历史残留。
+测试只替换客户端接口与官方来源，登录协调、身份发现、两轮比较、normalize、lifecycle、candidate、store 和管道应运行真实代码。读源实现还须使用浏览器事件边界的合成输入，执行实际请求构造、响应读取、服务准备和保存；不能仅用返回 fixture 的 readSource 回调验证。删除旧流程测试时保留适用的文件系统、恢复、精确数值及存储故障回归，并补齐交接状态。覆盖启动失败、取消与迟到结果、等待时关页、过期确认及恢复核验失败后停止后续游戏。check_workflow 仅检查列明的静态规则和链接，不替代行为回归，也不能单独证明无历史残留。
 
 真实登录由用户在内置浏览器自行完成；AI 主动询问后继续。真实来源验收要求客户端提供受支持的完整读取能力。不能以合成来源、公开页面或用户确认代替真实业务数据证明；当前 Codex 读取限制见[客户端桥接](docs/client-bridge.md)。
 

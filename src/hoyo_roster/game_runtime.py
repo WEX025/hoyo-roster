@@ -64,6 +64,7 @@ class GameResult:
     roles: tuple[RoleResult, ...] = field(default_factory=tuple)
     error_code: str | None = None
     stop_account: bool = False
+    missing_sources: tuple[str, ...] = ()
 
     @property
     def failed(self):
@@ -74,6 +75,10 @@ class GameResult:
         print(f"GAME={self.game}\nGAME_STATUS={status}", flush=True)
         if self.error_code:
             print(f"ERROR_CODE={self.error_code}", flush=True)
+        if self.missing_sources:
+            print("FAILED_STAGE=SOURCE_CAPABILITY\nCOLLECTION_STATUS=NOT_COLLECTED", flush=True)
+            for source in self.missing_sources:
+                print(f"MISSING_SOURCE={source}", flush=True)
         if self.status == "NO_ROLES":
             print("COLLECTION_STATUS=NOT_COLLECTED", flush=True)
         for role in self.roles:

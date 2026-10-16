@@ -1,40 +1,64 @@
 # 客户端浏览器桥接
 
-宿主文件为 src/hoyo_roster/client_host.mjs，随 Python 包和源码分发。AI 在当前客户端 JavaScript 运行时导入 createClientHost，并传入已经通过客户端文档选定的实际 browser 对象。不得传一个浏览器 ID 或创建独立浏览器。
+## 正式入口
 
-## 执行
+AI 在当前客户端的 JavaScript 运行时导入 src/hoyo_roster/client_runtime.mjs，调用 createRosterHost(browser)。browser 必须是已通过客户端文档选定的实际内置浏览器对象；不能传浏览器 ID，不能另开独立浏览器。这个装配入口直接连接两游戏的读源实现，不再要求执行 AI 临时编写 readSource。
 
-先安装当前 Python 包，使用该环境解释器；调用 host.startTask，传 python、cwd、operation（sync/discover/login）、game（默认 all），可选 storageRoot、runtimeRoot、uid。该方法以参数数组启动 Python 私有工作进程，不使用 shell；标准输入输出均为管道，不向终端展示协议。
+单独执行登录可以导入 client_host.mjs 并调用 createClientHost(browser)；登录本身没有读源依赖。后者是低层宿主，省略适配器不能用于采集，返回 SOURCE_ADAPTER_MISSING；生产 createRosterHost 已装配适配器，所选客户端没有必要能力时返回 CLIENT_SOURCE_UNAVAILABLE。这两个状态不能混淆。
 
-每个客户端工具回合内显式 await task.pump()，它只在当前回合处理待办浏览器动作；管道回调只入队，不在后台调用浏览器。pump 遇到登录确认即返回，不阻塞等待人类回答。host.pendingQuestion() 返回 attempt、问题及选项。AI 对新 attempt 使用用户输入工具主动询问是否完成官方页面登录，并保留 attempt 与问题的关联。回答“已完成”后调用 host.answerLogin("completed", question.attempt)；未完成用 waiting，取消用 cancel，均须传该 attempt。同一等待尝试不重复催问；仅可沿用针对本次尝试的明确确认。认证再次失效会生成新 attempt，旧确认不能用于新尝试。pendingQuestion 不包含凭据。不要在 JavaScript 中阻塞等待人类答复；保留 host/task 变量并将控制交回用户。
+先安装当前 Python 包，核对与所选源码一致，再调用 host.startTask，传 python、cwd、operation（sync/discover/login）、game（默认 all），可选 storageRoot、runtimeRoot、uid。宿主以参数数组启动 Python 私有工作进程，不使用 shell；协议不出现在可见终端。
 
-用户回答后继续调用 task.pump()，直到 task.status().done；不要在未处理待办请求时只等待 completion。task.status() 提供固定报告、待处理数量、是否结束、宿主 errorCode 和待答问题。下一次主动 pump 检查待答页面是否仍存在，关闭时终止等待；不会在后台调用浏览器。task.completion 在工作进程关闭后给出退出码、宿主 errorCode 及固定报告，正常成功须匹配协议最终结果。task.cancel() 或 host.cancel() 中断所有待办和挂起 SDK/来源等待，并终止工作进程；一秒内未退出则强制终止。进程关闭后释放浏览器占用，不等待挂起适配器返回，迟到结果不再写入管道或结果。保留浏览器。页面需按客户端保留机制维持到后续回合。一次 host 只用于一个任务；新任务可创建新的 host，仍传同一个客户端浏览器对象。
+## 分层与历史代码迁移
 
-## 数据适配
+| 文件 | 职责 |
+|---|---|
+| client_runtime.mjs | 唯一装配入口，注入游戏读源插件及服务动作契约 |
+| client_host.mjs | 活浏览器引用、登录问答、相关管道、取消和进程生命周期；不实现游戏请求或服务刷新 |
+| client_network.mjs | 客户端公开能力、浏览器内请求与响应观察、原始文本、超时；不导入游戏 |
+| games/genshin/client_source.mjs | 原神 Binding 与养成请求覆盖；移植 donor d2b70ac 的 OfficialCollector |
+| games/zzz/client_source.mjs | 绝区零注册接口、DS、设备头准备与服务初始化回执；移植同一 donor 的 BrowserTransport/页面准备 |
+| games/zzz/endpoints.py | 游戏服务初始化及一次局部刷新、名单闭合、详情与邦布的业务次序 |
 
-createClientHost(browser) 默认没有完整数据源读取能力；同步/发现明确返回 CLIENT_SOURCE_UNAVAILABLE，登录仍可执行。
+两游戏不互相导入。公共层接受注入回调与契约；装配入口只选择插件，不核验游戏身份。登录只打开页面、提示本人登录并等待确认；服务准备属于游戏。没有恢复历史 Profile 驱动、短信自动化或认证材料导出。
 
-只有实际存在受支持的客户端读取接口时，才传 readSource 函数。它收到实际 browser、signal（AbortSignal）、game、source、params、body；适配器须响应 signal 中止，在每次后续浏览器动作前检查取消；宿主无法撤回适配器已执行的外部动作，但会丢弃终止后的结果。返回且只返回三个字段：json 是客户端直接读取的原始官方 JSON 文本，evidence 为必要的来源覆盖证据；origin 为来源 url、method、status、redirected 的观察值。Python 精确核验注册端点/方法、拒绝跳转和非成功状态，HTTP 429 按限流停止。不要先用 JavaScript JSON.parse 再 stringify 重编码来源数字，不从内存中的私有应用状态或认证目录取数据，不通过独立 HTTP 或 Cookie 导出补齐能力。
+## 客户端能力与真实来源
 
-允许来源：
+内置实现仅在所选标签页明确声明 cdp 能力时，使用公开 CdpTabCapability.send/readEvents。没有声明时不调用 get("cdp")、不寻找调试地址、不切换浏览器后端，也不把 Playwright DOM evaluate 当成网络接口。
 
-| 游戏 | source |
+原神监听实际 Network 请求、响应与完成事件，记录真实请求体、分页及来源，再通过 getResponseBody 读取原始 JSON 文本。绝区零通过同一标签页/会话中的浏览器原生请求调用注册接口；不导出 Cookie，不由 Node/Python HTTP 客户端重放。Origin/Referer 由浏览器决定，不伪造这两个头。SDK 拒绝或页面请求被阻断时明确失败，不换路线绕过。
+
+设备头仅访问 donor 指定的少数 x-rpc 字段，留在当前 JavaScript 宿主内；不访问 Cookie/Authorization 值。用户确认一次新的登录后，宿主递增 generation，游戏插件丢弃上代设备头缓存并在后续读源时准备。初始化响应可能含认证材料，宿主只判断固定 HTTP/业务状态并丢弃响应体，经 service.prepare 返回 ready 与观察到的 origin；认证内容不进入 Python 管道。
+
+业务 source.read 只返回 json、evidence、origin。json 保留原始文本，不进行 JavaScript 浮点解析再编码；Base64 先解码并严格检查 UTF-8。origin 为实际观察的 url、method、status、redirected，Python 再核验本游戏不可变端点。拒绝跳转、事件缺口、缓存/Service Worker 响应与非法来源；HTTP 429、风险状态停止账号任务。
+
+| 游戏 | 来源 |
 |---|---|
 | 原神 | binding、cultivation-avatar-list |
 | 绝区零 | binding、record:avatar/basic、record:avatar/info、record:buddy/info、cultivate:user/avatar_basic_list、cultivate:user/batch_avatar_detail_v2 |
+| 绝区零服务能力 | cultivate:badge-login，经 service.prepare 调用，不作为业务 JSON 来源返回 |
 
-来源字段和身份参数以各游戏 endpoint_specs、source/transport 及规范化代码为准。原神 cultivation-avatar-list 的 evidence 必须包含官方观察到的 request（uid、region、lang、空 element_attr_ids/weapon_cat_ids、page=1、正整数 size）及 pages_observed=[1]。缺失证据、过滤条件非空、未知多页不能保存。
+原神 cultivation-avatar-list 的 evidence 必须含实际 request（uid、region、lang、空 element_attr_ids/weapon_cat_ids、page=1、正整数 size）及 pages_observed=[1]；其他页、过滤或身份变化即失败。绝区零每个身份首次使用养成服务前初始化一次；养成接口明确认证失效时允许服务内刷新一次，仍失败才进入账号恢复边界。其他 HTTP、风险或格式错误不触发局部重试。
 
-宿主可报告固定的认证失效、风控、限流、页面不可用、数据能力不可用等错误，不能把响应体或工具异常文本当公开错误。数据源不得记录或返回 Cookie/token、手机号、验证码、设备头等认证材料。
+各游戏在 entry 中声明当前操作需要的来源：discover 只需自己的 Binding；sync 需要全部本游戏来源及服务能力。source.check 基于实际标签页能力返回支持范围，缺项只终止该游戏并报告阶段，后续游戏继续。能力声明不替代后续响应、身份及双轮覆盖校验。DOM 观察不能伪装为带 HTTP 证明的业务响应。
 
-当前 Codex 仅有 DOM/页面操作及页面声明的 WebMCP；原神和绝区零当前官方页面未声明数据工具。因此没有可提供给 readSource 的完整受支持数据接口。这个限制是当前运行结果的一部分，不能把测试用 reader 当成可用的真实适配。
+## 推进与登录交接
 
-## 管道契约
+每个客户端工具回合内显式 await task.pump({maxRequests: 1})。管道回调只入队，不在后台调用浏览器；每个来源步骤包括页面准备，总期限为 45 秒。超时和取消中止后续动作，迟到结果被丢弃，不提交数据。
 
-请求包含 version=1、递增 id、method、session 和 params。首次 session.attach 的 session 为 null；宿主返回随机会话关联值。后续请求与响应均匹配该值和 id。响应固定为 version、id、session、result、error；成功 error=null，错误 result=null。协议数据限制为 16 MiB，使用单行 UTF-8 JSON。
+pump 遇到登录确认即返回；host.pendingQuestion() 给出 attempt、问题及选项。AI 对新 attempt 主动询问本人是否完成官方页面登录，并保留问题和 attempt 的关联。调用 host.answerLogin("completed", question.attempt) 只沿用针对本次尝试的明确确认；尚未完成用 waiting，取消用 cancel。认证再次失效是新尝试，旧答复不适用。pendingQuestion 不含凭据。保留 host/task 和页面，不在 JavaScript 中阻塞等待人类答复。
 
-Python worker 的 report/end 帧承载固定状态、必要本机结果路径及退出码；数据源帧只在进程私有管道中交换，不写源响应日志。Python 在 login 返回后进入当前游戏，直接通过同一管道请求来源，不存在另一个浏览器接收步骤。工作进程结束不关闭客户端浏览器。
+确认后登录模块结束，继续 pump 到 task.status().done，由当前游戏核验身份并采集。等待期间页面关闭由下一次主动 pump 检测并终止。task.cancel() 或 host.cancel() 中止挂起调用、回收子进程；一秒内未退出则强制终止。进程关闭后释放浏览器占用，保留客户端浏览器。页面跨回合使用客户端保留标记。一次 host 只运行一个任务，新任务可继续借用同一个浏览器。
 
-## 验证
+## 管道与扩展
 
-Python 回归使用合成源驱动真实登录模块、游戏、两轮、规范化、候选及存储。Node 回归使用真实子进程和管道，检查同一 browser 对象进入来源读取、一次用户确认、两游戏采集保存，以及页面关闭和换会话拒绝。来源是合成的，不能替代真实官方数据验收。
+请求包含 version=1、递增 id、method、session、params；首次 session.attach 的 session 为 null，之后每条请求与响应关联同一随机会话。响应固定为 version、id、session、result、error；成功 error=null，失败 result=null。帧为 16 MiB 内单行 UTF-8 JSON。错序、换会话、EOF、非法帧和取消均明确终止。
+
+service.prepare 的 params 为 game、service、params，结果只含 ready=true 和 origin。服务到注册来源的映射由装配层通过 serviceSources 注入，公共宿主不硬编码游戏初始化流程。source.read 参数为 game、source、params、body；宿主向读源回调额外传实际 browser、AbortSignal、generation。
+
+自定义客户端适配可在低层 createClientHost 注入 readSource、sourceNames、checkSources、prepareService、serviceSources。来源与服务契约会被复制，未知或重复来源被拒绝；checkSources 检查运行时能力，prepareService 只返回初始化回执。禁止以能力声明或空回调伪造实现。正常采集使用 createRosterHost。
+
+worker 的 report/end 帧只承载固定状态、必要本机路径与退出码；原始来源和设备头不写公开日志。task.completion 在进程关闭后结算，须与协议最终结果匹配；未处理完待办时不能只等待 completion。最终 PASS 仍以游戏事务完成、验证和锁释放为前提。
+
+## 验证边界
+
+tests/test_client_sources.mjs 在浏览器事件边界提供合成输入，执行真正的请求构造、观察、读源插件、生产宿主、Python worker、双次采集及保存；另测精确文本、服务认证信息隔离、重登后缓存失效、事件缺口、跳转、能力拒绝与超时。tests/test_service_session.py 检查游戏服务初始化/刷新与账号登录解耦。该证据不能替代真实官方数据与当前客户端能力的验收；最新实测见[验证状态](release-validation.md)。

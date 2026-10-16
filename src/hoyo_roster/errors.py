@@ -30,9 +30,21 @@ class ClientProtocolError(OperationError):
 class ClientSourceUnavailable(OperationError):
     code = "CLIENT_SOURCE_UNAVAILABLE"
 
+    def __init__(self, missing_sources=()):
+        self.missing_sources = tuple(missing_sources)
+        super().__init__()
+
+
+class SourceAdapterMissing(ClientSourceUnavailable):
+    code = "SOURCE_ADAPTER_MISSING"
+
 
 class SourceDataInvalid(OperationError):
     code = "SOURCE_DATA_INVALID"
+
+
+class SourceRequestNotObserved(OperationError):
+    code = "SOURCE_REQUEST_NOT_OBSERVED"
 
 
 class LoginTimeout(OperationError):

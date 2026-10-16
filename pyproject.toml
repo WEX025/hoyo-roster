@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hoyo-roster"
 version = "0.1.0rc1"
-description = "Private local Genshin/ZZZ collection; HSR temporarily unavailable, do not use it"
+description = "Private Genshin/ZZZ snapshot tooling with client browser source readers; HSR paused"
 readme = "README.md"
 requires-python = "==3.12.*"
 license = "MIT"

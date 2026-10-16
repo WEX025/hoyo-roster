@@ -9,6 +9,7 @@ from .errors import SyncError
 from .transport import ClientTransport
 from .endpoints import EndpointClient, select_role
 from .ids import parse_role_uid
+from .endpoint_specs import BINDING, ENDPOINT_REGISTRY
 
 
 def owned_roles(data):
@@ -34,6 +35,8 @@ def owned_roles(data):
 
 
 async def run(args, session):
+    required = (BINDING.name,) if args.operation == "discover" else tuple(ENDPOINT_REGISTRY)
+    await session.client.require_sources("zzz", required)
     collector = EndpointClient(ClientTransport(session))
 
     async def check():

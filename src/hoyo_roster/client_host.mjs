@@ -7,12 +7,14 @@ const LOGIN_URL = "https://act.mihoyo.com/ys/event/calculator/index.html#/charac
 const SOURCES = Object.freeze({
   genshin: new Set(["binding", "cultivation-avatar-list"]),
   zzz: new Set(["binding", "record:avatar/basic", "record:avatar/info", "record:buddy/info",
-    "cultivate:user/avatar_basic_list", "cultivate:user/batch_avatar_detail_v2"]),
+    "cultivate:user/avatar_basic_list", "cultivate:user/batch_avatar_detail_v2", "cultivate:badge-login"]),
 });
 const BROWSER_TASKS = new WeakSet();
 const MAX_FRAME = 16 * 1024 * 1024;
 const FAILURES = new Set(["AUTHENTICATION_REQUIRED", "LOGIN_CANCELLED", "LOGIN_TIMEOUT",
   "CLIENT_BROWSER_REQUIRED", "CLIENT_BROWSER_UNAVAILABLE", "CLIENT_SOURCE_UNAVAILABLE",
+  "SOURCE_ADAPTER_MISSING",
+  "SOURCE_DATA_INVALID", "SOURCE_REQUEST_NOT_OBSERVED",
   "CLIENT_PAGE_UNAVAILABLE", "CLIENT_PROTOCOL_ERROR", "CLIENT_REQUEST_FAILED",
   "RATE_LIMITED", "RISK_CONTROL", "WRONG_ACCOUNT"]);
 
@@ -22,14 +24,47 @@ function failure(code) {
   return error;
 }
 
-export function createClientHost(browser, { readSource = null } = {}) {
+export function createClientHost(browser, { readSource = null, sourceNames = null,
+  checkSources = null, prepareService = null, serviceSources = {} } = {}) {
   if (![browser?.tabs?.list, browser?.tabs?.get, browser?.tabs?.new].every(v => typeof v === "function")) {
     throw failure("CLIENT_BROWSER_REQUIRED");
   }
   if (readSource !== null && typeof readSource !== "function") {
-    throw failure("CLIENT_SOURCE_UNAVAILABLE");
+    throw failure("SOURCE_ADAPTER_MISSING");
+  }
+  if ([checkSources, prepareService].some(fn => fn !== null && typeof fn !== "function")) {
+    throw failure("CLIENT_PROTOCOL_ERROR");
+  }
+  // Copy capability declarations so a later caller mutation cannot widen access.
+  const supported = Object.fromEntries(Object.entries(SOURCES).map(([game, names]) => [game, new Set(
+    readSource === null ? [] : sourceNames === null ? names : [],
+  )]));
+  if (sourceNames !== null) {
+    if (readSource === null || typeof sourceNames !== "object" || Array.isArray(sourceNames)) {
+      throw failure("CLIENT_PROTOCOL_ERROR");
+    }
+    for (const [game, names] of Object.entries(sourceNames)) {
+      if (!Object.hasOwn(SOURCES, game) || !Array.isArray(names) || new Set(names).size !== names.length ||
+          names.some(name => !SOURCES[game].has(name))) throw failure("CLIENT_PROTOCOL_ERROR");
+      supported[game] = new Set(names);
+    }
+  }
+  if (!serviceSources || typeof serviceSources !== "object" || Array.isArray(serviceSources)) {
+    throw failure("CLIENT_PROTOCOL_ERROR");
+  }
+  const services = new Map(), serviceOnly = new Set();
+  for (const [game, declarations] of Object.entries(serviceSources)) {
+    if (!Object.hasOwn(SOURCES,game) || !declarations || typeof declarations !== "object" || Array.isArray(declarations)) {
+      throw failure("CLIENT_PROTOCOL_ERROR");
+    }
+    for (const [service, source] of Object.entries(declarations)) {
+      if (!/^[a-z][a-z0-9-]*$/.test(service) || !supported[game].has(source)) throw failure("CLIENT_PROTOCOL_ERROR");
+      services.set(game+"\0"+service,source);
+      serviceOnly.add(game+"\0"+source);
+    }
   }
   const session = randomBytes(16).toString("hex");
+  let generation = 0;
   const lifetime = new AbortController();
   let loginPage = null;
   let attached = false;
@@ -100,6 +135,36 @@ export function createClientHost(browser, { readSource = null } = {}) {
       return { browser: "client-built-in", source_reader: readSource !== null };
     }
     if (!attached) throw failure("CLIENT_PROTOCOL_ERROR");
+    if (method === "source.check") {
+      if (Object.keys(params).sort().join(",") !== "game,sources" || !Object.hasOwn(SOURCES, params.game) ||
+          !Array.isArray(params.sources) || !params.sources.length ||
+          new Set(params.sources).size !== params.sources.length ||
+          params.sources.some(name => !SOURCES[params.game].has(name))) {
+        throw failure("CLIENT_PROTOCOL_ERROR");
+      }
+      if (readSource === null) throw failure("SOURCE_ADAPTER_MISSING");
+      let available = [...supported[params.game]];
+      if (checkSources !== null) {
+        available = await invoke(() => checkSources({ browser, signal: lifetime.signal,
+          game: params.game, sources: params.sources, generation }));
+        if (!Array.isArray(available) || new Set(available).size !== available.length ||
+            available.some(name => !supported[params.game].has(name))) throw failure("CLIENT_PROTOCOL_ERROR");
+      }
+      return { available: params.sources.filter(name => available.includes(name) &&
+        (!serviceOnly.has(params.game+"\0"+name) || prepareService !== null)) };
+    }
+    if (method === "service.prepare") {
+      const source = services.get(params.game+"\0"+params.service);
+      if (!source ||
+          Object.keys(params).sort().join(",") !== "game,params,service") throw failure("CLIENT_PROTOCOL_ERROR");
+      if (prepareService === null) throw failure("SOURCE_ADAPTER_MISSING");
+      if (!supported[params.game].has(source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
+      const result = await invoke(() => prepareService({ browser, signal: lifetime.signal,
+        game: params.game, service: params.service, params: params.params, generation }));
+      if (!result || result.ready !== true || !Object.hasOwn(result,"origin") ||
+          Object.keys(result).sort().join(",") !== "origin,ready") throw failure("CLIENT_PROTOCOL_ERROR");
+      return result;
+    }
     if (method === "login.open") {
       if (params.url !== LOGIN_URL || Object.keys(params).length !== 1 || loginPage) {
         throw failure("CLIENT_PROTOCOL_ERROR");
@@ -136,10 +201,14 @@ export function createClientHost(browser, { readSource = null } = {}) {
       });
     }
     if (method === "source.read") {
-      if (!SOURCES[params.game]?.has(params.source)) throw failure("CLIENT_PROTOCOL_ERROR");
-      if (readSource === null) throw failure("CLIENT_SOURCE_UNAVAILABLE");
+      if (!Object.hasOwn(SOURCES, params.game) || !SOURCES[params.game].has(params.source)) {
+        throw failure("CLIENT_PROTOCOL_ERROR");
+      }
+      if (serviceOnly.has(params.game+"\0"+params.source)) throw failure("CLIENT_PROTOCOL_ERROR");
+      if (readSource === null) throw failure("SOURCE_ADAPTER_MISSING");
+      if (!supported[params.game].has(params.source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
       const result = await invoke(() => readSource({ browser, signal: lifetime.signal,
-        game: params.game, source: params.source, params: params.params, body: params.body }));
+        game: params.game, source: params.source, params: params.params, body: params.body, generation }));
       if (!result || typeof result.json !== "string" ||
           !Object.hasOwn(result, "evidence") || !Object.hasOwn(result, "origin") || Object.keys(result).length !== 3) {
         throw failure("CLIENT_PROTOCOL_ERROR");
@@ -190,6 +259,7 @@ export function createClientHost(browser, { readSource = null } = {}) {
       if (pending !== current) return;
       pending = null;
       if (answer !== "waiting") loginPage = null;
+      if (answer === "completed") generation++;
       current.resolve(answer);
     },
 

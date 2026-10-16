@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
+from hoyo_roster.errors import AuthenticationRequired
 
 from .endpoint_specs import (
     AVATAR_BASIC,
@@ -36,6 +37,8 @@ BANGBOO_COMPLETENESS_AUTHORITY: CompletenessAuthority = "OFFICIAL_FRONTEND_SINGL
 
 
 class Transport(Protocol):
+    async def prepare_cultivate(self, *, uid: str, region: str) -> None: ...
+
     async def request_json(
         self,
         endpoint: EndpointSpec,
@@ -179,6 +182,12 @@ class EndpointClient:
 
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
+        self._cultivate_ready: set[tuple[str, str]] = set()
+        self._cultivate_refreshed: set[tuple[str, str]] = set()
+
+    async def _cultivate_login(self, role: Role) -> None:
+        await self._transport.prepare_cultivate(uid=role.uid, region=role.server)
+        self._cultivate_ready.add((role.uid, role.server))
 
     async def get_binding(self) -> Mapping[str, Any]:
         return await self._transport.request_json(
@@ -207,7 +216,18 @@ class EndpointClient:
     ) -> Mapping[str, Any]:
         params: dict[str, object] = {"uid": role.uid, "region": role.server}
         params.update(extra_params or {})
-        return await self._transport.request_json(endpoint, params=params, body=body)
+        key = (role.uid, role.server)
+        if key not in self._cultivate_ready:
+            await self._cultivate_login(role)
+        try:
+            return await self._transport.request_json(endpoint, params=params, body=body)
+        except AuthenticationRequired:
+            if key in self._cultivate_refreshed:
+                raise
+            self._cultivate_refreshed.add(key)
+            self._cultivate_ready.discard(key)
+            await self._cultivate_login(role)
+            return await self._transport.request_json(endpoint, params=params, body=body)
 
     async def _complete_record_collection(
         self,

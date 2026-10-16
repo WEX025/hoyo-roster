@@ -43,8 +43,27 @@ test("Host without a source reader advertises the limitation explicitly", async 
   assert.equal(attached.result.source_reader, false);
   const result = await host.exchange(request(2, "source.read", attached.session,
     { game: "zzz", source: "binding", params: {}, body: null }));
-  assert.equal(result.error, "CLIENT_SOURCE_UNAVAILABLE");
+  assert.equal(result.error, "SOURCE_ADAPTER_MISSING");
   assert.deepEqual(fixture.events, []);
+});
+
+test("Declared per-game source support is enforced before reading and copied", async () => {
+  const fixture = browserFixture();
+  let reads = 0;
+  const sourceNames = { genshin: ["binding"] };
+  const host = createClientHost(fixture.browser, { sourceNames, readSource: async () => { reads++; } });
+  sourceNames.genshin.push("cultivation-avatar-list");
+  const attached = await host.exchange(request(1, "session.attach", null));
+  const checked = await host.exchange(request(2, "source.check", attached.session,
+    {game:"genshin", sources:["binding", "cultivation-avatar-list"]}));
+  assert.deepEqual(checked.result, {available:["binding"]});
+  const result = await host.exchange(request(3, "source.read", attached.session,
+    {game:"zzz",source:"binding",params:{},body:null}));
+  assert.equal(result.error,"CLIENT_SOURCE_UNAVAILABLE");
+  assert.equal(reads,0);
+  const malformed = await host.exchange(request(4, "source.check", attached.session,
+    {game:"genshin",sources:["binding","binding"]}));
+  assert.equal(malformed.error,"CLIENT_PROTOCOL_ERROR");
 });
 
 test("Login confirmation retains the same page and performs no data reads", async () => {
@@ -85,12 +104,15 @@ test("Session changes and unregistered source operations are rejected", async ()
     { game: "zzz", source: "unregistered" }))).error, "CLIENT_PROTOCOL_ERROR");
 });
 
-test("Production worker performs user confirmation, both games, validation and saving through the host", { timeout: 120000 }, async () => {
+test("Synthetic reader drives production worker through confirmation, both games, validation and saving", { timeout: 120000 }, async () => {
   const fixture = browserFixture();
   const temporary = await realpath(await mkdtemp(join(tmpdir(), "hoyo-client-pipe-")));
   let authenticated = false;
   const reads = [];
-  const host = createClientHost(fixture.browser, { readSource: async query => {
+  const host = createClientHost(fixture.browser, { serviceSources:{zzz:{cultivate:"cultivate:badge-login"}}, prepareService: async query => {
+    assert.equal(query.browser,fixture.browser);
+    return {ready:true,origin:{url:"https://api-takumi.mihoyo.com/common/badge/v1/login/account",method:"POST",status:200,redirected:false}};
+  }, readSource: async query => {
     assert.equal(query.browser, fixture.browser);
     if (!authenticated) {
       const error = new Error("AUTHENTICATION_REQUIRED");
@@ -120,6 +142,28 @@ test("Production worker performs user confirmation, both games, validation and s
   } finally {
     if (!task.status().done) { task.cancel(); await task.completion; }
     await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test("Default production host reports both missing adapters without prompting or creating results", {timeout:15000}, async () => {
+  const fixture = browserFixture();
+  const temporary = await realpath(await mkdtemp(join(tmpdir(),"hoyo-missing-adapter-")));
+  const host = createClientHost(fixture.browser);
+  const task = host.startTask({python,cwd:root,runtimeRoot:join(temporary,"runtime"),storageRoot:join(temporary,"results")});
+  try {
+    while (!task.status().done) await task.pump({waitMs:100});
+    const result = await task.completion;
+    assert.equal(result.code,1);
+    for (const game of ["genshin","zzz"]) assert.ok(result.events.includes("GAME="+game));
+    assert.equal(result.events.filter(line=>line==="ERROR_CODE=SOURCE_ADAPTER_MISSING").length,2);
+    assert.equal(result.events.filter(line=>line.startsWith("MISSING_SOURCE=")).length,9);
+    assert.ok(result.events.includes("TASK_STATUS=FAIL"));
+    assert.equal(host.pendingQuestion(),null);
+    assert.deepEqual(fixture.events,[]);
+    await assert.rejects(readFile(join(temporary,"results")), {code:"ENOENT"});
+  } finally {
+    if (!task.status().done) {task.cancel();await task.completion;}
+    await rm(temporary,{recursive:true,force:true});
   }
 });
 
