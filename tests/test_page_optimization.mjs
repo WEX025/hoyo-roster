@@ -26,8 +26,7 @@ function fixture() {
     })),
   }));
   const document = { querySelector: () => ({}), querySelectorAll: selector => selector === ".character-item" ? cards : containers() };
-  const target = name => ({ text: name, evaluate: async () => ({hover:blocker === "hover",blocked:blocker !== "none"}), isVisible: async () => !edit,
-    evaluate: async () => true,
+  const target = name => ({ text: name, evaluate: async () => name === "已拥有" ? true : ({hover:blocker === "hover",blocked:blocker !== "none"}), isVisible: async () => !edit,
     click: async () => { if (name === "选择角色") { blocker = "none"; return; } if (selected.has(name)) selected.delete(name); else selected.add(name); } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; },
