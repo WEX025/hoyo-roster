@@ -83,6 +83,14 @@ test("Genshin refuses stale login generations, replaced pages and an observed ch
   }
 });
 
+test("Genshin refreshes the official identity page after shared login instead of trusting a stale anonymous SPA", async () => {
+  const f = fixture();
+  const role = await f.reader.read({...f.query("page:identity"),params:{},generation:1});
+  assert.equal(role.uid,"123456789");
+  assert.equal(f.counts.reload,1);
+  await assert.rejects(f.reader.read(f.query("page:detail",{names:["Alpha"]},1)),{code:"SOURCE_DATA_INVALID"});
+});
+
 test("cancelling a cached round prevents any later navigation or returned details", async () => {
   const f = fixture();
   await f.reader.read(f.query("page:roster"));

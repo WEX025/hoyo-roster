@@ -5,7 +5,8 @@ import stat
 import uuid
 import pytest
 import hoyo_roster.user_workspace as workspace
-from tests import candidate_policy_for
+from tests import candidate_policy_for, make_shared
+from hoyo_roster import platform_io as io
 from hoyo_roster.storage.common import (
     load_metadata,
     tree_digest,
@@ -174,14 +175,20 @@ def test_wrong_identity_or_corrupted_generation_recovery_rejected(store):
 def test_new_intermediates_private_existing_shared_parent_unchanged(tmp_path):
     parent = tmp_path / "shared"
     parent.mkdir(mode=0o755)
-    parent.chmod(0o755)
+    make_shared(parent)
+    before = (
+        io.backend._descriptor(parent).GetSecurityDescriptorBinaryForm() if io.WINDOWS else None
+    )
     leaf = workspace.private_directory(parent / "application" / "users" / "scope")
-    assert stat.S_IMODE(parent.stat().st_mode) == 0o755
+    assert not io.private(parent)
     for path in (leaf, leaf.parent, leaf.parent.parent):
-        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+        assert io.private(path)
     with pytest.raises(workspace.WorkspaceError):
         workspace.private_directory(parent)
-    assert stat.S_IMODE(parent.stat().st_mode) == 0o755
+    if io.WINDOWS:
+        assert io.backend._descriptor(parent).GetSecurityDescriptorBinaryForm() == before
+    else:
+        assert stat.S_IMODE(parent.stat().st_mode) == 0o755
 
 
 def test_symlink_rejected_without_touching_target(tmp_path):

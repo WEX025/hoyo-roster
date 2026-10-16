@@ -50,6 +50,9 @@ export function createGenshinPageSource(ui) {
     if (source === "page:identity") {
       prepared = null;
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
+      // Another game tab may have completed shared login while this SPA still
+      // renders its anonymous catalog. Re-read the official page in this session.
+      await measure("genshin.reload", signal, () => tab.reload());
       const role = await measure("genshin.identity", signal, () => identity(tab, signal));
       return ui.record("genshin", await ui.call(signal, () => tab.url()), "role-selector", role, generation);
     }

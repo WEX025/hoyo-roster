@@ -392,6 +392,9 @@ def test_existing_insecure_browser_profile_preserved(tmp_path):
 
     profile = tmp_path / "profile"
     profile.mkdir(mode=0o755)
+    from tests import make_shared
+
+    make_shared(profile)
     with pytest.raises(MetadataError):
         secure_private_directory(profile)
     if io.WINDOWS:

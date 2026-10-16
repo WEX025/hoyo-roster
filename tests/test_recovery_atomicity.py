@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests import candidate_policy_for
+from tests import candidate_policy_for, make_shared
 from hoyo_roster import cli, user_workspace as uw
 from hoyo_roster.storage.common import atomic_write_metadata, load_metadata, tree_digest
 from tests.fixtures import UID_A
@@ -281,7 +281,7 @@ def test_activation_validation_never_changes_current(tmp_path, damage):
     if damage == "marker":
         (old / "generation.json").unlink()
     elif damage == "permissions":
-        old.chmod(0o755)
+        make_shared(old)
     else:
         path = (
             old
@@ -387,7 +387,7 @@ def test_commit_preflight_retains_rejected_candidate(tmp_path, damage):
     if damage == "marker":
         (candidate.root / "candidate-state.json").unlink()
     elif damage == "permissions":
-        candidate.root.chmod(0o755)
+        make_shared(candidate.root)
     elif damage == "region":
         atomic_write_metadata(store.identity_file, store._identity_document("cn_qd01"))
     else:

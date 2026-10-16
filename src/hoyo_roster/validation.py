@@ -33,7 +33,12 @@ def run_validator(
         # Windows CreateProcess rejects a long extended-path working directory.
         # All validator paths are absolute; use the known interpreter directory.
         result = subprocess.run(
-            command, cwd=Path(sys.executable).parent, capture_output=True, check=False, timeout=90
+            command,
+            cwd=Path(sys.executable).parent,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            timeout=90,
         )
     except subprocess.TimeoutExpired:
         raise ValidationFailure(
