@@ -171,3 +171,58 @@ def test_prepare_rejects_dirty_source_before_install_or_browser(prepared, monkey
     with pytest.raises(WorkspaceError, match="WORKFLOW_SOURCE_DIRTY"):
         collection_environment.prepare(prepared)
     assert len(calls) == 1 and calls[0][1:3] == ["status", "--porcelain"]
+
+
+def test_worker_rejects_a_changed_package_before_browser_access(prepared):
+    with prepared.edit() as value:
+        value["version"]["package_digest"] = "0" * 64
+    port = PagePort()
+    assert collect(prepared, port) == 1
+    assert port.calls == []
+
+
+def test_preparation_updates_once_repairs_only_when_needed_and_rechecks(
+    prepared, tmp_path, monkeypatch
+):
+    package = tmp_path / "public-package"
+    package.mkdir()
+    (package / "entry.mjs").write_text("// synthetic public code\n")
+    expected = inventory(package)
+    with prepared.edit() as value:
+        value["version"] = None
+        value["config"].update(
+            package_directory=str(package),
+            repository=str(tmp_path / "repo"),
+            update=True,
+            installation_artifact=str(tmp_path / "synthetic.whl"),
+        )
+    commands, installed = [], False
+
+    def command(args, **kwargs):
+        nonlocal installed
+        commands.append(args)
+        if args[0] == "git":
+            if args[1:3] == ["rev-parse", "--abbrev-ref"]:
+                return "origin/main\n"
+            return "synthetic\n" if args[1:3] == ["rev-parse", "HEAD"] else ""
+        if "pip" in args:
+            installed = True
+            return ""
+        return json.dumps(expected if installed else {})
+
+    monkeypatch.setattr(collection_environment, "command", command)
+    version = collection_environment.prepare(prepared)
+    assert version["installation_repaired"]
+    assert [c[1] for c in commands if c[0] == "git"] == [
+        "status",
+        "rev-parse",
+        "fetch",
+        "merge",
+        "rev-parse",
+    ]
+    assert len([c for c in commands if "pip" in c]) == 1
+    with prepared.edit() as value:
+        value["version"] = version
+    commands.clear()
+    assert not collection_environment.prepare(prepared)["installation_repaired"]
+    assert all("pip" not in c and "fetch" not in c for c in commands)
