@@ -29,4 +29,15 @@ Keep pumping until done; each game owns identity checks, both passes, normalizat
 
 Inspect task.status() for fixed progress, questions and errors. Use game=all; parallelGames=false retains sequential Genshin then ZZZ for comparison, while true overlaps games in one session/lease. On concurrent authentication expiry, quiesce in-flight sources, recover once, reverify pinned identities and serially restart uncommitted games; keep completed results. Immediately continue the next active window when no question is pending; defer aggregate analysis until completion. Drain host.drainMetrics() into private timing records, separately from PAGE_TIMING/CLIENT_TIMING, without summing nested or overlapping spans. task.completion settles after process closure; check its exit code and protocol result. Do not await completion alone while requests need pumping. At every task end, await completion, then await host.releasePageSettings() in an active tool call; cancel first on tool failure or user cancellation. Normal pump completion also restores temporary zero-viewport repairs. Retain the shared browser and pages. Source callbacks stop on AbortSignal; source failure is not successful collection.
 
+Keep consecutive windows in the SAME active foreground tool invocation when the client supports it, instead of returning to the model after every ten-second window. Bound the foreground slice to the client's verified outer deadline, leaving room to drain a full in-flight source and return. The tested desktop's outer MCP deadline is 300 seconds even with a larger requested timeout: use a 180-second launch slice and a 270-second execution timeout there, then immediately resume the same task in the next active call. This is foreground work, not a detached/background loop. Each window still drains before returning; login questions end the slice immediately. Other clients need their own verified budget.
+
+```js
+const began = performance.now();
+let state;
+do {
+  state = await pumpWindow(task, { onStep: recordPrivateTiming });
+} while (!state.done && !state.question && performance.now() - began < 180000);
+// Return fixed progress; actively resume this SAME task on the next call.
+```
+
 Report page saves as OFFICIAL_PAGE / PARTIAL, with actual counts and paths. They do not meet API complete coverage and never overwrite API generations. HSR is paused; Genshin excludes artifacts/full stat panels. For offline API-generation maintenance read [local use](../../../docs/local-use.md). Do not explore old private directories or generalize session retention to client restarts or untested platforms.
