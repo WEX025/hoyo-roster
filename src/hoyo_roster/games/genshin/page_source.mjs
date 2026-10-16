@@ -79,10 +79,14 @@ export function createGenshinPageSource(ui) {
       const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
       const label = card.getByText(name, { exact: true });
       if (!(await ui.call(signal, () => label.isVisible()))) throw sourceFailure("SOURCE_DATA_INVALID");
-      // Selection reorders the cards. The public SDK's stability wait can spend
-      // the full click timeout on that movement even after the click succeeded.
-      // Address the visible label; verify the complete selected set below.
-      await measure(operation, signal, () => label.click({ timeoutMs: 2500, force: true }));
+      // Selection reorders the cards. Keep ordinary actionability checks, but
+      // bound each label action instead of waiting 2.5s for card movement.
+      // A timeout is accepted only when the requested state was actually observed.
+      try { await measure(operation, signal, () => label.click({ timeoutMs: 400 })); }
+      catch (error) {
+        const observed = await selectedNames();
+        if (observed.includes(name) !== (operation === "genshin.select")) throw error;
+      }
     }
     for (const name of selected.filter(n => !params.names.includes(n))) {
       await selectLabel(name, "genshin.deselect");
