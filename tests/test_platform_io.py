@@ -64,6 +64,17 @@ def test_reparse_attribute_is_rejected_without_following():
     assert not io.is_redirect(SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0))
 
 
+def test_process_liveness_routes_to_windows_query_without_signals(monkeypatch):
+    query = Mock(return_value=True)
+    monkeypatch.setattr(io, "WINDOWS", True)
+    monkeypatch.setattr(io, "backend", SimpleNamespace(process_alive=query), raising=False)
+    monkeypatch.setattr(os, "kill", lambda *args: pytest.fail("Windows liveness must not signal"))
+    assert io.process_alive(123)
+    assert not io.process_alive(0)
+    assert not io.process_alive(True)
+    query.assert_called_once_with(123)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink policy")
 def test_custom_redirected_tmpdir_still_rejected(tmp_path, monkeypatch):
     destination = tmp_path / "destination"
@@ -189,6 +200,7 @@ def windows(monkeypatch):
         "win32api": SimpleNamespace(
             GetVolumeInformation=Mock(return_value=(None, None, None, None, "NTFS"))
         ),
+        "win32process": SimpleNamespace(GetExitCodeProcess=Mock(return_value=259)),
         "win32con": SimpleNamespace(**constants),
         "ntsecuritycon": SimpleNamespace(**constants),
         "win32security": security,
@@ -218,6 +230,31 @@ class ACL:
 
     def GetAce(self, index):
         return self.entries[index]
+
+
+@pytest.mark.parametrize("exit_code,expected", [(259, True), (0, False)])
+def test_windows_process_query_closes_handle(windows, monkeypatch, exit_code, expected):
+    handle = SimpleNamespace(Close=Mock())
+    opened = Mock(return_value=handle)
+    monkeypatch.setattr(windows.win32api, "OpenProcess", opened, raising=False)
+    windows.win32process.GetExitCodeProcess.return_value = exit_code
+    assert windows.process_alive(123) is expected
+    opened.assert_called_once_with(0x1000, False, 123)
+    handle.Close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("code,expected", [(87, False), (5, True), (123, None)])
+def test_windows_process_query_errors_do_not_prove_a_dead_owner(
+    windows, monkeypatch, code, expected
+):
+    error = windows.pywintypes.error()
+    error.winerror = code
+    monkeypatch.setattr(windows.win32api, "OpenProcess", Mock(side_effect=error), raising=False)
+    if expected is None:
+        with pytest.raises(OSError, match="PROCESS_STATE_UNAVAILABLE"):
+            windows.process_alive(123)
+    else:
+        assert windows.process_alive(123) is expected
 
 
 def descriptor(owner="current", entries=None):

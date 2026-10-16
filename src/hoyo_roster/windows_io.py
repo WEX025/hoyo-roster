@@ -15,7 +15,25 @@ import pywintypes
 import win32api
 import win32con
 import win32file
+import win32process
 import win32security
+
+
+def process_alive(pid: int) -> bool:
+    # Windows signal zero is not a POSIX-style existence probe. Query a handle;
+    # never signal or terminate a process while deciding whether recovery is safe.
+    try:
+        handle = win32api.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    except pywintypes.error as error:
+        if error.winerror == 87:  # ERROR_INVALID_PARAMETER: no such PID
+            return False
+        if error.winerror == 5:  # Access denied is not evidence of a dead owner.
+            return True
+        raise OSError("PROCESS_STATE_UNAVAILABLE") from None
+    try:
+        return win32process.GetExitCodeProcess(handle) == 259  # STILL_ACTIVE
+    finally:
+        handle.Close()
 
 
 def _native_path(path: Path) -> str:

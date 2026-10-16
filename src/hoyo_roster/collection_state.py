@@ -36,15 +36,7 @@ def fingerprint(role):
 
 
 def alive(pid):
-    if type(pid) is not int or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    return io.process_alive(pid)
 
 
 class RunStore:

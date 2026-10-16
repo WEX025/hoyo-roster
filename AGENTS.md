@@ -2,6 +2,8 @@
 
 先读 [README](README.md)、[四模块工作流](docs/workflow.md)、[本机使用](docs/local-use.md)。Python 3.12；采集装配入口为 src/hoyo_roster/client_runtime.mjs 的 createRosterHost(browser)，低层宿主为 client_host.mjs。所有操作系统统一借用当前 AI 客户端内置浏览器；Codex 使用 Codex 内置浏览器。没有可操作宿主或数据读取能力时报告明确错误，不自行启动浏览器。
 
+完整原神+绝区零页面同步优先使用 src/hoyo_roster/client_workflow.mjs 的 openCollectionWorkflow；顶层基础设施负责阶段、配置、版本、计时、验证与报告，不新增业务模块。按返回的 nextAction 继续同一个 advance，登录为显式等待；不临时拼装命令或重复启动任务。进程恢复只复用同版本、哈希和格式有效的已提交快照，并重新读取官方身份；未提交游戏重做双轮。活控制器/准备进程/worker 不接管、不盲杀；恢复元数据不得保存认证材料、浏览器对象或登录确认。完整入口须随 wheel 分发。详见[持久化工作流](docs/timed-collection.md)。
+
 - 四个业务模块：登录、原神、崩铁、绝区零。各游戏拥有身份核验、采集、标准化、校验和保存；公共桥接、锁、节流、JSON 与存储不是额外业务模块。游戏不得导入另一游戏实现；公共层只接受注入的游戏回调和契约。
 - client_runtime.mjs 是装配入口，注入各游戏页面/API 读源插件；client_page.mjs、client_network.mjs 与低层宿主不导入游戏实现。使用现成 createRosterHost，不要求执行 AI 临时补 reader。默认优先公开 DOM 读取；API 路径仅使用实际声明的 CDP 能力。未声明时不访问 CDP、不发现调试地址、不用 DOM evaluate 发请求。浏览器原生请求留在所选内置浏览器会话内，不导出认证材料、不由独立 HTTP 客户端替代。
 - 默认直接原神→绝区零；显式 parallelGames/--parallel-games 可在同一任务交叠游戏。每游戏内部串行，共享会话锁和两秒来源间隔；并发还在宿主实际启动端限制间隔，不靠两个独立任务绕开锁。游戏先通过同一客户端会话读取自身官方身份：页面路径读取官方角色切换面板的 UID、区服显示名和昵称；API 路径读取 Binding。明确认证失效才调用登录。登录模块只打开官方页面、提示用户自行登录并主动询问是否完成；只沿用本次登录尝试的明确确认，不重复询问；认证再次失效开启新尝试并重新确认。确认后立即返回同一会话与页面，保留浏览器。登录模块不核验身份、不抓数据、不写结果。

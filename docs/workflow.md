@@ -38,4 +38,4 @@ readSource 使用宿主受支持接口返回已注册来源记录。API 来源�
 
 ## 运行入口
 
-AI 使用 [local-roster skill](../.agents/skills/local-roster/SKILL.md) 建立宿主任务；桥接协议和执行方法见[客户端桥接](client-bridge.md)。Python CLI 不再自行启动浏览器。离线检查与恢复见[本机使用](local-use.md)，数据范围见[数据格式](data-format.md)，验收范围见[验证状态](release-validation.md)。
+AI 使用 [local-roster skill](../.agents/skills/local-roster/SKILL.md) 调用[持久化工作流](timed-collection.md)的统一入口，按 nextAction 推进；完整页面同步不临时拼装命令。底层宿主、独立登录和桥接协议见[客户端桥接](client-bridge.md)。Python CLI 不再自行启动浏览器。离线检查与恢复见[本机使用](local-use.md)，数据范围见[数据格式](data-format.md)，验收范围见[验证状态](release-validation.md)。
