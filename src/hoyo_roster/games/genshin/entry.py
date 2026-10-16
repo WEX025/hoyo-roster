@@ -8,6 +8,7 @@ from .cli import run_sync
 from .errors import SyncError
 from .source import OfficialCollector
 from .normalize import positive_id, select_binding
+from .endpoint_specs import BINDING, CULTIVATION_LIST
 
 
 def owned_roles(data):
@@ -33,6 +34,10 @@ def owned_roles(data):
 
 
 async def run(args, session):
+    required = (
+        (BINDING.name,) if args.operation == "discover" else (BINDING.name, CULTIVATION_LIST.name)
+    )
+    await session.client.require_sources("genshin", required)
     collector = OfficialCollector(session)
 
     async def check():

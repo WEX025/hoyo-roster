@@ -46,10 +46,11 @@ def avatar(level=90):
 
 
 class FakePort:
-    def __init__(self, *, authenticated=True, source_reader=True):
+    def __init__(self, *, authenticated=True, source_reader=True, source_names=None):
         self.ref = "a" * 32
         self.authenticated = authenticated
         self.source_reader = source_reader
+        self.source_names = source_names
         self.calls = []
         self.counts = Counter()
         self.answers = ["completed"]
@@ -68,6 +69,21 @@ class FakePort:
         result, error = None, None
         if method == "session.attach":
             result = {"browser": "client-built-in", "source_reader": self.source_reader}
+        elif method == "source.check":
+            available = (
+                params["sources"]
+                if self.source_names is None
+                else self.source_names.get(params["game"], [])
+            )
+            result = {"available": [name for name in params["sources"] if name in available]}
+        elif method == "service.prepare":
+            game, source = params["game"], "cultivate:badge-login"
+            self.counts[(game, source)] += 1
+            error = self.fail_at.get((game, source, self.counts[(game, source)]))
+            if not self.authenticated:
+                error = "AUTHENTICATION_REQUIRED"
+            if error is None:
+                result = {"ready": True, "origin": self.origin(game, source)}
         elif method == "login.open":
             result = {"page": "synthetic-page"}
         elif method == "login.confirm":

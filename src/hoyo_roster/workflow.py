@@ -39,8 +39,6 @@ async def run_task(args, client=None):
                 await login(client)
                 print("LOGIN_STATUS=USER_CONFIRMED", flush=True)
                 return 0
-            # Data capability failure is an explicit boundary, not a second browser fallback.
-            client.require_source_reader()
             for game in games:
                 module = importlib.import_module("hoyo_roster.games." + game + ".entry")
                 try:
@@ -51,6 +49,7 @@ async def run_task(args, client=None):
                         "FAIL",
                         error_code=error.code,
                         stop_account=stops_account(error, error.code),
+                        missing_sources=getattr(error, "missing_sources", ()),
                     )
                 except WorkspaceError as error:
                     result = GameResult(

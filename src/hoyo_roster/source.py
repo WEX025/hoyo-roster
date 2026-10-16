@@ -13,6 +13,29 @@ from .errors import (
 from .jsonio import loads_json
 
 
+def validate_origin(origin, spec):
+    if not isinstance(origin, dict) or set(origin) != {"url", "method", "status", "redirected"}:
+        raise SourceDataInvalid()
+    try:
+        actual = urlsplit(origin["url"])
+    except (ValueError, TypeError, AttributeError):
+        raise SourceDataInvalid() from None
+    if (
+        actual.scheme != "https"
+        or actual.netloc != spec.host
+        or actual.path != spec.path
+        or actual.fragment
+        or origin["method"] != spec.method
+        or origin["redirected"] is not False
+        or type(origin["status"]) is not int
+    ):
+        raise SourceDataInvalid()
+    if origin["status"] == 429:
+        raise RateLimited()
+    if not 200 <= origin["status"] < 300:
+        raise SourceDataInvalid()
+
+
 class ClientSource:
     def __init__(self, session, game):
         self.session = session
@@ -39,27 +62,7 @@ class ClientSource:
             or not isinstance(result["json"], str)
         ):
             raise ClientProtocolError()
-        origin = result["origin"]
-        if not isinstance(origin, dict) or set(origin) != {"url", "method", "status", "redirected"}:
-            raise SourceDataInvalid()
-        try:
-            actual = urlsplit(origin["url"])
-        except (ValueError, TypeError, AttributeError):
-            raise SourceDataInvalid() from None
-        if (
-            actual.scheme != "https"
-            or actual.netloc != spec.host
-            or actual.path != spec.path
-            or actual.fragment
-            or origin["method"] != spec.method
-            or origin["redirected"] is not False
-            or type(origin["status"]) is not int
-        ):
-            raise SourceDataInvalid()
-        if origin["status"] == 429:
-            raise RateLimited()
-        if not 200 <= origin["status"] < 300:
-            raise SourceDataInvalid()
+        validate_origin(result["origin"], spec)
         try:
             payload = loads_json(result["json"])
         except ValueError:
@@ -76,3 +79,19 @@ class ClientSource:
         if code != 0 or not isinstance(payload.get("data"), dict):
             raise SourceDataInvalid()
         return payload["data"], result["evidence"]
+
+    async def prepare_service(self, spec, service, params):
+        client = self.session.client
+        client.require_source_reader()
+        await self.session.gate.reserve(requested_min_interval=2.0)
+        result = await client.call(
+            "service.prepare", {"game": self.game, "service": service, "params": params}
+        )
+        self.request_count += 1
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"ready", "origin"}
+            or result["ready"] is not True
+        ):
+            raise ClientProtocolError()
+        validate_origin(result["origin"], spec)

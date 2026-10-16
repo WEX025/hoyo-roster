@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .errors import ClientProtocolError, ClientSourceUnavailable, OperationError
+from .errors import (
+    ClientProtocolError,
+    ClientSourceUnavailable,
+    SourceAdapterMissing,
+    OperationError,
+    SourceDataInvalid,
+    SourceRequestNotObserved,
+)
 from .jsonio import loads_json, json_bytes
 
 PROTOCOL_VERSION = 1
@@ -17,6 +24,9 @@ HOST_ERRORS = {
     "CLIENT_BROWSER_REQUIRED",
     "CLIENT_BROWSER_UNAVAILABLE",
     "CLIENT_SOURCE_UNAVAILABLE",
+    "SOURCE_ADAPTER_MISSING",
+    "SOURCE_DATA_INVALID",
+    "SOURCE_REQUEST_NOT_OBSERVED",
     "CLIENT_PAGE_UNAVAILABLE",
     "CLIENT_PROTOCOL_ERROR",
     "CLIENT_REQUEST_FAILED",
@@ -113,6 +123,9 @@ class ClientSession:
                 "RISK_CONTROL": RiskControl,
                 "WRONG_ACCOUNT": WrongAccount,
                 "CLIENT_SOURCE_UNAVAILABLE": ClientSourceUnavailable,
+                "SOURCE_ADAPTER_MISSING": SourceAdapterMissing,
+                "SOURCE_DATA_INVALID": SourceDataInvalid,
+                "SOURCE_REQUEST_NOT_OBSERVED": SourceRequestNotObserved,
             }
             if error in kinds:
                 raise kinds[error]()
@@ -131,4 +144,24 @@ class ClientSession:
 
     def require_source_reader(self):
         if not self.source_reader:
-            raise ClientSourceUnavailable()
+            raise SourceAdapterMissing()
+
+    async def require_sources(self, game, sources):
+        """Each game declares the sources required for this operation before any save."""
+        requested = tuple(sources)
+        if not self.source_reader:
+            raise SourceAdapterMissing(requested)
+        result = await self.call("source.check", {"game": game, "sources": list(requested)})
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"available"}
+            or not isinstance(result["available"], list)
+            or any(
+                not isinstance(name, str) or name not in requested for name in result["available"]
+            )
+            or len(set(result["available"])) != len(result["available"])
+        ):
+            raise ClientProtocolError()
+        missing = tuple(name for name in requested if name not in result["available"])
+        if missing:
+            raise ClientSourceUnavailable(missing)

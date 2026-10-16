@@ -14,9 +14,11 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 
 ## 当前实现状态
 
-[local-roster skill](.agents/skills/local-roster/SKILL.md) 通过包内 client_host.mjs 建立真实客户端宿主和 Python 私有管道；Python 不自行启动浏览器。普通终端运行在线命令会报 CLIENT_BROWSER_REQUIRED。安装包不会自动获得客户端浏览器能力。
+**已移植历史采集代码，但当前 Codex 内置浏览器尚未开放适配器所需的 CDP 能力，完整真实采集仍未通过验收。**
 
-登录交接和两游戏采集/校验/保存已通过生产代码与真实进程管道的合成源回归。当前 Codex 已实测原神登录保持与绝区零绑定角色页面复用；但官方页面没有 WebMCP 数据工具，当前浏览器接口不提供完整来源响应，因此默认完整同步返回 CLIENT_SOURCE_UNAVAILABLE，不输出角色快照。详见[客户端桥接](docs/client-bridge.md)和[验证状态](docs/release-validation.md)。
+[local-roster skill](.agents/skills/local-roster/SKILL.md) 通过包内 client_runtime.mjs 的 createRosterHost(browser) 装配游戏读源实现、客户端宿主和 Python 私有管道；Python 不自行启动浏览器。普通终端运行在线命令会报 CLIENT_BROWSER_REQUIRED。安装包不会自动获得客户端浏览器能力。
+
+原神读源实现迁移了历史官方请求/响应监听，绝区零迁移了请求签名、设备头准备与养成服务初始化。初始化及一次服务刷新由绝区零模块负责，共享账号登录仍由独立登录模块负责。浏览器事件边界的合成回归已驱动这些实际实现完成两游戏的校验、保存；这不等于真实账号采集已通过。适配器只访问所选客户端公开的能力，缺少所需能力时按游戏报告 CLIENT_SOURCE_UNAVAILABLE 和缺项；低层宿主未装配适配器才报 SOURCE_ADAPTER_MISSING。详见[客户端桥接](docs/client-bridge.md)和[验证状态](docs/release-validation.md)。
 
 其他客户端、Windows/Linux 客户端浏览器、客户端重启保持和完整真实采集尚未验收。版本 0.1.0rc1 仍为发布候选。
 

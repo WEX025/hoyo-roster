@@ -217,12 +217,92 @@ def test_login_and_discovery_never_create_business_results(tmp_path, operation):
     assert not (tmp_path / "results").exists()
 
 
-def test_unavailable_reader_stops_without_login_or_result(tmp_path, capsys):
+def test_missing_adapter_reports_each_game_without_login_or_result(tmp_path, capsys):
     port = FakePort(source_reader=False)
     assert cli.main(arguments(tmp_path), client=port.client()) == 1
-    assert "ERROR_CODE=CLIENT_SOURCE_UNAVAILABLE" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert output.count("ERROR_CODE=SOURCE_ADAPTER_MISSING") == 2
+    assert "GAME=genshin\nGAME_STATUS=FAIL" in output
+    assert "GAME=zzz\nGAME_STATUS=FAIL" in output
+    assert output.count("FAILED_STAGE=SOURCE_CAPABILITY") == 2
+    assert output.count("MISSING_SOURCE=") == 9
+    assert "TASK_STATUS=FAIL" in output
     assert not (tmp_path / "results").exists()
     assert [c["method"] for c in port.calls] == ["session.attach"]
+
+
+@pytest.mark.parametrize("supported_game", ["genshin", "zzz"])
+def test_game_source_support_is_independent(tmp_path, capsys, supported_game):
+    from hoyo_roster.games.genshin.endpoint_specs import BINDING, CULTIVATION_LIST
+    from hoyo_roster.games.zzz.endpoint_specs import ENDPOINT_REGISTRY
+
+    names = (
+        (BINDING.name, CULTIVATION_LIST.name)
+        if supported_game == "genshin"
+        else tuple(ENDPOINT_REGISTRY)
+    )
+    port = FakePort(source_names={supported_game: names})
+    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert store_for(tmp_path, supported_game).inspect()["current"] == "PRESENT"
+    other = "zzz" if supported_game == "genshin" else "genshin"
+    assert not any(
+        c["method"] == "source.read" and c["params"]["game"] == other for c in port.calls
+    )
+    output = capsys.readouterr().out
+    assert f"GAME={supported_game}\nGAME_STATUS=PASS" in output
+    assert f"GAME={other}\nGAME_STATUS=FAIL" in output
+    assert "ERROR_CODE=CLIENT_SOURCE_UNAVAILABLE" in output
+
+
+def test_binding_only_support_allows_discovery_but_refuses_sync_before_writes(tmp_path, capsys):
+    names = {game: ["binding"] for game in ("genshin", "zzz")}
+    assert (
+        cli.main(
+            arguments(tmp_path, "--operation", "discover"),
+            client=FakePort(source_names=names).client(),
+        )
+        == 0
+    )
+    assert not (tmp_path / "results").exists()
+    port = FakePort(source_names=names)
+    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert not any(c["method"] == "source.read" for c in port.calls)
+    assert not (tmp_path / "results").exists()
+    assert "MISSING_SOURCE=binding" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        None,
+        {},
+        {"available": "binding"},
+        {"available": ["unknown"]},
+        {"available": ["binding", "binding"]},
+        {"available": [None]},
+    ],
+)
+def test_malformed_capability_response_stops_account_before_sources(reply, tmp_path, capsys):
+    class BadCapabilities(FakePort):
+        async def exchange(self, message):
+            result = await super().exchange(message)
+            if message["method"] == "source.check":
+                result["result"] = reply
+            return result
+
+    port = BadCapabilities()
+    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert not any(c["method"] in {"source.read", "login.open"} for c in port.calls)
+    assert "ERROR_CODE=CLIENT_PROTOCOL_ERROR" in capsys.readouterr().out
+    assert not (tmp_path / "results").exists()
+
+
+def test_explicit_login_works_without_source_adapter(tmp_path, capsys):
+    port = FakePort(source_reader=False)
+    assert cli.main(arguments(tmp_path, "--operation", "login"), client=port.client()) == 0
+    assert [c["method"] for c in port.calls] == ["session.attach", "login.open", "login.confirm"]
+    assert "LOGIN_STATUS=USER_CONFIRMED" in capsys.readouterr().out
+    assert not (tmp_path / "results").exists()
 
 
 def test_no_host_fails_before_private_paths(tmp_path, capsys):

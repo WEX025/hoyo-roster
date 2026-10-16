@@ -46,6 +46,20 @@ BINDING = EndpointSpec(
     allows_redirect=False,
     pagination_contract=None,
 )
+BADGE_LOGIN = EndpointSpec(
+    name="cultivate:badge-login",
+    scheme="https",
+    host="api-takumi.mihoyo.com",
+    path="/common/badge/v1/login/account",
+    method="POST",
+    purpose="establish this game's cultivate session inside the shared browser",
+    allows_body=True,
+    allows_device_id=False,
+    required_response_fields=(),
+    allows_auth_cookie=True,
+    allows_redirect=False,
+    pagination_contract=None,
+)
 AVATAR_BASIC = EndpointSpec(
     name="record:avatar/basic",
     scheme="https",
@@ -119,6 +133,7 @@ CULTIVATE_BATCH_DETAIL = EndpointSpec(
 
 _REGISTERED_ENDPOINTS = (
     BINDING,
+    BADGE_LOGIN,
     AVATAR_BASIC,
     AVATAR_INFO,
     BUDDY_INFO,
