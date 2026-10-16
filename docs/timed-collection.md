@@ -1,58 +1,79 @@
-# 可重复计时采集
+# 持久化的前台采集工作流
 
-普通同步仍默认串行。需要原神和绝区零完整计时或串并行比较时，使用仓库的 `tools/timed_collection.mjs`，不再复制实验目录中的脚本。游戏采集实现、双轮、身份和保存契约沿用 [AGENTS](../AGENTS.md)。此入口随源码及 sdist 分发；单独 wheel 内含底层 `client_runner.mjs`，不含仓库 tools/Skill。需要完整编排时保留源码 checkout。
+`src/hoyo_roster/client_workflow.mjs` 的 `openCollectionWorkflow` 是原神和绝区零页面同步的统一入口，随 wheel 和源码一起分发。顶层控制器串起环境准备、来源版本固定、采集、收尾、快照验证和报告；[游戏规则](../AGENTS.md)继续由原有核心执行。`tools/timed_collection.mjs`、`tools/analyze_collection.py` 保留兼容入口，不作为新的执行流程。
 
-## 更新与预检
+## 配置和调用
 
-仅在用户要求更新时检查 `git status --short`、`git fetch origin` 和当前分支与远端的差异。干净且可快进时 `git pull --ff-only`；有未提交修改或分叉时保留现场，判断分支用途。采集入口不会隐式拉取或切换代码，也不每次无条件重装。
-
-选择实际 Python 3.12 环境，先运行 `python tools/verify_installation.py`。它按字节核对全部 Python/JavaScript/资源清单，拒绝多余安装文件和脏源码；仅安装不匹配时构建并重装，重试预检。源码改动应先完成验证并提交，再以干净版本采集。开发测试可用 `PYTHONPATH=src`，实际安装核验不要设置它来掩盖旧安装。
-
-## 前台执行
-
-按当前客户端浏览器工具的文档取得真实内置浏览器对象。将下列配置填成实际绝对路径；不要导出认证材料。先用客户端支持的前台执行超时 270 秒调用：
+运行 `hoyo-roster-workflow --entrypoint` 可获得实际包入口 file URL 和解释器；`hoyo-roster-workflow --status ABSOLUTE_RUN_DIRECTORY` 只读固定状态。在当前客户端的主动浏览器工具调用中导入该包路径。客户端工具负责取得真实内置浏览器对象；不由本项目启动另一个浏览器。
 
 ```js
-var { startTimedCollection } = await import(REPOSITORY_FILE_URL + "/tools/timed_collection.mjs");
-var collection = await startTimedCollection(browser, {
-  python: PYTHON_312_EXECUTABLE,
+var { openCollectionWorkflow } = await import(PACKAGE_FILE_URL + "/client_workflow.mjs");
+var workflow = await openCollectionWorkflow({
   directory: NEW_PRIVATE_RUN_DIRECTORY,
-  runtimeRoot: SHARED_RUNTIME_DIRECTORY,
   parallelGames: true,
 });
-console.log(await collection.advance());
+console.log(await workflow.advance(browser));
 ```
 
-配置变量由执行者选择；`REPOSITORY_FILE_URL` 是 checkout 的 file URL。默认 `parallelGames:false`；比较时只改变此参数及新的 run 目录，其他条件保持一致。入口再次实时运行版本预检，安全创建新的私有目录；目录已存在或位于 checkout 内会拒绝，避免覆盖旧证据及污染源码。
+`PACKAGE_FILE_URL` 指向源码 `src/hoyo_roster` 或实际安装包目录，目录参数为私有 run 目录。必填配置只有 directory；不从 cwd 猜仓库、不扫描用户目录。默认串行，示例显式启用跨游戏并发。Python 从安装环境、源码 .venv、已知 Python 命令中检测 3.12；歧义时显式传 python。缺少基础依赖时尝试安装选中的公开包；无法建立安全控制环境时返回固定错误，不假装已经创建可恢复任务。
 
-下一次主动调用只运行 `await collection.advance()`，直至 `done:true`。每段最多 180 秒启动预算，内部窗口最多十秒，收拢最长 45 秒来源后返回；实际墙钟可超过启动预算。不要开后台循环，不要在请求仍待推进时只等待 worker completion。工具外层异常时，在可执行的前台调用中 `await collection.cancel()`。
+其他可选参数：
 
-登录 question 立即返回；遵守 [Skill](../.agents/skills/local-roster/SKILL.md) 的 attempt 规则，由用户在页面完成登录并明确确认后，调用 `collection.host.answerLogin("completed", question.attempt)`，再继续同一对象。入口不自动回答登录问题。换客户端或宿主重启后不能假定绑定或页面仍有效。
+| 参数 | 默认与含义 |
+| --- | --- |
+| python | 已知位置自动发现；显式值选择实际 3.12 解释器 |
+| runtimeRoot | 平台用户私有根；覆盖时跨 run 复用同一路径，不能每游戏各建一套锁 |
+| update | false；仅用户要求更新时传 true，检查干净工作区后 fetch 并只允许快进当前 upstream；不切分支、不 reset |
+| repairInstallation | true；已匹配就跳过；不匹配时重装并逐文件复核 |
+| installationArtifact | 可选的本地 wheel，供离线修复安装；安装后仍须与目标源码逐字节匹配 |
+| baseline | 明确选择的旧 run 目录；自动核对数据并比较采集耗时 |
 
-每个目录自动生成：
+复用已有 directory 时只传 directory 和必要的 python；其他配置不可悄悄更改。预检失败是显式失败状态，不会带着旧包继续。更新仅发生在第一次准备阶段；恢复禁止切换采集版本。公开 JS 被复制到该 run 内按内容哈希隔离的代码目录，避免长驻 ESM 缓存执行旧代码；不复制浏览器状态。
+
+## 固定状态机
+
+| 状态 | nextAction | 行为 |
+| --- | --- | --- |
+| PREPARING | CONTINUE | 源码状态、授权更新、安装检查/修复、固定 runtime |
+| WAITING_BROWSER | ATTACH_BROWSER | 等待实际浏览器；已附加时返回 CONTINUE |
+| COLLECTING | CONTINUE | 同一 worker 执行各游戏身份、双轮、校验、原子保存 |
+| WAITING_LOGIN | CONFIRM_LOGIN | 挂起在人工登录；使用当前 opaque attempt 回复 |
+| VERIFYING | CONTINUE | 验证快照哈希、字段、身份和当前尝试的复核记录 |
+| REPORTING | CONTINUE | 自动生成本机结构化及 Markdown 报告 |
+| SUCCEEDED | DONE | worker 已关闭、设置恢复、验证与报告均完成 |
+| FAILED / CANCELLED | STOP | 固定错误或明确取消；不能报告 PASS |
+
+每次只调用 `await workflow.advance(browser)`，控制器选择阶段；不再另外启动分析命令。准备阶段单独返回；采集阶段在一个主动调用里连续推进，最多 180 秒启动预算，内部每窗十秒并收拢最长45秒来源，完成后自动验证和报告。测试桌面采用 270 秒工具超时。主动调用返回后不继续浏览器工作。不得仅后台等待 worker completion；不得用两个任务绕过浏览器占用、共享锁或两秒节流。
+
+登录立即返回 question，用户在官方页面处理全部凭据和验证。只有本人针对当前 `question.attempt` 明确确认后才能调用 `workflow.answerLogin("completed", question.attempt)`。waiting 保留相同问题并等待，不重复询问；cancel 调用 `await workflow.cancel()`。详见 [Skill](../.agents/skills/local-roster/SKILL.md)。控制器拒绝错尝试、换浏览器及并行 advance。收尾保留共享浏览器，不自动关闭页面。
+
+## 持久化与恢复
+
+`workflow.json` 使用已有私有权限、排他锁及原子元数据写入，保存不可变配置、源码/包摘要、阶段、尝试、身份指纹、已提交快照路径与哈希。不保存真实浏览器引用、认证材料或登录确认。MD 不是恢复状态来源。
+
+游戏首次读官方身份时将身份指纹固定；双轮一致、校验通过且 store.save 成功后才写该游戏检查点。源数据、身份或持久化失败不成为已完成记录。恢复先重新建立客户端宿主并读取官方身份；已提交游戏还须验证原快照哈希和格式，只复核身份、不重复收集；未提交游戏重新执行两轮，拒绝混合未完成轮次。
+
+新进程恢复调用相同 `openCollectionWorkflow({directory, python?})`，随后继续 advance。旧控制器、准备进程或 worker 仍活着会拒绝接管，不盲杀 PID。旧 worker 随私有管道断开退出、锁释放后才能继续。若旧客户端进程仍活着但对象绑定丢失，返回 BUSY 是安全限制，需要恢复原对象或由本人处理原进程；不能虚构跨客户端重启保持。
+
+验证/报告阶段中断可离线重做，报告写入后才进入 SUCCEEDED。明确取消保持 CANCELLED；只有用户恢复请求才使用 retry。retry 仅允许列明的临时失败，身份变化、风控、限流及检查点损坏不允许盲重试。版本变化需要新的任务，不能在旧记录上混跑新代码。
+
+## 产物和计时
 
 | 文件 | 用途 |
 | --- | --- |
-| version.json | 本次实时源码 SHA、干净状态、安装匹配和文件数 |
-| events.jsonl | 窗口、每次 pump、来源和浏览器阶段指标；私有保留 |
-| steps.md | 每步 UTC、耗时及经过白名单筛选的进度 |
-| result.json | worker 真正关闭且页面设置恢复后才写入退出结果 |
-| results/ | 双轮核验和原子保存后的私有页面快照 |
+| workflow.json | 权威持久化状态及每游戏检查点 |
+| workflow-steps.md | 预检、采集、人工等待、验证、报告的逐阶段墙钟 |
+| attempts/NNNN/version.json | 该尝试固定版本 |
+| attempts/NNNN/events.jsonl、steps.md、result.json | 每窗口/pump/来源指标和真实 worker 关闭结果 |
+| results/ | 经过验证、原子保存的个人页面快照 |
+| report/summary.json、summary.md | 自动生成的最终报告、计时与可选基线对比 |
 
-返回到对话的状态仅包含固定进度，完整路径和结果事件留在本机。失败时取消并等待 worker 关闭、恢复临时页面设置；失败日志不会成为成功结果。不关闭共享浏览器。此编排没有修改各游戏双轮和身份实现。
+全流程墙钟与采集尝试墙钟分别报告。人工等待、中断和交接空档计入所属阶段；中断前尚未落盘的浏览器跨度标为不完整，不补造数据。不同进程 performance.timeOrigin 不同，只在各次尝试内部计算跨度并集与交叠，不能跨进程直接合并。嵌套跨度不相加冒充端到端。
 
-## 离线复盘
+旧实验记录仍可用 `hoyo-roster-analyze --run RUN_DIRECTORY --compare BASELINE_DIRECTORY --output REPORT_DIRECTORY` 离线分析；标注 replay，不当作新增真实采集。正常工作流不需要这一步。更换源码、数据范围或恢复任务后的性能差值不当作同条件提速。
 
-```sh
-python tools/analyze_collection.py --run RUN_DIRECTORY --compare BASELINE_DIRECTORY --output REPORT_DIRECTORY
-```
+## 验证边界
 
-单次分析省略 `--compare`。兼容旧实验目录的中文文件名，无硬编码 UID、样本角色数、日期或本机路径。报告输出 `analysis.json` 和 `analysis.md`：校验两游戏提交状态、两轮名单/身份事件、实际保存的快照，再计算来源次数、跨度和区间并集、交叠、真实启动间隔、窗口空档、分操作统计。比较时核对源码、身份、名单和详情；数据变化不能冒充同条件提速。失败证据返回非零码；这是采集证据检查器，不能证明日志来源真实性，也不替代游戏内实际双轮比较。
+`tests/test_collection_workflow.py` 运行实际身份、双轮、规范化与保存，覆盖恢复、账号/快照变化、状态机和收尾门槛。`tests/test_client_workflow_driver.mjs` 检查单入口、人工等待、取消及离线报告衔接。`tests/test_client_workflow_integration.mjs` 使用真实控制进程、worker、管道和保存，在第一个游戏提交后退出控制进程，再由另一个进程恢复；只替换官方来源为合成数据。
 
-报告默认是**已有证据的离线重算**，并非重新抓取。嵌套阶段与并行跨度不能直接相加。首次安装/开发/回归不计入一次采集成绩；需要测这些环节时另行保存实际命令与墙钟时间。
-
-## 证据位置与人工边界
-
-`tests/test_client_collection.mjs` 覆盖等待登录、续跑、启动预算、无脱离调用的后台推进、错误收尾与预检失败不碰浏览器；`tests/test_collection_analysis.py` 用真实 CLI/规范化/存储生成合成快照，覆盖交叠算法、账号变化、缺双轮/身份/详情、失败退出和节流证据拒绝。原有 `tests/test_client_parallel.mjs` 继续用真实 worker 管道验证并发、节流、双轮、提交和取消。
-
-浏览器工具初始化、前台工具调用交接、用户登录确认属于宿主或人工边界，由 Skill 固定操作。页面选择器改变仍需真实页面验收；代码测试和历史日志重算不应被报告成当前页面的新增验收。PR 创建/合并只在用户授权范围内执行，不属于每次抓取的自动步骤。
+真实官网验收应单独记录源码版本、平台、阶段计时、角色数量和结果范围。合成进程恢复测试不等于真实桌面客户端重启验收。所有个人产物仅存本机；不因工作流完成而自动创建 PR、推送、发布或合并。

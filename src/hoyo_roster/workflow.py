@@ -97,9 +97,24 @@ async def run_task(args, client=None):
         raise ClientBrowserRequired()
     if not isinstance(client, ClientSession):
         raise ClientBrowserRequired()
+    if getattr(args, "collection_run", None) is not None:
+        from .collection_state import CollectionCheckpoint
+
+        if not args.client_stdio or args.operation != "sync" or args.game != "all":
+            raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
+        checkpoint = CollectionCheckpoint(args.collection_run)
+        config = checkpoint.store.read()["config"]
+        if (
+            args.storage_root != checkpoint.store.root / "results"
+            or str(args.runtime_root) != config["runtime_root"]
+        ):
+            raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
+        args._collection_checkpoint = checkpoint
     results = []
     try:
         async with SessionService(client, args.runtime_root) as session:
+            if getattr(args, "_collection_checkpoint", None) is not None and not client.page_reader:
+                raise WorkspaceError("WORKFLOW_PAGE_READER_REQUIRED")
             if args.operation == "login":
                 await login(client)
                 print("LOGIN_STATUS=USER_CONFIRMED", flush=True)

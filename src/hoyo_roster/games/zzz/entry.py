@@ -43,7 +43,7 @@ async def run(args, session):
         try:
             await session.client.require_sources("zzz", PAGE_SOURCES)
         except ClientSourceUnavailable:
-            if session.parallel:
+            if session.parallel or getattr(args, "_collection_checkpoint", None) is not None:
                 raise
             pass
         else:

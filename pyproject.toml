@@ -18,6 +18,8 @@ dev = ["pytest==8.4.1", "ruff==0.12.7", "build==1.6.1"]
 
 [project.scripts]
 hoyo-roster = "hoyo_roster.cli:main"
+hoyo-roster-analyze = "hoyo_roster.collection_analysis:main"
+hoyo-roster-workflow = "hoyo_roster.collection_control:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoyo_roster"]

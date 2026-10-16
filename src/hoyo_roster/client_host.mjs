@@ -10,7 +10,8 @@ const SOURCES = Object.freeze({
     "cultivate:user/avatar_basic_list", "cultivate:user/batch_avatar_detail_v2", "cultivate:badge-login",
     "page:identity", "page:roster", "page:detail"]),
 });
-const BROWSER_TASKS = new WeakSet();
+// Share the lease across version-addressed runtime imports in the same client.
+const BROWSER_TASKS = globalThis[Symbol.for("hoyo-roster.browser-tasks")] ??= new WeakSet();
 const MAX_FRAME = 16 * 1024 * 1024;
 const FAILURES = new Set(["AUTHENTICATION_REQUIRED", "LOGIN_CANCELLED", "LOGIN_TIMEOUT",
   "CLIENT_BROWSER_REQUIRED", "CLIENT_BROWSER_UNAVAILABLE", "CLIENT_SOURCE_UNAVAILABLE",
@@ -283,7 +284,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let python, cwd, game, operation, args;
       try {
         if (!options || typeof options !== "object" || Array.isArray(options) ||
-            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames"].includes(k))) {
+            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun"].includes(k))) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         ({ python, cwd, game = "all", operation = "sync" } = options);
@@ -293,11 +294,13 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         args = ["-m", "hoyo_roster", "--client-stdio", "--game", game, "--operation", operation];
+        if (options.collectionRun !== undefined && (game !== "all" || operation !== "sync" || options.uid !== undefined)) throw failure("CLIENT_PROTOCOL_ERROR");
         if (options.parallelGames !== undefined && typeof options.parallelGames !== "boolean") throw failure("CLIENT_PROTOCOL_ERROR");
         concurrentGames = options.parallelGames === true && game === "all" && operation !== "login";
         if (concurrentGames) args.push("--parallel-games");
         for (const [option, value] of [
           ["--storage-root", options.storageRoot], ["--runtime-root", options.runtimeRoot], ["--uid", options.uid],
+          ["--collection-run", options.collectionRun],
         ]) {
           if (value !== undefined) {
             if (!validString(value) || (option !== "--uid" && !isAbsolute(value))) throw failure("CLIENT_PROTOCOL_ERROR");
