@@ -1,5 +1,6 @@
 """Compare the loaded public package with this fixed checkout, never authentication data."""
 
+import argparse
 import hashlib
 import json
 import subprocess
@@ -11,9 +12,8 @@ import hoyo_roster
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main() -> int:
-    installed = Path(hoyo_roster.__file__).resolve().parent
-    source = ROOT / "src/hoyo_roster"
+def verify(root: Path, installed: Path) -> dict:
+    source = root / "src/hoyo_roster"
     required = [
         path
         for path in source.rglob("*")
@@ -36,14 +36,14 @@ def main() -> int:
         ):
             mismatches += 1
     revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=5
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=5
     )
     status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, timeout=5
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, timeout=5
     )
     clean = status.returncode == 0 and not status.stdout
     matched = bool(required) and mismatches == 0 and not unexpected
-    result = {
+    return {
         "source_sha": revision.stdout.strip() if revision.returncode == 0 else None,
         "source_worktree_clean": clean,
         "loaded_package": str(installed),
@@ -53,8 +53,38 @@ def main() -> int:
         "unexpected_installed_files": len(unexpected),
         "installation_matches_source": matched,
     }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--prepare-run", type=Path, help="New private log directory outside checkout"
+    )
+    args = parser.parse_args()
+    result = verify(ROOT, Path(hoyo_roster.__file__).resolve().parent)
+    passed = bool(
+        result["source_worktree_clean"]
+        and result["installation_matches_source"]
+        and result["source_sha"]
+    )
+    if passed and args.prepare_run is not None:
+        from hoyo_roster.user_workspace import private_directory
+
+        path = args.prepare_run
+        try:
+            if (
+                not path.is_absolute()
+                or path.resolve().is_relative_to(ROOT.resolve())
+                or path.exists()
+                or path.is_symlink()
+            ):
+                raise ValueError()
+            private_directory(path)
+        except Exception:
+            result["error_code"] = "UNSAFE_OR_EXISTING_RUN_DIRECTORY"
+            passed = False
     print(json.dumps(result, indent=2))
-    return 0 if clean and matched and result["source_sha"] else 1
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

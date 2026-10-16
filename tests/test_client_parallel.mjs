@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClientHost } from "../src/hoyo_roster/client_host.mjs";
 import { pumpWindow } from "../src/hoyo_roster/client_runner.mjs";
+import { recordCollection } from "../tools/timed_collection.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const python = join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
@@ -35,10 +36,15 @@ test("one real worker multiplexes games, throttles actual starts and commits bot
     finally {active.delete(q.game);completions.push(q.game);}
   } });
   const task=host.startTask({python,cwd:root,parallelGames:true,runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
+  const logs = join(temp, "timing");
+  await mkdir(logs, {mode:0o700});
+  let released = false;
+  const recorder = await recordCollection({drainMetrics:()=>[], releasePageSettings:async()=>{released=true;}},
+    task, logs, {source_sha:"synthetic"}, true);
   try {
     while(!task.status().done){
       insidePump=true;
-      try{await pumpWindow(task);}finally{insidePump=false;}
+      try{await recorder.advance({launchMs:10000});}finally{insidePump=false;}
       assert.equal(active.size,0,"active browser work must be drained before returning");
     }
     const result=await task.completion;
@@ -53,6 +59,8 @@ test("one real worker multiplexes games, throttles actual starts and commits bot
     assert.equal(result.events.filter(x=>x==="COMMIT_STATE=COMMITTED").length,2);
     assert.ok(result.events.includes("TASK_STATUS=PASS"));
     assert.ok(result.events.some(x=>x.startsWith("CLIENT_TIMING=")));
+    assert.equal(released,true);
+    assert.equal(JSON.parse(await readFile(join(logs,"result.json"),"utf8")).code,0);
     await assert.rejects(readFile(join(temp,"results","snapshot.json")),{code:"ENOENT"});
   }finally{if(!task.status().done){task.cancel();await task.completion;}await rm(temp,{recursive:true,force:true});}
 });

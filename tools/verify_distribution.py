@@ -82,6 +82,10 @@ def verify(dist: Path) -> int:
                 "AGENTS.md",
                 "CLAUDE.md",
                 ".agents/skills/local-roster/SKILL.md",
+                "docs/timed-collection.md",
+                "tools/timed_collection.mjs",
+                "tools/analyze_collection.py",
+                "tools/verify_installation.py",
                 "data/.gitkeep",
             ]:
                 require(path in members, "SDIST_PUBLIC_RESOURCE_MISSING")
