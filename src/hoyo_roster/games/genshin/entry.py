@@ -1,6 +1,6 @@
 """genshin owns session checks, official identities, collection and saving."""
 
-from hoyo_roster.errors import AuthenticationRequired, WrongAccount
+from hoyo_roster.errors import AuthenticationRequired, WrongAccount, ClientSourceUnavailable
 from hoyo_roster.models import OwnedRole
 from hoyo_roster.game_runtime import execute_roles
 from .candidate import candidate_policy
@@ -34,6 +34,16 @@ def owned_roles(data):
 
 
 async def run(args, session):
+    if session.client.page_reader:
+        from hoyo_roster.page_source import PAGE_SOURCES
+        from .page import run as run_page
+
+        try:
+            await session.client.require_sources("genshin", PAGE_SOURCES)
+        except ClientSourceUnavailable:
+            pass
+        else:
+            return await run_page(args, session)
     required = (
         (BINDING.name,) if args.operation == "discover" else (BINDING.name, CULTIVATION_LIST.name)
     )

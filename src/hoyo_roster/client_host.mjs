@@ -5,9 +5,10 @@ import { isAbsolute } from "node:path";
 
 const LOGIN_URL = "https://act.mihoyo.com/ys/event/calculator/index.html#/character";
 const SOURCES = Object.freeze({
-  genshin: new Set(["binding", "cultivation-avatar-list"]),
+  genshin: new Set(["binding", "cultivation-avatar-list", "page:identity", "page:roster", "page:detail"]),
   zzz: new Set(["binding", "record:avatar/basic", "record:avatar/info", "record:buddy/info",
-    "cultivate:user/avatar_basic_list", "cultivate:user/batch_avatar_detail_v2", "cultivate:badge-login"]),
+    "cultivate:user/avatar_basic_list", "cultivate:user/batch_avatar_detail_v2", "cultivate:badge-login",
+    "page:identity", "page:roster", "page:detail"]),
 });
 const BROWSER_TASKS = new WeakSet();
 const MAX_FRAME = 16 * 1024 * 1024;
@@ -24,7 +25,7 @@ function failure(code) {
   return error;
 }
 
-export function createClientHost(browser, { readSource = null, sourceNames = null,
+export function createClientHost(browser, { readSource = null, sourceNames = null, pageReader = false,
   checkSources = null, prepareService = null, serviceSources = {} } = {}) {
   if (![browser?.tabs?.list, browser?.tabs?.get, browser?.tabs?.new].every(v => typeof v === "function")) {
     throw failure("CLIENT_BROWSER_REQUIRED");
@@ -32,6 +33,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
   if (readSource !== null && typeof readSource !== "function") {
     throw failure("SOURCE_ADAPTER_MISSING");
   }
+  if (typeof pageReader !== "boolean" || (pageReader && readSource === null)) throw failure("CLIENT_PROTOCOL_ERROR");
   if ([checkSources, prepareService].some(fn => fn !== null && typeof fn !== "function")) {
     throw failure("CLIENT_PROTOCOL_ERROR");
   }
@@ -132,7 +134,8 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
     if (method === "session.attach") {
       if (attached || Object.keys(params).length) throw failure("CLIENT_PROTOCOL_ERROR");
       attached = true;
-      return { browser: "client-built-in", source_reader: readSource !== null };
+      return { browser: "client-built-in", source_reader: readSource !== null,
+        ...(pageReader ? { page_reader: true } : {}) };
     }
     if (!attached) throw failure("CLIENT_PROTOCOL_ERROR");
     if (method === "source.check") {
