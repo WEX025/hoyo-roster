@@ -84,6 +84,7 @@ export function createGenshinPageSource(ui) {
       // A timeout is accepted only when the requested state was actually observed.
       try { await measure(operation, signal, () => label.click({ timeoutMs: 400 })); }
       catch (error) {
+        if (error.name !== "TimeoutError") throw error;
         const observed = await selectedNames();
         if (observed.includes(name) !== (operation === "genshin.select")) throw error;
       }
