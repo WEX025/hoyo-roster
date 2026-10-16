@@ -22,6 +22,7 @@ export async function dismissSchemeNotice(ui, tab, signal) {
 
 export function createZzzPageSource(ui) {
   let roster = null, epoch = null;
+  const measure = (name, signal, action) => ui.measure(name, signal, action);
   async function click(tab, locator, signal) {
     await dismissSchemeNotice(ui, tab, signal);
     try { return await ui.click(tab, locator, signal); }
@@ -57,44 +58,50 @@ export function createZzzPageSource(ui) {
         () => tab.playwright.locator(".game-role-list").isVisible(), signal);
     });
   }
-  async function selector(tab, signal) {
+  async function selector(tab, signal, scan = true) {
     await dismissSchemeNotice(ui, tab, signal);
     const isOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
     await openPanel(tab, tab.playwright.locator("svg.more-icon"), isOpen, signal);
-    return ui.wait(signal, () => tab.playwright.evaluate(() =>
+    if (!scan) return;
+    return measure("zzz.roster", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() =>
       Array.from(document.querySelectorAll(".agent-list__row .gt-card")).map(e => ({
         name: e.querySelector(".gt-card__info-outside")?.textContent?.trim(), text: e.innerText?.trim(),
-      }))), rows => rows.length > 0 && rows.every(r => r.name && /^(?:Lv\.[1-9][0-9]*|-)\s/.test(r.text ?? "")), { stable: true });
+      }))), rows => rows.length > 0 && rows.every(r => r.name && /^(?:Lv\.[1-9][0-9]*|-)\s/.test(r.text ?? "")), { stable: true }));
   }
   async function read({ source, params, body, signal, generation }) {
     if (body !== null || !params || typeof params !== "object" || Array.isArray(params)) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     const tab = await ui.page(PAGE, signal);
     if (source === "page:identity") {
+      roster = null; epoch = null;
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Reset transient selector/dialog overlays left by a previous interrupted
       // collection. Reloading this tab retains the SAME browser login session.
-      await ui.call(signal, () => tab.reload());
+      await measure("zzz.reload", signal, () => tab.reload());
       return ui.record("zzz", await ui.call(signal, () => tab.url()), "role-selector", await identity(tab, signal), generation);
     }
     const fields = source === "page:detail" ? "names,region,uid" : "region,uid";
     if (!sourceNames.includes(source) || Object.keys(params).sort().join(",") !== fields ||
       !/^[1-9][0-9]{0,31}$/.test(params.uid) || typeof params.region !== "string") throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     if (source === "page:roster") {
-      await ui.call(signal, () => tab.reload());
+      roster = null; epoch = null;
+      await measure("zzz.reload", signal, () => tab.reload());
       ui.assertIdentity(await identity(tab, signal), params);
       const cards = await selector(tab, signal);
       roster = cards.filter(r => /^Lv\./.test(r.text)).map(r => ({ name: r.name, level: r.text.match(/^Lv\.[0-9]+/)[0] }));
-      epoch = { uid: params.uid, region: params.region, generation };
+      epoch = { uid: params.uid, region: params.region, generation, tab };
       return ui.record("zzz", await ui.call(signal, () => tab.url()), "owned-selector", { rows: roster, excluded_unowned: cards.length - roster.length }, generation);
     }
-    if (!roster || epoch?.generation !== generation || epoch.uid !== params.uid || epoch.region !== params.region ||
+    if (!roster || epoch?.generation !== generation || epoch.tab !== tab || epoch.uid !== params.uid || epoch.region !== params.region ||
       !Array.isArray(params.names) || params.names.length !== 1 || !roster.some(r => r.name === params.names[0])) {
       throw sourceFailure("SOURCE_DATA_INVALID");
     }
     const name = params.names[0];
     const previousHeader = await ui.call(signal, () => headerName(tab));
-    await selector(tab, signal);
+    await measure("zzz.open-selector", signal, () => selector(tab, signal, false));
     const card = tab.playwright.locator(".agent-list__row .gt-card").filter({ has: tab.playwright.getByText(name, { exact: true }) });
+    await ui.wait(signal, () => card.isVisible(), Boolean);
+    const ownedLabel = await ui.call(signal, () => card.innerText({ timeoutMs: 1500 }));
+    if (!/^Lv\.[1-9][0-9]*\s/.test(ownedLabel)) throw sourceFailure("SOURCE_DATA_INVALID");
     let state = await click(tab, card.getByText(name, { exact: true }), signal);
     await dismissSchemeNotice(ui, tab, signal);
     if (await ui.call(signal, () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible()) &&
@@ -102,7 +109,7 @@ export function createZzzPageSource(ui) {
       state = await click(tab, card.getByText(name, { exact: true }), signal);
     }
     const transition = !state.includes("当前技能等级");
-    const detail = await ui.wait(signal, () => tab.playwright.evaluate(() => {
+    const detail = await measure("zzz.details", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() => {
       const find = text => Array.from(document.querySelectorAll("p,div")).find(e => e.textContent?.trim() === text && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0);
       const name = Array.from(document.querySelectorAll("div.relative.z-2")).find(e => e.parentElement.classList.contains("mr-4"))?.textContent?.trim();
       const weapon = find("当前音擎"), skills = find("当前技能等级"), discs = find("当前装备驱动盘");
@@ -120,7 +127,7 @@ export function createZzzPageSource(ui) {
         preview: document.body.innerText.includes("未拥有该代理人，正在预览方案"),
         selector_open: Array.from(document.querySelectorAll(".agent-list__row")).some(e =>
           e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0) };
-    }), value => value.name && (value.name !== previousHeader || transition) && !value.preview && !value.selector_open && value.current_weapon && value.current_skills && value.current_discs, { stable: true });
+    }), value => value.name && (value.name !== previousHeader || transition) && !value.preview && !value.selector_open && value.current_weapon && value.current_skills && value.current_discs, { stable: true }));
     return ui.record("zzz", await ui.call(signal, () => tab.url()), "current-agent-sections", { details: [{ name, display_name: detail.name,
       current_weapon: detail.current_weapon, current_skills: detail.current_skills, current_discs: detail.current_discs }] }, generation);
   }

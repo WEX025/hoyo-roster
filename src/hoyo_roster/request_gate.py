@@ -14,6 +14,7 @@ class RequestGate:
         self.path = settings.root / "request-state.json"
 
     async def reserve(self, *, requested_min_interval: float) -> float:
+        started = time.monotonic()
         if not math.isfinite(requested_min_interval) or requested_min_interval < 2:
             raise ConfigurationError("Request interval must be at least two seconds")
         now = time.time()
@@ -35,6 +36,14 @@ class RequestGate:
             # A future/corrupt clock reservation is not permission to reset throttling.
             # Reject before changing its evidence or waiting outside the operation budget.
             raise RequestScheduleInvalid("Persisted request schedule exceeds the wait budget")
+        persist_started = time.monotonic()
         atomic_write_metadata(self.path, {"next_allowed_at": scheduled + requested_min_interval})
+        persisted = time.monotonic()
         await asyncio.sleep(wait)
+        self.last_reservation = {
+            "planned_wait_ms": wait * 1000,
+            "actual_wait_ms": (time.monotonic() - persisted) * 1000,
+            "persist_ms": (persisted - persist_started) * 1000,
+            "total_ms": (time.monotonic() - started) * 1000,
+        }
         return scheduled

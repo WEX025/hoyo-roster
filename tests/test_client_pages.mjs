@@ -12,7 +12,7 @@ test("ZZZ retries only an explicit official error once, preserving the same page
       playwright: { getByRole: () => ({ isVisible: async () => false }),
         getByText: text => ({ text, isVisible: async () => failed && text === "出错了，请重试" && scenario !== "unknown" }),
         locator: () => ({ count: async () => 1 }) } };
-    const ui = { page: async () => tab, call: async (_signal, action) => action(),
+    const ui = { measure: async (_name, _signal, action) => action(), page: async () => tab, call: async (_signal, action) => action(),
       identity: async selected => { assert.equal(selected, tab); identities++;
         if (failed) throw Object.assign(new Error("synthetic"), { code: scenario === "auth" ? "AUTHENTICATION_REQUIRED" : "SOURCE_REQUEST_NOT_OBSERVED" });
         return { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };

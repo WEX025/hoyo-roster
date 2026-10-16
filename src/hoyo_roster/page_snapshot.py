@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 import re
+import json
+import time
 
 import portalocker
 
@@ -176,6 +178,9 @@ class PageSnapshotStore:
 
 
 async def run_page_game(args, session, *, game, source, normalize, batch_size):
+    game_started = time.monotonic()
+    print(f"PAGE_GAME_BEGIN={game}", flush=True)
+
     async def check():
         value = await source.read("identity")
         return identity(value, game), value
@@ -241,13 +246,37 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                 first = await collect()
                 print("PAGE_PASS=2", flush=True)
                 second = await collect()
+                validation_started = time.monotonic()
                 if first != second:
                     raise SourceDataInvalid()
                 validate_snapshot(second, game, normalize)
+                print(
+                    "PAGE_TIMING="
+                    + json.dumps(
+                        {
+                            "game": game,
+                            "phase": "validate",
+                            "duration_ms": (time.monotonic() - validation_started) * 1000,
+                        }
+                    ),
+                    flush=True,
+                )
                 second["synced_at"] = (
                     datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
                 )
+                save_started = time.monotonic()
                 changed = store.save(second)
+                print(
+                    "PAGE_TIMING="
+                    + json.dumps(
+                        {
+                            "game": game,
+                            "phase": "save",
+                            "duration_ms": (time.monotonic() - save_started) * 1000,
+                        }
+                    ),
+                    flush=True,
+                )
                 break
             except AuthenticationRequired:
                 if attempt:
@@ -277,6 +306,18 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                     (RoleResult(role, "FAIL", "PAGE_SAVE_FAILED", result_scope=store.root),),
                     error_code="PAGE_SAVE_FAILED",
                 )
+    print(
+        "PAGE_TIMING="
+        + json.dumps(
+            {
+                "game": game,
+                "phase": "game",
+                "duration_ms": (time.monotonic() - game_started) * 1000,
+            }
+        ),
+        flush=True,
+    )
+    print(f"PAGE_GAME_SAVED={game}", flush=True)
     print(
         f"PAGE_DETAILS_UNAVAILABLE={sum(d.get('status') == 'unsupported' for d in second['details'])}",
         flush=True,

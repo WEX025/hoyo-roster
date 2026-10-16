@@ -314,9 +314,20 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let inFlight = null;
       let pumping = false;
       let killTimer = null;
+      let queueWake = null;
+      function wakeQueue() { const wake = queueWake; queueWake = null; wake?.(); }
+      async function waitForRequest(waitMs) {
+        if (!waitMs || requests.length || exitCode !== null || errorCode) return;
+        await new Promise(resolve => {
+          const finish = () => { clearTimeout(timer); queueWake = null; resolve(); };
+          const timer = setTimeout(finish, waitMs);
+          queueWake = finish;
+        });
+      }
       function stop(code) {
         if (exitCode !== null || errorCode) return;
         errorCode = code;
+        wakeQueue();
         events.push("ERROR_CODE=" + code);
         abort(code);
         requests.length = 0;
@@ -343,6 +354,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         } else {
           if (message?.event || requests.length || active) { stop("CLIENT_PROTOCOL_ERROR"); return; }
           requests.push(message);
+          wakeQueue();
         }
       }
       child.stdout.on("data", chunk => {
@@ -377,6 +389,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         abort(errorCode ?? "CLIENT_BROWSER_UNAVAILABLE");
         requests.length = 0;
         exitCode = errorCode ? 1 : code;
+        wakeQueue();
         BROWSER_TASKS.delete(browser);
         resolve({ code: exitCode, errorCode, events: [...events] });
       }));
@@ -397,7 +410,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
               if (pending || exitCode !== null || lifetime.signal.aborted) break;
               if (inFlight) await inFlight;
               if (!requests.length) {
-                if (waitMs) await new Promise(r => setTimeout(r, waitMs));
+                await waitForRequest(waitMs);
                 if (!requests.length || exitCode !== null || lifetime.signal.aborted) break;
               }
               const message = requests.shift();
