@@ -12,8 +12,18 @@ class RequestGate:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.path = settings.root / "request-state.json"
+        self._reservation_lock = asyncio.Lock()
 
     async def reserve(self, *, requested_min_interval: float) -> float:
+        queued = time.monotonic()
+        async with self._reservation_lock:
+            queue_wait = (time.monotonic() - queued) * 1000
+            scheduled = await self._reserve(requested_min_interval=requested_min_interval)
+            self.last_reservation["queue_wait_ms"] = queue_wait
+            self.last_reservation["total_ms"] += queue_wait
+            return scheduled
+
+    async def _reserve(self, *, requested_min_interval: float) -> float:
         started = time.monotonic()
         if not math.isfinite(requested_min_interval) or requested_min_interval < 2:
             raise ConfigurationError("Request interval must be at least two seconds")

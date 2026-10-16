@@ -7,7 +7,9 @@ export async function pumpWindow(task, { budgetMs = 10000, onStep = () => {} } =
   let status = task.status();
   while (!status.done && !status.question && performance.now() - started < budgetMs) {
     const before = performance.now();
-    status = await task.pump({ maxRequests: 1, waitMs: 1000 });
+    status = await task.pump(status.parallelGames ? {
+      maxRequests: 64, waitMs: 1000, launchBudgetMs: Math.max(0, budgetMs - (performance.now() - started)),
+    } : { maxRequests: 1, waitMs: 1000 });
     await onStep({ started: before, duration_ms: performance.now() - before, status });
   }
   return status;

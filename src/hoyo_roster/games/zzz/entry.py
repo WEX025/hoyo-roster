@@ -43,6 +43,8 @@ async def run(args, session):
         try:
             await session.client.require_sources("zzz", PAGE_SOURCES)
         except ClientSourceUnavailable:
+            if session.parallel:
+                raise
             pass
         else:
             return await run_page(args, session)

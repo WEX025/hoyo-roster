@@ -23,6 +23,10 @@ from .storage.common import secure_private_directory, MetadataError
 MODULE_ROOT = Path(__file__).resolve().parent
 
 
+class ParallelRecoveryRequired(Exception):
+    """Quiesce peer readers before entering the existing shared login recovery."""
+
+
 def runtime_scope(value: Path | None = None) -> Path:
     root = (value if value is not None else paths.default_private_root()).expanduser()
     if not root.is_absolute():
@@ -55,6 +59,8 @@ class SessionService:
         self.handoff = None
         self._checks = {}
         self._lock = None
+        self.parallel = False
+        self.parallel_recovered = False
 
     async def __aenter__(self):
         # Prove a real host connection before selecting any private runtime paths.
@@ -73,6 +79,12 @@ class SessionService:
         self._lock.__exit__(*exc)
 
     async def recover(self, verify_current=None):
+        if self.parallel:
+            raise ParallelRecoveryRequired()
+        if self.parallel_recovered:
+            error = AuthenticationRecoveryFailed()
+            error.stop_account = True
+            raise error
         try:
             handoff = await login(self.client)
             if handoff.session is not self.client or not handoff.user_confirmed:

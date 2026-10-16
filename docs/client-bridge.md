@@ -10,6 +10,8 @@ AI 在当前客户端的 JavaScript 运行时导入 src/hoyo_roster/client_runti
 
 先安装当前 Python 包，核对与所选源码一致，再调用 host.startTask，传 python、cwd、operation（sync/discover/login）、game（默认 all），可选 storageRoot、runtimeRoot、uid。宿主以参数数组启动 Python 私有工作进程，不使用 shell；协议不出现在可见终端。
 
+`parallelGames: true` 可在同一任务交叠两游戏，默认 false 用于串行兼容/对照。会话锁和浏览器占用仍唯一，各游戏来源内部串行；最多两条不同游戏请求在途。私有管道按递增请求 ID 接收、按对应 ID 返回，回复可乱序。控制/登录请求保持排他，并发恢复先收拢在途读源后统一登录和核验，再串行重做未提交游戏。共享两秒来源间隔同时由 Python 调度和并发宿主实际启动端约束。
+
 ## 分层与历史代码迁移
 
 | 文件 | 职责 |
@@ -49,7 +51,7 @@ API 读取器仅在所选标签页明确声明 cdp 能力时使用公开 CdpTabC
 
 ## 推进与登录交接
 
-每个客户端工具回合内显式 await task.pump({maxRequests: 1})。管道回调只入队，不在后台调用浏览器；每个来源步骤包括页面准备，总期限为 45 秒。超时和取消中止后续动作，迟到结果被丢弃，不提交数据。
+每个客户端工具回合内显式 await pumpWindow(task)。串行逐条推进；并发以十秒启动预算调度至多两条不同游戏读源，返回前收拢全部在途浏览器动作，登录问题立即交还。管道回调只入队，不在后台调用浏览器；每个来源步骤包括页面准备，总期限45秒。超时和取消中止后续动作，迟到结果被丢弃，不提交数据。CLIENT_TIMING 只记录请求序号、固定方法/游戏、队列等待与处理跨度，供区分排队和页面执行，不包含业务参数或结果。
 
 pump 遇到登录确认即返回；host.pendingQuestion() 给出 attempt、问题及选项。AI 对新 attempt 主动询问本人是否完成官方页面登录，并保留问题和 attempt 的关联。调用 host.answerLogin("completed", question.attempt) 只沿用针对本次尝试的明确确认；尚未完成用 waiting，取消用 cancel。认证再次失效是新尝试，旧答复不适用。pendingQuestion 不含凭据。保留 host/task 和页面，不在 JavaScript 中阻塞等待人类答复。
 

@@ -9,7 +9,7 @@ export async function dismissSchemeNotice(ui, tab, signal) {
   if (!(await ui.call(signal, () => notice.isVisible()))) return false;
   const acknowledge = tab.playwright.getByRole("button", { name: "知道了", exact: true });
   if (await ui.call(signal, () => acknowledge.isVisible())) {
-    try { await ui.click(tab, acknowledge, signal); }
+    try { await ui.click(tab, acknowledge, signal, { snapshot: false }); }
     catch (error) {
       // The known notice may finish closing between the visibility check and
       // click. Only that observed disappearance is recoverable here.
@@ -25,10 +25,10 @@ export function createZzzPageSource(ui) {
   const measure = (name, signal, action) => ui.measure(name, signal, action);
   async function click(tab, locator, signal) {
     await dismissSchemeNotice(ui, tab, signal);
-    try { return await ui.click(tab, locator, signal); }
+    try { return await measure("zzz.click", signal, () => ui.click(tab, locator, signal, { snapshot: false })); }
     catch (error) {
       if (!(await dismissSchemeNotice(ui, tab, signal))) throw error;
-      return ui.click(tab, locator, signal);
+      return measure("zzz.click", signal, () => ui.click(tab, locator, signal, { snapshot: false }));
     }
   }
   async function openPanel(tab, locator, ready, signal) {
@@ -77,7 +77,7 @@ export function createZzzPageSource(ui) {
       // Reset transient selector/dialog overlays left by a previous interrupted
       // collection. Reloading this tab retains the SAME browser login session.
       await measure("zzz.reload", signal, () => tab.reload());
-      return ui.record("zzz", await ui.call(signal, () => tab.url()), "role-selector", await identity(tab, signal), generation);
+      return ui.record("zzz", await ui.call(signal, () => tab.url()), "role-selector", await measure("zzz.identity", signal, () => identity(tab, signal)), generation);
     }
     const fields = source === "page:detail" ? "names,region,uid" : "region,uid";
     if (!sourceNames.includes(source) || Object.keys(params).sort().join(",") !== fields ||
@@ -85,7 +85,7 @@ export function createZzzPageSource(ui) {
     if (source === "page:roster") {
       roster = null; epoch = null;
       await measure("zzz.reload", signal, () => tab.reload());
-      ui.assertIdentity(await identity(tab, signal), params);
+      ui.assertIdentity(await measure("zzz.identity", signal, () => identity(tab, signal)), params);
       const cards = await selector(tab, signal);
       roster = cards.filter(r => /^Lv\./.test(r.text)).map(r => ({ name: r.name, level: r.text.match(/^Lv\.[0-9]+/)[0] }));
       epoch = { uid: params.uid, region: params.region, generation, tab };
@@ -102,13 +102,21 @@ export function createZzzPageSource(ui) {
     await ui.wait(signal, () => card.isVisible(), Boolean);
     const ownedLabel = await ui.call(signal, () => card.innerText({ timeoutMs: 1500 }));
     if (!/^Lv\.[1-9][0-9]*\s/.test(ownedLabel)) throw sourceFailure("SOURCE_DATA_INVALID");
-    let state = await click(tab, card.getByText(name, { exact: true }), signal);
+    // The official visible active marker associates an unchanged header with
+    // this owned card. Re-selecting it closes the panel without a title change.
+    const targetWasActive = await ui.call(signal, () => card.evaluate(e => Boolean(e.querySelector(".gt-card__content.active"))));
+    const selectorOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
+    await click(tab, card.getByText(name, { exact: true }), signal);
     await dismissSchemeNotice(ui, tab, signal);
-    if (await ui.call(signal, () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible()) &&
-      await ui.call(signal, () => headerName(tab)) === previousHeader) {
-      state = await click(tab, card.getByText(name, { exact: true }), signal);
+    const transition = await ui.call(signal, () => tab.playwright.evaluate(() =>
+      !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
+        e.textContent?.trim() === "当前技能等级" && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)));
+    try { await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 750 }); }
+    catch (error) {
+      if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
+      if (await ui.call(signal, selectorOpen)) await click(tab, card.getByText(name, { exact: true }), signal);
+      await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 3000 });
     }
-    const transition = !state.includes("当前技能等级");
     const detail = await measure("zzz.details", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() => {
       const find = text => Array.from(document.querySelectorAll("p,div")).find(e => e.textContent?.trim() === text && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0);
       const name = Array.from(document.querySelectorAll("div.relative.z-2")).find(e => e.parentElement.classList.contains("mr-4"))?.textContent?.trim();
@@ -127,7 +135,7 @@ export function createZzzPageSource(ui) {
         preview: document.body.innerText.includes("未拥有该代理人，正在预览方案"),
         selector_open: Array.from(document.querySelectorAll(".agent-list__row")).some(e =>
           e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0) };
-    }), value => value.name && (value.name !== previousHeader || transition) && !value.preview && !value.selector_open && value.current_weapon && value.current_skills && value.current_discs, { stable: true }));
+    }), value => value.name && (value.name !== previousHeader || targetWasActive || transition) && !value.preview && !value.selector_open && value.current_weapon && value.current_skills && value.current_discs, { stable: true }));
     return ui.record("zzz", await ui.call(signal, () => tab.url()), "current-agent-sections", { details: [{ name, display_name: detail.name,
       current_weapon: detail.current_weapon, current_skills: detail.current_skills, current_discs: detail.current_discs }] }, generation);
   }

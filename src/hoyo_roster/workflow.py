@@ -1,8 +1,9 @@
-"""Sequential independent games over a host-attached client session."""
+"""Independent games over one host-attached, globally throttled client session."""
 
+import asyncio
 import importlib
 
-from .auth import SessionService
+from .auth import SessionService, ParallelRecoveryRequired
 from .client import ClientSession
 from .errors import OperationError, ClientBrowserRequired
 from .login import login
@@ -10,6 +11,70 @@ from .user_workspace import WorkspaceError, direct_configuration
 from .game_runtime import GameResult, stops_account
 
 SUPPORTED_GAMES = ("genshin", "zzz")
+
+
+async def execute_game(args, session, game):
+    module = importlib.import_module("hoyo_roster.games." + game + ".entry")
+    try:
+        return await module.run(args, session)
+    except OperationError as error:
+        return GameResult(
+            game,
+            "FAIL",
+            error_code=error.code,
+            stop_account=stops_account(error, error.code),
+            missing_sources=getattr(error, "missing_sources", ()),
+        )
+    except WorkspaceError as error:
+        return GameResult(
+            game, "FAIL", error_code=str(error), stop_account=stops_account(error, str(error))
+        )
+
+
+async def parallel_games(args, session, games):
+    """One worker/lease; quiesce peers before recovery, preserving committed games."""
+    session.parallel = True
+    tasks = {asyncio.create_task(execute_game(args, session, game)): game for game in games}
+    pending, completed = set(tasks), {}
+    recovery = False
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            stop = False
+            for task in done:
+                try:
+                    result = task.result()
+                    completed[tasks[task]] = result
+                    stop |= result.stop_account
+                except ParallelRecoveryRequired:
+                    recovery = True
+            if stop or recovery:
+                break
+    finally:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        drain = getattr(session.client.port, "drain", None)
+        if drain is not None:
+            await drain()
+        session.parallel = False
+    if recovery and not any(r.stop_account for r in completed.values()):
+        print("PARALLEL_RECOVERY=QUIESCED\nPARALLEL_MODE=SERIAL_RECOVERY", flush=True)
+        try:
+            await session.recover()
+        except BaseException:
+            for result in completed.values():
+                result.report(finalized=False)
+            raise
+        session.parallel_recovered = True
+        for game in games:
+            if game not in completed:
+                print(f"PAGE_RESTART={game}", flush=True)
+                result = await execute_game(args, session, game)
+                completed[game] = result
+                if result.stop_account:
+                    break
+    return [completed[g] for g in games if g in completed]
 
 
 async def run_task(args, client=None):
@@ -39,28 +104,18 @@ async def run_task(args, client=None):
                 await login(client)
                 print("LOGIN_STATUS=USER_CONFIRMED", flush=True)
                 return 0
-            for game in games:
-                module = importlib.import_module("hoyo_roster.games." + game + ".entry")
-                try:
-                    result = await module.run(args, session)
-                except OperationError as error:
-                    result = GameResult(
-                        game,
-                        "FAIL",
-                        error_code=error.code,
-                        stop_account=stops_account(error, error.code),
-                        missing_sources=getattr(error, "missing_sources", ()),
-                    )
-                except WorkspaceError as error:
-                    result = GameResult(
-                        game,
-                        "FAIL",
-                        error_code=str(error),
-                        stop_account=stops_account(error, str(error)),
-                    )
-                results.append(result)
-                if result.stop_account:
-                    break
+            if (
+                getattr(args, "parallel_games", False)
+                and session.client.page_reader
+                and len(games) > 1
+            ):
+                results.extend(await parallel_games(args, session, games))
+            else:
+                for game in games:
+                    result = await execute_game(args, session, game)
+                    results.append(result)
+                    if result.stop_account:
+                        break
     except BaseException:
         for result in results:
             result.report(finalized=False)

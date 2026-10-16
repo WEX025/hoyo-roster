@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument(
+        "--parallel-games", action="store_true", help="同一任务内交叠两游戏；共享会话锁和两秒节流"
+    )
+    parser.add_argument(
         "--storage-root",
         type=Path,
         help="结果根目录（绝对路径）；默认为已核验源码仓库 data/，无源码时为系统用户数据根的 results/；不改变客户端浏览器会话",

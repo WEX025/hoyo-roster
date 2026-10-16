@@ -72,7 +72,10 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
   let attached = false;
   let pending = null;
   let sequence = 0;
-  let active = false;
+  let active = 0;
+  let concurrentGames = false;
+  const activeGames = new Set();
+  let exclusive = false;
   let started = false;
   let questionReady = null;
   let stopTask = null;
@@ -223,15 +226,19 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
 
   const host = {
     async exchange(message) {
+      const lane = concurrentGames && ["source.read", "source.check", "service.prepare"].includes(message?.method)
+        ? message?.params?.game : null;
       const valid = message && message.version === 1 && Number.isSafeInteger(message.id) &&
         message.id === sequence + 1 && typeof message.method === "string" &&
         message.params && typeof message.params === "object" && !Array.isArray(message.params) &&
         Object.keys(message).sort().join(",") === "id,method,params,session,version" &&
         (message.method === "session.attach" ? message.session === null : message.session === session);
-      if (!valid || active || lifetime.signal.aborted) {
+      if (!valid || lifetime.signal.aborted || (active &&
+          (!lane || exclusive || activeGames.has(lane) || active >= 2))) {
         return { version: 1, id: message?.id ?? 0, session, result: null, error: "CLIENT_PROTOCOL_ERROR" };
       }
-      active = true;
+      active++;
+      if (lane) activeGames.add(lane); else exclusive = true;
       sequence = message.id;
       try {
         const result = await dispatch(message.method, message.params);
@@ -239,7 +246,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       } catch (error) {
         return { version: 1, id: message.id, session, result: null,
           error: FAILURES.has(error?.code) ? error.code : "CLIENT_REQUEST_FAILED" };
-      } finally { active = false; }
+      } finally { active--; if (lane) activeGames.delete(lane); else exclusive = false; }
     },
 
     pendingQuestion() {
@@ -276,7 +283,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let python, cwd, game, operation, args;
       try {
         if (!options || typeof options !== "object" || Array.isArray(options) ||
-            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid"].includes(k))) {
+            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames"].includes(k))) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         ({ python, cwd, game = "all", operation = "sync" } = options);
@@ -286,6 +293,9 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         args = ["-m", "hoyo_roster", "--client-stdio", "--game", game, "--operation", operation];
+        if (options.parallelGames !== undefined && typeof options.parallelGames !== "boolean") throw failure("CLIENT_PROTOCOL_ERROR");
+        concurrentGames = options.parallelGames === true && game === "all" && operation !== "login";
+        if (concurrentGames) args.push("--parallel-games");
         for (const [option, value] of [
           ["--storage-root", options.storageRoot], ["--runtime-root", options.runtimeRoot], ["--uid", options.uid],
         ]) {
@@ -311,7 +321,8 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let endedCode = null;
       let streamEnded = false;
       let incoming = Buffer.alloc(0);
-      let inFlight = null;
+      const inFlight = new Set();
+      let nextSourceStart = 0;
       let pumping = false;
       let killTimer = null;
       let queueWake = null;
@@ -319,7 +330,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       async function waitForRequest(waitMs) {
         if (!waitMs || requests.length || exitCode !== null || errorCode) return;
         await new Promise(resolve => {
-          const finish = () => { clearTimeout(timer); queueWake = null; resolve(); };
+          const finish = () => { clearTimeout(timer); if (queueWake === finish) queueWake = null; resolve(); };
           const timer = setTimeout(finish, waitMs);
           queueWake = finish;
         });
@@ -352,8 +363,8 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
           streamEnded = true;
           child.stdin.end();
         } else {
-          if (message?.event || requests.length || active) { stop("CLIENT_PROTOCOL_ERROR"); return; }
-          requests.push(message);
+          if (message?.event || requests.length + active >= (concurrentGames ? 2 : 1)) { stop("CLIENT_PROTOCOL_ERROR"); return; }
+          requests.push({ message, queued: performance.now() });
           wakeQueue();
         }
       }
@@ -394,41 +405,75 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         resolve({ code: exitCode, errorCode, events: [...events] });
       }));
       const status = () => ({ done: exitCode !== null, code: exitCode, errorCode,
-        question: host.pendingQuestion(), pendingRequests: requests.length, events: [...events] });
+        question: host.pendingQuestion(), pendingRequests: requests.length,
+        parallelGames: concurrentGames, inFlight: inFlight.size, events: [...events] });
       return {
         status,
-        async pump({ waitMs = 250, maxRequests = 16 } = {}) {
+        async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0 } = {}) {
           if (pumping || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > 1000 ||
-              !Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 64) {
+              !Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 64 ||
+              !Number.isFinite(launchBudgetMs) || launchBudgetMs < 0 || launchBudgetMs > 10000) {
             throw failure("CLIENT_PROTOCOL_ERROR");
           }
           pumping = true;
           try {
             // SDK liveness checks only run inside this explicit active tool call.
             await checkPendingPage();
-            for (let handled = 0; handled < maxRequests; handled++) {
+            const deadline = performance.now() + launchBudgetMs;
+            let handled = 0;
+            const ready = new Promise(resolve => { questionReady = resolve; });
+            while (handled < maxRequests) {
               if (pending || exitCode !== null || lifetime.signal.aborted) break;
-              if (inFlight) await inFlight;
-              if (!requests.length) {
-                await waitForRequest(waitMs);
-                if (!requests.length || exitCode !== null || lifetime.signal.aborted) break;
+              if (launchBudgetMs && performance.now() >= deadline) break;
+              if (inFlight.size >= (concurrentGames ? 2 : 1)) {
+                await Promise.race([...inFlight, ready]);
+                continue;
               }
-              const message = requests.shift();
-              const ready = new Promise(resolve => { questionReady = resolve; });
-              inFlight = (async () => {
+              if (!requests.length) {
+                if (!inFlight.size) {
+                  await waitForRequest(waitMs);
+                  if (!requests.length && !launchBudgetMs) break;
+                } else await Promise.race([...inFlight, waitForRequest(waitMs), ready]);
+                if (!requests.length) {
+                  if (launchBudgetMs) continue;
+                  if (inFlight.size) continue;
+                  break;
+                }
+              }
+              if (pending || exitCode !== null || lifetime.signal.aborted ||
+                  (launchBudgetMs && performance.now() >= deadline)) break;
+              const next = requests[0]?.message;
+              const throttled = concurrentGames && ["source.read", "service.prepare"].includes(next?.method);
+              if (throttled && nextSourceStart > performance.now()) {
+                if (launchBudgetMs && nextSourceStart >= deadline) break;
+                while (!lifetime.signal.aborted && nextSourceStart > performance.now()) {
+                  await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(100, nextSourceStart - performance.now()))));
+                }
+                if (lifetime.signal.aborted) break;
+              }
+              const { message, queued } = requests.shift();
+              handled++;
+              const began = performance.now(), queueWait = began - queued;
+              if (throttled) nextSourceStart = began + 2000;
+              const current = (async () => {
                 const reply = await host.exchange(message);
                 if (lifetime.signal.aborted) return;
                 const encoded = JSON.stringify(reply) + "\n";
                 if (Buffer.byteLength(encoded, "utf8") > MAX_FRAME) { stop("CLIENT_PROTOCOL_ERROR"); return; }
                 if (child.stdin.writable) child.stdin.write(encoded);
-              })().catch(() => stop("CLIENT_PROTOCOL_ERROR"));
-              const current = inFlight;
-              await Promise.race([current, ready]);
-              questionReady = null;
-              if (pending) break;
-              await current;
-              if (inFlight === current) inFlight = null;
+                if (concurrentGames && ["WRONG_ACCOUNT", "RATE_LIMITED", "RISK_CONTROL", "CLIENT_PROTOCOL_ERROR"].includes(reply.error)) {
+                  stop(reply.error);
+                }
+                events.push("CLIENT_TIMING=" + JSON.stringify({ request: message.id, method: message.method,
+                  ...(message.params.game ? { game: message.params.game } : {}), phase: "exchange",
+                  started: began, queue_wait_ms: queueWait, duration_ms: performance.now() - began }));
+              })().catch(() => stop("CLIENT_PROTOCOL_ERROR")).finally(() => { inFlight.delete(current); wakeQueue(); });
+              inFlight.add(current);
             }
+            // No browser promise survives a normal active tool call. Human login is
+            // the sole exception, suspended before further browser work until answered.
+            if (inFlight.size && !pending) await Promise.race([Promise.all([...inFlight]), ready]);
+            questionReady = null;
             // Yield to process-close I/O after cancellation; callers may keep pumping.
             if (lifetime.signal.aborted && exitCode === null) await completion;
             return status();
