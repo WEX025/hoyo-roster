@@ -52,7 +52,7 @@ export function createGenshinPageSource(ui) {
   }
   async function owned(tab, signal, params, generation) {
     if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-      await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
+      tab = await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
     }
     await returnSelector(tab, signal);
     const role = await measure("genshin.identity", signal, () => identity(tab, signal));
@@ -67,18 +67,18 @@ export function createGenshinPageSource(ui) {
         name: e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim(),
         level: e.querySelector(".gt-avatar-name p")?.textContent?.trim(),
       }))), rows => rows.length > 0 && rows.every(r => r.name && /^Lv\.[1-9][0-9]*$/.test(r.level ?? "")), { stable: true }));
-    return { rows, role };
+    return { rows, role, tab };
   }
   async function read({ source, params, body, signal, generation }) {
     if (body !== null || !params || typeof params !== "object" || Array.isArray(params)) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
-    const tab = await ui.page(PAGE, signal);
+    let tab = await ui.page(PAGE, signal);
     if (source === "page:identity") {
       prepared = null;
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Another game tab may have completed shared login while this SPA still
       // renders its anonymous catalog. Re-read the official page in this session.
       if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-        await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
+        tab = await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("genshin.identity", signal, () => identity(tab, signal));
       identityContext = { tab, generation };
@@ -89,7 +89,8 @@ export function createGenshinPageSource(ui) {
       !/^[1-9][0-9]{0,31}$/.test(params.uid) || typeof params.region !== "string") throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     if (source === "page:roster") {
       prepared = null;
-      const { rows, role } = await owned(tab, signal, params, generation);
+      const { rows, role, tab: selectedTab } = await owned(tab, signal, params, generation);
+      tab = selectedTab;
       identityContext = { tab, generation };
       prepared = { rows, role, tab, generation, editing: false };
       return ui.record("genshin", await ui.call(signal, () => tab.url()), "owned-selector", { rows }, generation);

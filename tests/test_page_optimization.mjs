@@ -67,7 +67,7 @@ function fixture({ home = false, delayedSelection = false, delayedBack = false, 
       }),
     } };
   current = tab;
-  const ui = { page: async () => current, navigate: async selected => selected.reload(), identity: async () => ({ ...role }),
+  const ui = { page: async () => current, navigate: async selected => { await selected.reload(); return selected; }, identity: async () => ({ ...role }),
     assertIdentity: (a, b) => { if (a.uid !== b.uid || a.region !== b.region) throw Object.assign(new Error(), { code: "WRONG_ACCOUNT" }); },
     call: async (signal, action) => { signal.throwIfAborted(); const result = await action(); signal.throwIfAborted(); return result; },
     measure: async (_name, signal, action) => ui.call(signal, action),
@@ -279,7 +279,7 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   // The card locator's text is only a synthetic matching label.
   const oldTarget = tab.playwright.getByText;
   tab.playwright.getByText = name => ({ ...oldTarget(name), text: name });
-  const ui = { page: async () => tab, navigate: async selected => selected.reload(), identity: async () => role, assertIdentity: () => {},
+  const ui = { page: async () => tab, navigate: async selected => { await selected.reload(); return selected; }, identity: async () => role, assertIdentity: () => {},
     call: async (signal, fn) => { signal.throwIfAborted(); return fn(); },
     measure: async (_name, _signal, fn) => fn(),
     click: async (_tab, locator) => { await locator.click(); return "当前技能等级"; },

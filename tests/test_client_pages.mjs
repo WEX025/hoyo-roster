@@ -30,7 +30,7 @@ test("ZZZ retries only an explicit official error once, preserving the same page
       playwright: { getByRole: () => ({ isVisible: async () => false }),
         getByText: text => ({ text, isVisible: async () => failed && text === "出错了，请重试" && scenario !== "unknown" }),
         locator: () => ({ count: async () => 1 }) } };
-    const ui = { measure: async (_name, _signal, action) => action(), navigate: async selected => selected.reload(), page: async () => tab, call: async (_signal, action) => action(),
+    const ui = { measure: async (_name, _signal, action) => action(), navigate: async selected => { await selected.reload(); return selected; }, page: async () => tab, call: async (_signal, action) => action(),
       identity: async selected => { assert.equal(selected, tab); identities++;
         if (failed) throw Object.assign(new Error("synthetic"), { code: scenario === "auth" ? "AUTHENTICATION_REQUIRED" : "SOURCE_REQUEST_NOT_OBSERVED" });
         return { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };
@@ -79,11 +79,11 @@ function fixture({ zero = false, retained = true, freshZero = false } = {}) {
   const calls = [];
   const page = { id: "owned", url: async () => URL, markHandoff: async () => calls.push("retain"),
     goto: async () => calls.push("goto"), close: async () => calls.push("close"),
-    playwright: { evaluate: async () => ({ width: zero ? 0 : 1280, height: zero ? 0 : 900 }),
+    playwright: { evaluate: async fn => fn.toString().includes("location.href") ? URL : ({ width: zero ? 0 : 1280, height: zero ? 0 : 900 }),
       domSnapshot: async () => "safe state", locator: () => ({}), getByText: () => ({}) } };
   Object.defineProperty(page, "cookies", { get() { throw new Error("credential access forbidden"); } });
   const fresh = { ...page, id: "fresh", playwright: { ...page.playwright,
-    evaluate: async () => ({ width: freshZero ? 0 : 1280, height: freshZero ? 0 : 900 }) } };
+    evaluate: async fn => fn.toString().includes("location.href") ? URL : ({ width: freshZero ? 0 : 1280, height: freshZero ? 0 : 900 }) } };
   const browser = { tabs: { list: async () => retained ? [{ id: page.id, url: URL }] : [],
     get: async () => page, new: async () => { calls.push("new"); return fresh; } }, capabilities: {
     list: async () => [{ id: "viewport" }], get: async id => {
@@ -124,23 +124,53 @@ test("page record is explicitly UI provenance, without invented HTTP facts", () 
 });
 
 test("navigation retries a fixed transient error once at the identical official HTTPS URL", async () => {
-  for (const mode of ["throw", "error-page", "repeated-error-page"]) {
-    let current = URL, retries = 0;
+  for (const mode of ["throw", "error-page", "repeated-error-page", "late-error-page", "blocked-error-tab"]) {
+    let current = URL, retries = 0, metadata = URL, late = mode === "late-error-page", freshURL = "about:blank", created = 0;
     const networkPage = "data:text/html," + encodeURIComponent("<p>net::ERR_DNS_NO_MATCHING_SUPPORTED_ALPN</p>");
-    const metrics = createMetrics(), ui = createPageBrowser({ tabs: {} }, metrics);
-    const tab = { url: async () => current, reload: async () => {
+    if (mode === "blocked-error-tab") metadata = current = networkPage;
+    const fresh = { id: "fresh", url: async () => freshURL, markHandoff: async () => {},
+      goto: async target => { assert.equal(target, URL); retries++; freshURL = mode === "repeated-error-page" ? networkPage : URL; },
+      playwright: { evaluate: async fn => fn.toString().includes("location.href") ? freshURL : { width: 1280, height: 900 },
+        locator: () => ({}), getByText: () => ({}), domSnapshot: async () => "synthetic" } };
+    const metrics = createMetrics(), ui = createPageBrowser({ tabs: {
+      list: async () => [{ id: "synthetic", url: metadata }, ...(created ? [{ id: fresh.id, url: freshURL }] : [])],
+      new: async () => { created++; return fresh; }, get: async () => assert.fail("must retain the recovered page"),
+    } }, metrics);
+    const tab = { id: "synthetic", url: async () => current, playwright: { evaluate: async () => {
+      if (late) { late = false; metadata = networkPage; throw new Error("synthetic blocked error-document scope"); }
+      return current;
+    } }, reload: async () => {
       if (mode === "throw") throw new Error("Browser reported: net::ERR_CONNECTION_RESET");
-      current = networkPage;
-    }, goto: async target => {
-      assert.equal(target, URL); retries++;
-      current = mode === "repeated-error-page" ? networkPage : URL;
-    } };
+      if (mode === "blocked-error-tab") throw new Error("unsupported URL " + networkPage);
+      if (mode !== "late-error-page") current = networkPage;
+    }, goto: async () => assert.fail("original error tab must remain untouched") };
     const navigation = ui.navigate(tab, URL, new AbortController().signal, { reload: true });
     if (mode === "repeated-error-page") await assert.rejects(navigation, { code: "CLIENT_REQUEST_FAILED" });
-    else await navigation;
+    else {
+      assert.equal(await navigation, fresh);
+      assert.equal(await ui.page(URL, new AbortController().signal), fresh);
+    }
     assert.equal(retries, 1);
+    assert.equal(created, 1);
     assert.equal(metrics.drain().filter(e => e.operation === "page.navigation-retry").length, 1);
   }
+});
+
+test("a DOM setup failure at an official URL is not enough to infer a recoverable network error", async () => {
+  const error = new Error("synthetic client failure");
+  const ui = createPageBrowser({ tabs: { list: async () => [{ id: "synthetic", url: URL }] } });
+  const tab = { id: "synthetic", url: async () => URL, reload: async () => {},
+    goto: async () => assert.fail("no fixed network error evidence"),
+    playwright: { evaluate: async () => { throw error; } } };
+  await assert.rejects(ui.navigate(tab, URL, new AbortController().signal, { reload: true }), error);
+});
+
+test("a visible foreign document cannot be recovered using stale network-error metadata", async () => {
+  const ui = createPageBrowser({ tabs: { list: async () => [{ id: "synthetic", url: "data:text/html,net::ERR_TIMED_OUT" }] } });
+  const tab = { id: "synthetic", url: async () => URL, reload: async () => {},
+    goto: async () => assert.fail("foreign document must stop"),
+    playwright: { evaluate: async () => "https://example.org/" } };
+  await assert.rejects(ui.navigate(tab, URL, new AbortController().signal, { reload: true }), { code: "SOURCE_DATA_INVALID" });
 });
 
 test("navigation does not recover certificates, authentication, unknown redirects or cancelled calls", async () => {

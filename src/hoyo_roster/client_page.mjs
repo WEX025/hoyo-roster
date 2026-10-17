@@ -28,16 +28,30 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       try { const actual = new URL(value); return actual.origin === expected.origin && actual.pathname === expected.pathname; }
       catch { return false; }
     };
+    const errorPage = value => {
+      if (!value?.startsWith("data:text/html")) return false;
+      try { return transient(decodeURIComponent(value)); }
+      catch { return false; }
+    };
     async function landed() {
       const actual = await call(signal, () => tab.url());
-      if (matches(actual)) return true;
       // Inspect only the fixed code in metadata from OUR navigation, not the
       // error page DOM. Unknown redirects/interstitials are never recovered.
-      if (actual.startsWith("data:text/html")) {
-        try { if (transient(decodeURIComponent(actual))) return false; }
-        catch { /* Malformed metadata is not a recognized network error. */ }
+      if (errorPage(actual)) return false;
+      if (!matches(actual)) throw sourceFailure("SOURCE_DATA_INVALID");
+      let visibleURL;
+      try {
+        visibleURL = await call(signal, () => readDom(tab.playwright, () => location.href));
+      } catch (error) {
+        checkSignal(signal);
+        // reload() can resolve before a delayed error document replaces the
+        // old URL. A blocked DOM scope is not itself proof of a network error.
+        const current = (await call(signal, () => browser.tabs.list())).find(t => t.id === tab.id);
+        if (current && errorPage(current.url)) return false;
+        throw error;
       }
-      throw sourceFailure("SOURCE_DATA_INVALID");
+      if (!matches(visibleURL)) throw sourceFailure("SOURCE_DATA_INVALID");
+      return true;
     }
     try {
       await metrics.measure("page.navigation", () => call(signal, () => reload ? tab.reload() : tab.goto(url)));
@@ -45,13 +59,24 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       checkSignal(signal);
       if (/\bERR_(?:CERT_|SSL_)/.test(`${error.code ?? ""} ${error.message ?? ""}`)) throw error;
       if (error.code && !transient(error.code)) throw error;
-      if (!transient(error.message ?? "") && !transient(error.code ?? "")) throw error;
-      return retry();
+      if (transient(error.message ?? "") || transient(error.code ?? "")) return retry();
+      const current = (await call(signal, () => browser.tabs.list())).find(t => t.id === tab.id);
+      if (current && errorPage(current.url)) return retry();
+      throw error;
     }
     if (!(await landed())) return retry();
+    return tab;
     async function retry() {
-      await metrics.measure("page.navigation-retry", () => call(signal, () => tab.goto(url)));
-      if (!(await landed())) throw sourceFailure("CLIENT_REQUEST_FAILED");
+      return metrics.measure("page.navigation-retry", async () => {
+        // Some clients cannot operate a data: error document at all. Open the
+        // SAME approved HTTPS address in this browser; retain the original tab.
+        tab = await call(signal, () => browser.tabs.new());
+        await call(signal, () => tab.goto(url));
+        if (!(await landed())) throw sourceFailure("CLIENT_REQUEST_FAILED");
+        await call(signal, () => tab.markHandoff());
+        retained.set(url, tab);
+        return tab;
+      });
     }
   }
   async function page(url, signal) {
@@ -72,7 +97,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       if (!found) await call(signal, () => tab.close());
       throw sourceFailure("CLIENT_SOURCE_UNAVAILABLE");
     }
-    if (!found) await navigate(tab, url, signal);
+    if (!found) tab = await navigate(tab, url, signal);
     let size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
       width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
     })));
@@ -80,7 +105,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       // Retained panel webviews can become unmounted. A new tab in this SAME
       // browser shares its live session; do not copy credentials or close user tabs.
       tab = await call(signal, () => browser.tabs.new());
-      await navigate(tab, url, signal);
+      tab = await navigate(tab, url, signal);
       await call(signal, () => tab.playwright.domSnapshot());
       size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
         width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
