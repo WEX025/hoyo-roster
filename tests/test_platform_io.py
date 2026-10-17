@@ -36,7 +36,9 @@ except portalocker.exceptions.LockException:
 def test_unsafe_lock_does_not_modify_file(tmp_path):
     lock = tmp_path / "workspace.lock"
     lock.write_bytes(b"synthetic")
-    lock.chmod(0o644)
+    from tests import make_shared
+
+    make_shared(lock, 0o644)
     with pytest.raises(OSError if io.WINDOWS else io.UnsafePath):
         with io.exclusive_lock(lock):
             pytest.fail("unsafe lock admitted")
