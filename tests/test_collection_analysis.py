@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from hoyo_roster import cli
+from hoyo_roster import cli, platform_io as io
 from hoyo_roster.request_gate import RequestGate
 from tests.test_page_workflow import PagePort, arguments
 from tools.analyze_collection import compare_runs, read_run, union_ms
@@ -66,8 +66,8 @@ def test_replay_measures_overlap_without_adding_nested_metrics(run_dir):
 def test_comparison_detects_account_change_despite_same_timing(run_dir, tmp_path):
     original = read_run(run_dir)
     copied = tmp_path / "copy"
-    shutil.copytree(run_dir, copied)
-    snapshot = next((copied / "results").rglob("snapshot.json"))
+    shutil.copytree(io.filesystem_path(run_dir), io.filesystem_path(copied))
+    snapshot = next(io.filesystem_path(copied / "results").rglob("snapshot.json"))
     value = json.loads(snapshot.read_text())
     value["profile"]["uid"] = "987654321"
     snapshot.write_text(json.dumps(value), encoding="utf-8")
@@ -93,7 +93,7 @@ def test_incomplete_or_invalid_evidence_is_rejected(run_dir, damage):
         timings = [i for i, e in enumerate(result["events"]) if e.startswith("CLIENT_TIMING=")]
         result["events"][timings[1]] = 'CLIENT_TIMING={"method":"source.read","started":1}'
     elif damage == "missing-details":
-        snapshot = next((run_dir / "results").rglob("snapshot.json"))
+        snapshot = next(io.filesystem_path(run_dir / "results").rglob("snapshot.json"))
         value = json.loads(snapshot.read_text())
         value["details"] = []
         snapshot.write_text(json.dumps(value), encoding="utf-8")

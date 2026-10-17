@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
+from . import platform_io as io
 
 from hoyo_roster.games.genshin.page import normalize as normalize_genshin
 from hoyo_roster.games.zzz.page import normalize as normalize_zzz
@@ -33,6 +34,8 @@ def union_ms(spans):
 
 
 def read_run(directory: Path):
+    directory = io.filesystem_path(directory)
+
     def chosen(current, legacy):
         return directory / (current if (directory / current).is_file() else legacy)
 
