@@ -80,3 +80,13 @@ def test_pipe_loop_runner_handles_sigint():
     with pytest.raises(KeyboardInterrupt):
         io.run_async(exercise())
     assert finalized == [True]
+
+
+def test_unreadable_prior_sid_directory_is_rejected(monkeypatch, tmp_path):
+    import pywintypes
+
+    def denied(_path):
+        raise pywintypes.error(5, "GetNamedSecurityInfo", "synthetic access denied")
+
+    monkeypatch.setattr(io.backend, "_descriptor", denied)
+    assert not io.private(tmp_path)

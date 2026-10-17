@@ -5,6 +5,26 @@ from hoyo_roster import cli, paths, platform_io as io
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def native_windows_event_loops():
+    if not io.WINDOWS:
+        yield
+        return
+    import asyncio
+
+    previous = asyncio.get_event_loop_policy()
+
+    class Policy(asyncio.WindowsProactorEventLoopPolicy):
+        def new_event_loop(self):
+            return io.backend.new_event_loop()
+
+    asyncio.set_event_loop_policy(Policy())
+    try:
+        yield
+    finally:
+        asyncio.set_event_loop_policy(previous)
+
+
 @pytest.fixture(autouse=True)
 def private_test_home(tmp_path):
     # Never create or reuse real local authentication state in synthetic tests.

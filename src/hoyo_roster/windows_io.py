@@ -276,7 +276,12 @@ def _private_descriptor(descriptor) -> bool:
 
 
 def private(path: Path) -> bool:
-    return _private_descriptor(_descriptor(path))
+    try:
+        return _private_descriptor(_descriptor(path))
+    except pywintypes.error:
+        # A prior desktop sandbox SID may own a preserved private directory.
+        # Treat an unreadable DACL as unsafe, never as a generic task failure.
+        return False
 
 
 def container_safe(path: Path) -> bool:
