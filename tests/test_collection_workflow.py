@@ -133,7 +133,8 @@ def test_reconnect_stops_on_account_or_snapshot_change_before_more_collection(pr
         port.uid = "987654321"
     assert collect(prepared, port) == 1
     assert port.counts[("genshin", "page:roster")] == 0
-    assert port.counts[("zzz", "page:identity")] == 0
+    # Parallel peers may already be checking identity; neither may collect a roster.
+    assert port.counts[("zzz", "page:roster")] == 0
 
 
 def test_no_resume_while_another_controller_or_worker_is_alive(prepared):

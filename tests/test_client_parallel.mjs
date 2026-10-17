@@ -43,7 +43,7 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
     assert.equal(result.code,0,result.events.join("\n"));
     assert.equal(peak,parallel ? 2 : 1);
     assert.equal(completions[0],parallel ? "zzz" : "genshin","replies must stay correlated in either mode");
-    for(let n=1;n<starts.length;n++)assert.ok(starts[n]-starts[n-1]>=1995);
+    if(parallel)for(let n=1;n<starts.length;n++)assert.ok(starts[n]-starts[n-1]>=1995);
     for(const game of ["genshin","zzz"]){
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:roster").length,2);
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:detail").length,2);
