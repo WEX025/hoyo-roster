@@ -144,11 +144,12 @@ test("navigation retries a fixed transient error once at the identical official 
 });
 
 test("navigation does not recover certificates, authentication, unknown redirects or cancelled calls", async () => {
-  for (const mode of ["certificate", "authentication", "redirect", "unknown-data", "cancelled"]) {
+  for (const mode of ["certificate", "mixed-security", "authentication", "redirect", "unknown-data", "cancelled"]) {
     const controller = new AbortController(), ui = createPageBrowser({ tabs: {} });
     const reason = new Error("synthetic cancellation");
-    const problem = Object.assign(new Error(mode === "certificate" ? "net::ERR_CERT_AUTHORITY_INVALID" :
-      "net::ERR_TIMED_OUT"), mode === "authentication" ? { code: "AUTHENTICATION_REQUIRED" } : {});
+    const problem = Object.assign(new Error(["certificate", "mixed-security"].includes(mode) ? "net::ERR_CERT_AUTHORITY_INVALID" :
+      "net::ERR_TIMED_OUT"), mode === "authentication" ? { code: "AUTHENTICATION_REQUIRED" } :
+      mode === "mixed-security" ? { code: "ERR_CONNECTION_RESET" } : {});
     let current = URL;
     const tab = { url: async () => current, goto: async () => assert.fail("forbidden navigation retry"), reload: async () => {
       if (mode === "redirect") current = "https://example.org/";

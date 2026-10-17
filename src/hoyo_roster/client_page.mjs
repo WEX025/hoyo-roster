@@ -43,6 +43,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       await metrics.measure("page.navigation", () => call(signal, () => reload ? tab.reload() : tab.goto(url)));
     } catch (error) {
       checkSignal(signal);
+      if (/\bERR_(?:CERT_|SSL_)/.test(`${error.code ?? ""} ${error.message ?? ""}`)) throw error;
       if (error.code && !transient(error.code)) throw error;
       if (!transient(error.message ?? "") && !transient(error.code ?? "")) throw error;
       return retry();

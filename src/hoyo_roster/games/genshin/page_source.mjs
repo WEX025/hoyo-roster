@@ -4,6 +4,8 @@ import { sourceFailure } from "../../client_network.mjs";
 export const PAGE = "https://act.mihoyo.com/ys/event/calculator/index.html#/character";
 export const sourceNames = pageSourceNames;
 const UNSUPPORTED = "完成特定任务可达成奇偶突破、升级条件，养成计算器中暂不支持奇偶相关的计算";
+const clickTimedOut = error => error.name === "TimeoutError" ||
+  /^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "");
 
 export function createGenshinPageSource(ui) {
   let prepared = null;
@@ -110,6 +112,17 @@ export function createGenshinPageSource(ui) {
       Array.from(document.querySelectorAll(".character-item")).filter(e => e.querySelector(".gt-avatar-selected"))
         .map(e => e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim())));
     let selected = await selectedNames();
+    async function dismissHover(visible) {
+      try {
+        await measure("genshin.dismiss-hover", signal, () =>
+          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 2500 }));
+      } catch (error) {
+        if (!clickTimedOut(error)) throw error;
+        // A client timeout can arrive after the click took effect. Read the
+        // actual hover state; never assume a completed dismissal or click again.
+      }
+      await ui.wait(signal, visible, open => !open, { timeoutMs: 1500 });
+    }
     async function visibleLabel(card, name) {
       const label = card.getByText(name, { exact: true });
       try {
@@ -127,9 +140,7 @@ export function createGenshinPageSource(ui) {
           return getComputedStyle(e).visibility === "visible" && r.width > 0 && r.height > 0;
         }));
       if (await ui.call(signal, hoverOpen)) {
-        await measure("genshin.dismiss-hover", signal, () =>
-          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 400 }));
-        await ui.wait(signal, hoverOpen, visible => !visible, { timeoutMs: 1500 });
+        await dismissHover(hoverOpen);
       }
       const covered = () => readDom(label, e => {
         const r = e.getBoundingClientRect();
@@ -142,9 +153,8 @@ export function createGenshinPageSource(ui) {
       if (state.hover) {
         // Only the observed official character hover is dismissed. No generic
         // dialog handling or forced clicks through unknown overlays.
-        await measure("genshin.dismiss-hover", signal, () =>
-          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 400 }));
-        state = await ui.wait(signal, covered, value => !value.hover, { timeoutMs: 1500 });
+        await dismissHover(async () => (await covered()).hover);
+        state = await ui.call(signal, covered);
       }
       if (state.blocked) {
         // A returned selector may already be visible while its old modal is
@@ -171,8 +181,7 @@ export function createGenshinPageSource(ui) {
       catch (error) {
         // The supported client can wrap Playwright's timeout as a plain Error,
         // including after the click took effect. Never log its raw UI message.
-        if (error.name !== "TimeoutError" &&
-            !/^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "")) throw error;
+        if (!clickTimedOut(error)) throw error;
       }
       try {
         await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,

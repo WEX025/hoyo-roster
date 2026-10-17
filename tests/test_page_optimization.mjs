@@ -4,7 +4,7 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture({ home = false, delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
+function fixture({ home = false, delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null, hoverError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
   const counts = { reload: 0, back: 0, clicks: 0, characterNav: 0 };
   const pending = [];
@@ -38,7 +38,7 @@ function fixture({ home = false, delayedSelection = false, delayedBack = false, 
     return state;
   }, isVisible: async () => !edit && (name === "已拥有" ? !home : hiddenReads-- <= 0),
     click: async () => {
-      if (name === "选择角色") { blocker = "none"; return; }
+      if (name === "选择角色") { blocker = "none"; if (hoverError) throw hoverError; return; }
       if (name === "角色") { home = false; counts.characterNav++; return; }
       counts.clicks++;
       if (blocker === "offscreen-hover") return;
@@ -321,5 +321,17 @@ test("Genshin dismisses an observed character hover but refuses an unknown overl
     const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
     if (kind.includes("hover")) assert.equal((await read).details[0].name, "Alpha");
     else { await assert.rejects(read, { code: "SOURCE_DATA_INVALID" }); assert.equal(f.selected.size, 0); }
+  }
+});
+
+test("Genshin verifies hover dismissal after an applied click timeout without hiding other errors", async () => {
+  for (const timeout of [true, false]) {
+    const error = new Error(timeout ? "Error: Timed out after 2500ms waiting for selector synthetic" : "synthetic transport failure");
+    const f = fixture({ hoverError: error });
+    await f.reader.read(f.query("page:roster"));
+    f.setBlocker("offscreen-hover");
+    const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+    if (timeout) assert.equal((await read).details[0].name, "Alpha");
+    else await assert.rejects(read, error);
   }
 });
