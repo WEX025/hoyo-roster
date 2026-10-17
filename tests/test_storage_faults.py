@@ -33,6 +33,7 @@ def test_atomic_failure_explicit_phase(tmp_path, monkeypatch, stage):
     target = tmp_path / "state.json"
     atomic_write_metadata(target, {"old": True})
     original_fsync = os.fsync
+    original_sync = io.sync_directory
 
     def fsync(fd):
         isdir = stat.S_ISDIR(os.fstat(fd).st_mode)
@@ -44,7 +45,13 @@ def test_atomic_failure_explicit_phase(tmp_path, monkeypatch, stage):
         if stage == "before_replace":
             raise OSError("synthetic")
 
+    def sync(path):
+        if stage == "parent_fsync":
+            raise OSError("synthetic post-replace directory confirmation")
+        return original_sync(path)
+
     monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(io, "sync_directory", sync)
     with pytest.raises(AtomicWriteError if stage == "parent_fsync" else OSError):
         atomic_write_metadata(target, {"new": True}, before_replace=before_replace)
     assert load_metadata(target) == ({"new": True} if stage == "parent_fsync" else {"old": True})
@@ -59,20 +66,15 @@ def test_pointer_post_replace_fsync_retains_both_and_recovers(store, monkeypatch
     def injected(path, value):
         if path != store.current_file:
             return original(path, value)
-        original_fsync = os.fsync
-        parent = path.parent.stat()
+        original_sync = io.sync_directory
 
-        def fsync(fd):
-            meta = os.fstat(fd)
-            if stat.S_ISDIR(meta.st_mode) and (meta.st_dev, meta.st_ino) == (
-                parent.st_dev,
-                parent.st_ino,
-            ):
-                raise OSError("synthetic parent fsync")
-            return original_fsync(fd)
+        def sync(directory):
+            if directory == path.parent:
+                raise OSError("synthetic post-replace directory confirmation")
+            return original_sync(directory)
 
         with monkeypatch.context() as patch:
-            patch.setattr(os, "fsync", fsync)
+            patch.setattr(io, "sync_directory", sync)
             return original(path, value)
 
     monkeypatch.setattr(workspace, "atomic_write_metadata", injected)

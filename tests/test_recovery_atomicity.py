@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import stat
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from tests import candidate_policy_for, make_shared
-from hoyo_roster import cli, user_workspace as uw
+from hoyo_roster import cli, user_workspace as uw, platform_io as io
 from hoyo_roster.storage.common import atomic_write_metadata, load_metadata, tree_digest
 from tests.fixtures import UID_A
 
@@ -24,6 +23,7 @@ def make_store(root, game="genshin"):
     )
     with store.locked():
         store._install(None)
+    store._fixture_storage_root = root
     return store
 
 
@@ -36,7 +36,7 @@ def invoke(store, operation, *extra):
             "--uid",
             UID_A,
             "--storage-root",
-            str(store.root.parents[3]),
+            str(store._fixture_storage_root),
             "--operation",
             operation,
             *extra,
@@ -313,11 +313,11 @@ def test_real_recovery_commit_boundaries(tmp_path, monkeypatch, capsys, explicit
         store.transaction_file.unlink()
     before = {p: tree_digest(p) for p in (old, new)}
     pointer = store.current_file.read_bytes()
-    original_replace, original_fsync = os.replace, os.fsync
+    original_replace, original_fsync = io.replace, os.fsync
+    original_sync = io.sync_directory
     original_remove, original_unlink = uw.remove_owned_tree, Path.unlink
     replaced = False
     unlinked = False
-    root_stat = store.root.stat()
 
     def replace(src, dst):
         nonlocal replaced
@@ -330,18 +330,19 @@ def test_real_recovery_commit_boundaries(tmp_path, monkeypatch, capsys, explicit
         return original_replace(src, dst)
 
     def fsync(fd):
-        meta = os.fstat(fd)
-        parent = stat.S_ISDIR(meta.st_mode) and (meta.st_dev, meta.st_ino) == (
-            root_stat.st_dev,
-            root_stat.st_ino,
-        )
-        if (
-            (fault == "file-fsync" and not stat.S_ISDIR(meta.st_mode))
-            or (fault == "parent-fsync" and parent and (replaced or not explicit))
-            or (fault == "cleanup-fsync" and parent and unlinked)
-        ):
+        if fault == "file-fsync":
             raise OSError("synthetic fsync")
         return original_fsync(fd)
+
+    def sync(directory):
+        # Fault the shared confirmation boundary. Windows has no directory
+        # fsync; this also exercises its post-write-through error handling.
+        if directory == store.root and (
+            (fault == "parent-fsync" and (replaced or not explicit))
+            or (fault == "cleanup-fsync" and unlinked)
+        ):
+            raise OSError("synthetic directory confirmation")
+        return original_sync(directory)
 
     def remove(path):
         if fault == "cleanup":
@@ -357,8 +358,9 @@ def test_real_recovery_commit_boundaries(tmp_path, monkeypatch, capsys, explicit
         return original_unlink(path, *args, **kwargs)
 
     with monkeypatch.context() as hooks:
-        hooks.setattr(os, "replace", replace)
+        hooks.setattr(io, "replace", replace)
         hooks.setattr(os, "fsync", fsync)
+        hooks.setattr(io, "sync_directory", sync)
         hooks.setattr(uw, "remove_owned_tree", remove)
         hooks.setattr(Path, "unlink", unlink)
         result = invoke(store, "recover", *(("--generation", old.name) if explicit else ()))
@@ -443,12 +445,12 @@ def test_install_metadata_boundaries_preserve_needed_generations(
         "pointer": store.current_file,
     }[stage]
     original_atomic = uw.atomic_write_metadata
-    original_replace, original_fsync = os.replace, os.fsync
+    original_replace, original_fsync = io.replace, os.fsync
+    original_sync = io.sync_directory
 
     def atomic(path, value):
         if path != selected:
             return original_atomic(path, value)
-        parent = path.parent.stat()
 
         def replace(src, dst):
             if fault == "replace":
@@ -456,19 +458,19 @@ def test_install_metadata_boundaries_preserve_needed_generations(
             return original_replace(src, dst)
 
         def fsync(fd):
-            meta = os.fstat(fd)
-            isdir = stat.S_ISDIR(meta.st_mode)
-            if (fault == "file-fsync" and not isdir) or (
-                fault == "parent-fsync"
-                and isdir
-                and (meta.st_dev, meta.st_ino) == (parent.st_dev, parent.st_ino)
-            ):
+            if fault == "file-fsync":
                 raise OSError("synthetic metadata fsync")
             return original_fsync(fd)
 
+        def sync(directory):
+            if fault == "parent-fsync" and directory == path.parent:
+                raise OSError("synthetic metadata directory confirmation")
+            return original_sync(directory)
+
         with monkeypatch.context() as hooks:
-            hooks.setattr(os, "replace", replace)
+            hooks.setattr(io, "replace", replace)
             hooks.setattr(os, "fsync", fsync)
+            hooks.setattr(io, "sync_directory", sync)
             return original_atomic(path, value)
 
     with store.locked(), monkeypatch.context() as hooks:
