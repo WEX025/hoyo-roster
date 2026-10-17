@@ -4,11 +4,12 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture({ delayedSelection = false, missedClicks = 0 } = {}) {
+function fixture({ delayedSelection = false, delayedBack = false, missedClicks = 0 } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
   const counts = { reload: 0, back: 0, clicks: 0 };
   const pending = [];
   let edit = false, nickname = "Synthetic", current, blocker = "none";
+  let backReads = 0;
   const role = { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };
   const inputs = value => [{ value: String(value) }, { value: "90" }];
   const cards = names.map(name => ({
@@ -41,8 +42,8 @@ function fixture({ delayedSelection = false, missedClicks = 0 } = {}) {
       if (delayedSelection) pending.push({ reads: 3, toggle }); else toggle();
     } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
-    back: async () => { counts.back++; edit = false; },
-    url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit ? "/edit" : ""),
+    back: async () => { counts.back++; edit = false; backReads = delayedBack ? 3 : 0; },
+    url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
     playwright: {
       evaluate: async fn => {
         for (const action of [...pending]) if (--action.reads === 0) {
@@ -115,6 +116,15 @@ test("Genshin waits for delayed selection rendering without toggling a pending c
   const result = await f.reader.read(f.query("page:detail", { names: ["Gamma", "Delta"] }));
   assert.deepEqual(Array.from(result.details, d => d.name), ["Gamma", "Delta"]);
   assert.equal(f.counts.clicks, 6);
+});
+
+test("Genshin waits for back navigation even when the old selector is already visible", async () => {
+  const f = fixture({ delayedBack: true });
+  await f.reader.read(f.query("page:roster"));
+  await f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+  const result = await f.reader.read(f.query("page:detail", { names: ["Beta"] }));
+  assert.equal(result.details[0].name, "Beta");
+  assert.equal(f.counts.back, 1);
 });
 
 test("Genshin repairs one observed missed action and rejects a persistently missing selection", async () => {

@@ -75,10 +75,16 @@ export function createGenshinPageSource(ui) {
     if (prepared.editing) {
       const current = new URL(await ui.call(signal, () => tab.url()));
       if (current.hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
-      await measure("genshin.return-selector", signal, () => tab.back());
-      await ui.wait(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible(), Boolean);
-      const returned = new URL(await ui.call(signal, () => tab.url()));
-      if (returned.hash !== "#/character") throw sourceFailure("SOURCE_DATA_INVALID");
+      await measure("genshin.return-selector", signal, async () => {
+        await ui.call(signal, () => tab.back());
+        // back() may resolve before a Windows webview commits its SPA route;
+        // the old selector can already be visible beneath the editor transition.
+        await ui.wait(signal, async () => {
+          const returned = new URL(await ui.call(signal, () => tab.url()));
+          return returned.hash === "#/character" &&
+            await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
+        }, Boolean, { timeoutMs: 2500 });
+      });
       prepared.editing = false;
     }
     const nickname = await ui.call(signal, () => tab.playwright.locator(".user-wrapper .nickname").innerText({ timeoutMs: 1500 }));
