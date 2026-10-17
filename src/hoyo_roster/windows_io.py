@@ -20,6 +20,70 @@ import win32process
 import win32security
 
 
+def new_event_loop():
+    """Python 3.12 IOCP loop with a local pipe instead of a TCP wakeup socket."""
+    import asyncio
+    import _winapi
+    import win32pipe
+    from asyncio.windows_utils import PipeHandle, pipe
+    from asyncio.windows_events import IocpProactor
+
+    class PipeProactor(IocpProactor):
+        def select(self, timeout=None):
+            # Windows set_wakeup_fd requires a socket. Bound IOCP's idle wait
+            # instead, so Runner's normal SIGINT cancellation remains prompt.
+            return super().select(0.1 if timeout is None else min(timeout, 0.1))
+
+    class PipeEventLoop(asyncio.ProactorEventLoop):
+        def __init__(self):
+            # CPython 3.12's Proactor constructor/close install a socket-only
+            # signal fd. Initialize the same IOCP state without changing any
+            # process-global signal fd or event-loop policy.
+            asyncio.BaseEventLoop.__init__(self)
+            self._proactor = self._selector = PipeProactor()
+            self._self_reading_future = None
+            self._accept_futures = {}
+            self._proactor.set_loop(self)
+            self._make_self_pipe()
+
+        def close(self):
+            if self.is_running():
+                raise RuntimeError("Cannot close a running event loop")
+            if self.is_closed():
+                return
+            self._stop_accept_futures()
+            self._close_self_pipe()
+            self._proactor.close()
+            self._proactor = self._selector = None
+            asyncio.BaseEventLoop.close(self)
+
+        def _make_self_pipe(self):
+            reader, writer = pipe(overlapped=(True, False))
+            self._ssock, self._csock = PipeHandle(reader), PipeHandle(writer)
+            try:
+                # A full wakeup buffer already guarantees a pending wakeup.
+                # Never block the notifying thread while writing another byte.
+                win32pipe.SetNamedPipeHandleState(writer, win32pipe.PIPE_NOWAIT, None, None)
+            except BaseException:
+                self._ssock.close()
+                self._csock.close()
+                raise
+            self._internal_fds += 1
+
+        def _write_to_self(self):
+            writer = self._csock
+            if writer is not None:
+                try:
+                    _winapi.WriteFile(writer.fileno(), b"\0")
+                except (OSError, ValueError):
+                    # Same close/full-buffer race as the standard self socket.
+                    pass
+
+    loop = PipeEventLoop()
+    asyncio.set_event_loop(loop)
+    return loop
+
+
 def _process_parent(handle) -> int:
     # The documented ProcessBasicInformation layout is pointer-sized on both
     # Windows architectures. Query this exact open handle, not a guessed PID.

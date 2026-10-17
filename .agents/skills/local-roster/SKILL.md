@@ -13,6 +13,8 @@ In each active foreground tool call, explicitly await `workflow.advance(browser)
 
 On Windows, use a Python 3.12 environment's `Scripts/python.exe` returned by `--entrypoint`; the workflow resolves the verified venv redirector in its platform layer. Use `parallelGames:true` when parallel collection is requested, within this one workflow and one shared `runtimeRoot`. Do not launch one workflow per game or replace the interpreter with a base Python to evade ownership checks. Keep the source checkout clean and installed files matched before live acceptance. The anchored checkout is trusted only for each Git invocation; do not add global `safe.directory` entries. See [Windows workflow validation](../../../docs/timed-collection.md#windows).
 
+Windows worker scheduling uses the package's IOCP pipe loop through `platform_io.run_async`; installation uses a private run-scoped temporary directory. A startup with no source progress needs diagnosis and normal cancellation, not extra workflows, global network changes, or blindly killing Python processes. For synthetic native tests select a fresh workspace `--basetemp`; inherited desktop sandbox TEMP paths may be inaccessible.
+
 | nextAction | Required action |
 | --- | --- |
 | CONTINUE | Immediately call the same `advance` in the next active call; do not run separate analysis commands |

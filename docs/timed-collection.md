@@ -82,6 +82,8 @@ Windows 使用同一入口和 `parallelGames:true`，Python 由所选虚拟环�
 
 工作流安装与修复不复用 pip 缓存，避免前一次由另一 Windows 身份生成的缓存阻断重装。快照检查点与最终验证在平台层统一内部路径前缀，支持普通入口路径与 NTFS 长路径表示之间的比较，不改变相对检查点格式或放宽目录边界。
 
+安装子进程的 TEMP/TMP/TMPDIR 指向本次 run 的私有 `preparation-temp`，不依赖客户端传入的跨身份临时目录。Windows 的 CLI/worker 通过 `platform_io.run_async` 使用 Python 3.12 IOCP 和本地命名管道唤醒，避免标准 socketpair 的回环 TCP 初始化阻塞。此适配集中在 `windows_io`，保留原有异步任务、私有桥接、取消和并发限制；不更改全局事件循环策略或网络权限。由于 Windows 信号唤醒 fd 仅支持 socket，IOCP 空闲等待上限为 100ms，由 Runner 正常处理 SIGINT；回归覆盖跨线程唤醒、满缓冲、取消和句柄关闭。
+
 Windows 回归须包含真实 venv 的 Node→控制进程→worker→双轮→保存→验证→报告，测试不同游戏实际交叠、同游戏串行和共享两秒节流；恢复测试另验证已提交快照不重抓。合成来源通过后，再通过当前客户端内置浏览器进行本人官网采集，并在验收记录中分别标注。其他 OS 的实机验证不能由 Windows 结果替代。
 
 `tests/test_collection_workflow.py` 运行实际身份、双轮、规范化与保存，覆盖恢复、账号/快照变化、状态机和收尾门槛。`tests/test_client_workflow_driver.mjs` 检查单入口、人工等待、取消及离线报告衔接。`tests/test_client_workflow_integration.mjs` 使用真实控制进程、worker、管道和保存，在第一个游戏提交后退出控制进程，再由另一个进程恢复；只替换官方来源为合成数据。

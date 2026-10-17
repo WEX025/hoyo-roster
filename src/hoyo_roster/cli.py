@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 from .errors import OperationError
 from .progress import emit
+from .platform_io import run_async
 from .validation import CONTRACT_ROOT as CONTRACT_ROOT
 from .user_workspace import (
     GAMES,
@@ -249,7 +250,7 @@ def main(argv: list[str] | None = None, *, client=None) -> int:
 
         return serve(args)
     try:
-        return asyncio.run(run(args, client=client))
+        return run_async(run(args, client=client))
     except WorkspaceError as error:
         hint = "执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
         print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示={hint}")

@@ -27,6 +27,19 @@ def launch_parent_pid() -> int:
     return backend.launch_parent_pid() if WINDOWS else os.getppid()
 
 
+def run_async(coroutine):
+    """Keep worker event-loop setup inside the platform boundary."""
+    import asyncio
+
+    if not WINDOWS:
+        return asyncio.run(coroutine)
+    try:
+        with asyncio.Runner(loop_factory=backend.new_event_loop) as runner:
+            return runner.run(coroutine)
+    finally:
+        asyncio.set_event_loop(None)
+
+
 def process_alive(pid: int) -> bool:
     if type(pid) is not int or pid <= 0:
         return False
