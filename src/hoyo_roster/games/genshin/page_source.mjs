@@ -113,6 +113,18 @@ export function createGenshinPageSource(ui) {
         if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
         throw sourceFailure("SOURCE_DATA_INVALID");
       }
+      // A retained round can leave a hover above a different card. Checking
+      // only this label's current center misses it before click auto-scroll.
+      const hoverOpen = () => readDom(tab.playwright, () =>
+        Array.from(document.querySelectorAll(".character-popper")).some(e => {
+          const r = e.getBoundingClientRect();
+          return getComputedStyle(e).visibility === "visible" && r.width > 0 && r.height > 0;
+        }));
+      if (await ui.call(signal, hoverOpen)) {
+        await measure("genshin.dismiss-hover", signal, () =>
+          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 400 }));
+        await ui.wait(signal, hoverOpen, visible => !visible, { timeoutMs: 1500 });
+      }
       const covered = () => readDom(label, e => {
         const r = e.getBoundingClientRect();
         const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);

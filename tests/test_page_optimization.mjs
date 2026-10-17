@@ -28,16 +28,19 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
       innerText: category + "\nSynthetic skill", querySelectorAll: () => inputs(1),
     })),
   }));
-  const document = { querySelector: () => ({}), querySelectorAll: selector => selector === ".character-item" ? cards : containers() };
+  const document = { querySelector: () => ({}), querySelectorAll: selector =>
+    selector === ".character-item" ? cards : selector === ".character-popper" ?
+      (blocker.includes("hover") ? [{ getBoundingClientRect: () => ({ width: 240, height: 112 }) }] : []) : containers() };
   const target = name => ({ text: name, evaluate: async () => {
     if(name === "已拥有")return true;
-    const state={hover:blocker === "hover",blocked:blocker !== "none"};
+    const state={hover:blocker === "hover",blocked:["unknown", "closing"].includes(blocker)};
     if(blocker === "closing")blocker="none";
     return state;
   }, isVisible: async () => !edit && (name === "已拥有" || hiddenReads-- <= 0),
     click: async () => {
       if (name === "选择角色") { blocker = "none"; return; }
       counts.clicks++;
+      if (blocker === "offscreen-hover") return;
       if (missedClicks-- > 0) return;
       const toggle = () => { if (selected.has(name)) selected.delete(name); else selected.add(name); };
       if (delayedSelection) pending.push({ reads: 3, toggle }); else toggle();
@@ -51,7 +54,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
         for (const action of [...pending]) if (--action.reads === 0) {
           action.toggle(); pending.splice(pending.indexOf(action), 1);
         }
-        return runInNewContext("(" + fn.toString() + ")()", { document });
+        return runInNewContext("(" + fn.toString() + ")()", { document, getComputedStyle: () => ({ visibility: "visible" }) });
       },
       domSnapshot: async () => "Synthetic state",
       getByText: target,
@@ -303,12 +306,12 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
 
 
 test("Genshin dismisses an observed character hover but refuses an unknown overlay", async () => {
-  for (const kind of ["hover", "unknown"]) {
+  for (const kind of ["hover", "offscreen-hover", "unknown"]) {
     const f = fixture();
     await f.reader.read(f.query("page:roster"));
     f.setBlocker(kind);
     const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-    if (kind === "hover") assert.equal((await read).details[0].name, "Alpha");
+    if (kind.includes("hover")) assert.equal((await read).details[0].name, "Alpha");
     else { await assert.rejects(read, { code: "SOURCE_DATA_INVALID" }); assert.equal(f.selected.size, 0); }
   }
 });
