@@ -4,8 +4,17 @@ import { sourceFailure } from "../../client_network.mjs";
 export const PAGE = "https://act.mihoyo.com/ys/event/calculator/index.html#/character";
 export const sourceNames = pageSourceNames;
 const UNSUPPORTED = "完成特定任务可达成奇偶突破、升级条件，养成计算器中暂不支持奇偶相关的计算";
-const clickTimedOut = error => error.name === "TimeoutError" ||
-  /^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "");
+function clickFailure(error, timeoutMs) {
+  const message = error.message ?? "";
+  if (/\b(?:ERR_|RPC|transport|connection|authority|approval|security check)/i.test(message)) return "unknown";
+  if (["no_matches", "element_detached", "element_not_found"].includes(error.code)) return "target-moved";
+  if (["TimeoutError", "actionability_timeout"].includes(error.code)) return "timeout";
+  if (error.code) return "unknown";
+  if (error.name === "TimeoutError" ||
+      new RegExp(`(?:Timed out after ${timeoutMs}\\s*ms waiting for (?:selector|locator|element)|Timeout ${timeoutMs}\\s*ms exceeded)`, "i").test(message)) return "timeout";
+  if (/\b(?:no_matches|element_detached|element_not_found)\b|No element matches selector|Element is not attached to the DOM|Target element has been detached/i.test(message)) return "target-moved";
+  return "unknown";
+}
 
 export function createGenshinPageSource(ui) {
   let prepared = null;
@@ -118,7 +127,9 @@ export function createGenshinPageSource(ui) {
         await measure("genshin.dismiss-hover", signal, () =>
           tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 2500 }));
       } catch (error) {
-        if (!clickTimedOut(error)) throw error;
+        const kind = clickFailure(error, 2500);
+        await measure("genshin.click-error." + kind, signal, async () => {});
+        if (kind !== "timeout") throw error;
         // A client timeout can arrive after the click took effect. Read the
         // actual hover state; never assume a completed dismissal or click again.
       }
@@ -182,7 +193,9 @@ export function createGenshinPageSource(ui) {
       catch (error) {
         // The supported client can wrap Playwright's timeout as a plain Error,
         // including after the click took effect. Never log its raw UI message.
-        if (!clickTimedOut(error)) throw error;
+        const kind = clickFailure(error, 200);
+        await measure("genshin.click-error." + kind, signal, async () => {});
+        if (!["timeout", "target-moved"].includes(kind)) throw error;
       }
       try {
         await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,

@@ -42,7 +42,7 @@ function fixture({ home = false, delayedSelection = false, delayedBack = false, 
       if (name === "角色") { home = false; counts.characterNav++; return; }
       counts.clicks++;
       if (blocker === "offscreen-hover") return;
-      if (missedClicks-- > 0) return;
+      if (missedClicks-- > 0) { if (clickError) throw clickError; return; }
       const toggle = () => { if (selected.has(name)) selected.delete(name); else selected.add(name); };
       if (delayedSelection) pending.push({ reads: 3, toggle }); else toggle();
       if (clickError) throw clickError;
@@ -162,13 +162,25 @@ test("Genshin waits for returned card labels to render after route and owned-tab
 });
 
 test("Genshin verifies an applied click after the client's wrapped timeout but propagates unrelated errors", async () => {
-  for (const timeout of [true, false]) {
-    const clickError = new Error(timeout ? "Error: Timed out after 200ms waiting for selector synthetic" : "Synthetic transport failure");
+  for (const [message, recover, code] of [
+    ["Error: Timed out after 200ms waiting for selector synthetic", true],
+    ["Client wrapper: locator.click: Timeout 200ms exceeded", true],
+    ["Client wrapper: Timed out after 200 ms waiting for locator synthetic", true],
+    ["element_detached", true],
+    ["no_matches", true],
+    ["synthetic moved target", true, "no_matches"],
+    ["synthetic timed action", true, "actionability_timeout"],
+    ["Timeout 200ms exceeded", false, "AUTHENTICATION_REQUIRED"],
+    ["Synthetic transport failure", false],
+    ["RPC: Timed out after 200ms waiting for selector synthetic", false],
+    ["security check: Timeout 200ms exceeded", false],
+  ]) {
+    const clickError = Object.assign(new Error(message), code ? { code } : {});
     const f = fixture({ delayedSelection: true, clickError });
     await f.reader.read(f.query("page:roster"));
     const result = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-    if (timeout) assert.equal((await result).details[0].name, "Alpha");
-    else await assert.rejects(result, /Synthetic transport failure/);
+    if (recover) assert.equal((await result).details[0].name, "Alpha");
+    else await assert.rejects(result, clickError);
     assert.equal(f.counts.clicks, 1);
   }
 });
@@ -180,6 +192,17 @@ test("Genshin repairs one observed missed action and rejects a persistently miss
     const result = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
     if (missedClicks === 1) assert.equal((await result).details.length, 1);
     else await assert.rejects(result, { code: "SOURCE_DATA_INVALID" });
+    assert.equal(f.counts.clicks, 2);
+  }
+});
+
+test("a moved click target still needs the observed marker and permits only one missed-action repair", async () => {
+  for (const missedClicks of [1, 2]) {
+    const f = fixture({ missedClicks, clickError: new Error("no_matches") });
+    await f.reader.read(f.query("page:roster"));
+    const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+    if (missedClicks === 1) assert.equal((await read).details[0].name, "Alpha");
+    else await assert.rejects(read, { code: "SOURCE_DATA_INVALID" });
     assert.equal(f.counts.clicks, 2);
   }
 });
