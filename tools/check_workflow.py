@@ -91,7 +91,7 @@ def check():
         if "contracts" in path.parts:
             continue
         modules += 1
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         problems.extend(document_problems(source, path.relative_to(ROOT).as_posix(), operations))
         tree = ast.parse(source)
         for node in ast.walk(tree):
@@ -113,7 +113,11 @@ def check():
                 if path.name == "login.py" and any("games" in name.split(".") for name in names):
                     problems.append("LOGIN_IMPORTS_GAME")
     help_result = subprocess.run(
-        [sys.executable, "-m", "hoyo_roster", "--help"], capture_output=True, text=True, check=True
+        [sys.executable, "-X", "utf8", "-m", "hoyo_roster", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     if any(option in help_result.stdout for option in OLD_FLAGS):
         problems.append("OLD_PUBLIC_OPTION_PRESENT")
@@ -125,7 +129,7 @@ def check():
         + list((ROOT / ".agents").rglob("SKILL.md"))
     ):
         documents += 1
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         problems.extend(document_problems(source, path.relative_to(ROOT).as_posix(), operations))
         for reference in re.findall(r"\]\(([^\n)]+)\)", source):
             reference = reference.strip().strip("<>")

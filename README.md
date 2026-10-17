@@ -24,7 +24,7 @@ hoyo-roster 将你本人国服原神或绝区零的受支持账号状态保存�
 
 原有 API 读源器仍保留历史请求/响应监听、签名与绝区零游戏服务初始化；仅在客户端提供相应能力时运行，完整覆盖要求保持不变。游戏分别检查自身来源，缺少 CDP 不再阻断可用的页面路径。低层宿主未装配适配器报 SOURCE_ADAPTER_MISSING。详见[客户端桥接](docs/client-bridge.md)和[验证状态](docs/release-validation.md)。
 
-其他客户端、Windows/Linux 客户端浏览器、客户端重启保持和完整 API 采集尚未验收。版本 0.1.0rc1 仍为发布候选。
+当前 Windows Codex 内置浏览器已完成原神与绝区零并行页面同步验收；具体版本、计时和范围见[验证记录](docs/release-validation.md)。其他客户端、Linux 客户端浏览器、真实客户端重启保持和完整 API 采集尚未验收。版本 0.1.0rc1 仍为发布候选。
 
 ## API 快照字段范围
 
