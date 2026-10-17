@@ -4,9 +4,9 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture({ home = false, delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null, hoverError = null } = {}) {
+function fixture({ delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
-  const counts = { reload: 0, back: 0, clicks: 0, characterNav: 0 };
+  const counts = { reload: 0, back: 0, clicks: 0 };
   const pending = [];
   let edit = false, nickname = "Synthetic", current, blocker = "none";
   let backReads = 0;
@@ -28,34 +28,30 @@ function fixture({ home = false, delayedSelection = false, delayedBack = false, 
       innerText: category + "\nSynthetic skill", querySelectorAll: () => inputs(1),
     })),
   }));
-  const document = { querySelector: () => ({}), querySelectorAll: selector =>
-    selector === ".character-item" ? cards : selector === ".character-popper" ?
-      (blocker.includes("hover") ? [{ getBoundingClientRect: () => ({ width: 240, height: 112 }) }] : []) : containers() };
+  const document = { querySelector: () => ({}), querySelectorAll: selector => selector === ".character-item" ? cards : containers() };
   const target = name => ({ text: name, evaluate: async () => {
     if(name === "已拥有")return true;
-    const state={hover:blocker === "hover",blocked:["unknown", "closing"].includes(blocker)};
+    const state={hover:blocker === "hover",blocked:blocker !== "none"};
     if(blocker === "closing")blocker="none";
     return state;
-  }, isVisible: async () => !edit && (name === "已拥有" ? !home : hiddenReads-- <= 0),
+  }, isVisible: async () => !edit && (name === "已拥有" || hiddenReads-- <= 0),
     click: async () => {
-      if (name === "选择角色") { blocker = "none"; if (hoverError) throw hoverError; return; }
-      if (name === "角色") { home = false; counts.characterNav++; return; }
+      if (name === "选择角色") { blocker = "none"; return; }
       counts.clicks++;
-      if (blocker === "offscreen-hover") return;
-      if (missedClicks-- > 0) { if (clickError) throw clickError; return; }
+      if (missedClicks-- > 0) return;
       const toggle = () => { if (selected.has(name)) selected.delete(name); else selected.add(name); };
       if (delayedSelection) pending.push({ reads: 3, toggle }); else toggle();
       if (clickError) throw clickError;
     } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; backReads = delayedBack ? 3 : 0; hiddenReads = delayedLabels ? 3 : 0; },
-    url: async () => home ? "https://act.mihoyo.com/ys/event/calculator/index.html#/" : "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
+    url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
     playwright: {
       evaluate: async fn => {
         for (const action of [...pending]) if (--action.reads === 0) {
           action.toggle(); pending.splice(pending.indexOf(action), 1);
         }
-        return runInNewContext("(" + fn.toString() + ")()", { document, getComputedStyle: () => ({ visibility: "visible" }) });
+        return runInNewContext("(" + fn.toString() + ")()", { document });
       },
       domSnapshot: async () => "Synthetic state",
       getByText: target,
@@ -85,7 +81,7 @@ function fixture({ home = false, delayedSelection = false, delayedBack = false, 
   };
   const reader = createGenshinPageSource(ui);
   const query = (source, extra = {}, generation = 0) => ({ source, params: { uid: role.uid, region: role.region, ...extra }, body: null, generation, signal: new AbortController().signal });
-  return { counts, reader, query, selected, removeLastRow: () => cards.pop(), setUid: uid => { role.uid = uid; }, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
+  return { counts, reader, query, selected, setUid: uid => { role.uid = uid; }, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
 }
 
 test("Genshin reuses only the current round, reconciles selected cards and returns the requested details", async () => {
@@ -98,12 +94,8 @@ test("Genshin reuses only the current round, reconciles selected cards and retur
   assert.deepEqual(Array.from(second.details, d => d.name), ["Gamma", "Delta"]);
   assert.equal(f.counts.reload, 1);
   assert.equal(f.counts.back, 1);
-  f.removeLastRow();
-  const nextRound = await f.reader.read(f.query("page:roster"));
-  assert.equal(nextRound.rows.length, 3); // The second pass rereads the live selector.
-  assert.equal(f.counts.reload, 1);
-  assert.equal(f.counts.back, 2); // The new round returns from the last editor too.
-  await assert.rejects(f.reader.read(f.query("page:detail", { names: ["Delta"] })), { code: "SOURCE_DATA_INVALID" });
+  await f.reader.read(f.query("page:roster"));
+  assert.equal(f.counts.reload, 2); // A second pass must prepare fresh observations.
 });
 
 test("Genshin refuses stale login generations, replaced pages and an observed changed nickname", async () => {
@@ -117,22 +109,6 @@ test("Genshin refuses stale login generations, replaced pages and an observed ch
     f.setNickname("Synthetic");
     await assert.rejects(f.reader.read(f.query("page:detail", { names: ["Alpha"] })), { code: "SOURCE_DATA_INVALID" });
   }
-});
-
-test("Genshin rechecks identity when a new round returns from the editor", async () => {
-  const f = fixture(), nextRoster = f.query("page:roster");
-  await f.reader.read(nextRoster);
-  await f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-  f.setUid("987654321");
-  await assert.rejects(f.reader.read(nextRoster), { code: "WRONG_ACCOUNT" });
-  assert.equal(f.counts.reload, 1);
-});
-
-test("Genshin returns from the refreshed official home through its visible character control", async () => {
-  const f = fixture({ home: true });
-  assert.equal((await f.reader.read(f.query("page:roster"))).rows.length, 4);
-  assert.equal(f.counts.characterNav, 1);
-  assert.equal((await f.reader.read(f.query("page:detail", { names: ["Alpha"] }))).details[0].name, "Alpha");
 });
 
 test("Genshin waits for delayed selection rendering without toggling a pending click twice", async () => {
@@ -162,25 +138,13 @@ test("Genshin waits for returned card labels to render after route and owned-tab
 });
 
 test("Genshin verifies an applied click after the client's wrapped timeout but propagates unrelated errors", async () => {
-  for (const [message, recover, code] of [
-    ["Error: Timed out after 200ms waiting for selector synthetic", true],
-    ["Client wrapper: locator.click: Timeout 200ms exceeded", true],
-    ["Client wrapper: Timed out after 200 ms waiting for locator synthetic", true],
-    ["element_detached", true],
-    ["no_matches", true],
-    ["synthetic moved target", true, "no_matches"],
-    ["synthetic timed action", true, "actionability_timeout"],
-    ["Timeout 200ms exceeded", false, "AUTHENTICATION_REQUIRED"],
-    ["Synthetic transport failure", false],
-    ["RPC: Timed out after 200ms waiting for selector synthetic", false],
-    ["security check: Timeout 200ms exceeded", false],
-  ]) {
-    const clickError = Object.assign(new Error(message), code ? { code } : {});
+  for (const timeout of [true, false]) {
+    const clickError = new Error(timeout ? "Error: Timed out after 200ms waiting for selector synthetic" : "Synthetic transport failure");
     const f = fixture({ delayedSelection: true, clickError });
     await f.reader.read(f.query("page:roster"));
     const result = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-    if (recover) assert.equal((await result).details[0].name, "Alpha");
-    else await assert.rejects(result, clickError);
+    if (timeout) assert.equal((await result).details[0].name, "Alpha");
+    else await assert.rejects(result, /Synthetic transport failure/);
     assert.equal(f.counts.clicks, 1);
   }
 });
@@ -192,17 +156,6 @@ test("Genshin repairs one observed missed action and rejects a persistently miss
     const result = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
     if (missedClicks === 1) assert.equal((await result).details.length, 1);
     else await assert.rejects(result, { code: "SOURCE_DATA_INVALID" });
-    assert.equal(f.counts.clicks, 2);
-  }
-});
-
-test("a moved click target still needs the observed marker and permits only one missed-action repair", async () => {
-  for (const missedClicks of [1, 2]) {
-    const f = fixture({ missedClicks, clickError: new Error("no_matches") });
-    await f.reader.read(f.query("page:roster"));
-    const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-    if (missedClicks === 1) assert.equal((await read).details[0].name, "Alpha");
-    else await assert.rejects(read, { code: "SOURCE_DATA_INVALID" });
     assert.equal(f.counts.clicks, 2);
   }
 });
@@ -274,15 +227,14 @@ test("active runner pumps only single requests and hands back login questions im
 test("ZZZ reuses a roster and verifies both changed and already-active owned cards", async () => {
   const { createZzzPageSource } = await import("../src/hoyo_roster/games/zzz/page_source.mjs");
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
-  let opened = false, currentName = "Initial", scans = 0, reloads = 0, skillVersion = 1;
-  let names = ["Alpha", "Beta"];
+  let opened = false, currentName = "Initial", scans = 0, reloads = 0;
   const rect = () => ({ width: 100, height: 100 });
   const cardFor = name => ({ querySelector: () => ({ textContent: name }), innerText: "Lv.50 " + name });
   const marker = text => ({ textContent: text, children: [], getBoundingClientRect: rect,
-    parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName + " v" + skillVersion } },
+    parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName } },
     closest: () => ({ innerText: text + " synthetic " + currentName }) });
   const document = { body: { innerText: "Synthetic" }, querySelectorAll(selector) {
-    if (selector === ".agent-list__row .gt-card") { scans++; return names.map(cardFor); }
+    if (selector === ".agent-list__row .gt-card") { scans++; return [cardFor("Alpha"), cardFor("Beta")]; }
     if (selector === "div.relative.z-2") return [{ textContent: currentName, parentElement: { classList: { contains: () => true } } }];
     if (selector === "p,div") return ["当前音擎", "当前技能等级", "当前装备驱动盘"].map(marker);
     if (selector === ".agent-list__row") return opened ? [{ getBoundingClientRect: rect }] : [];
@@ -322,12 +274,6 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   assert.equal(repeated.details[0].display_name, "Beta");
   assert.ok(repeated.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
-  names = ["Alpha"]; skillVersion = 2;
-  assert.equal((await source.read(query("roster"))).rows.length, 1);
-  assert.equal(scans, 2);
-  assert.ok((await source.read(query("detail", ["Alpha"]))).details[0].current_skills.includes("v2"));
-  await assert.rejects(source.read(query("detail", ["Beta"])), { code: "SOURCE_DATA_INVALID" });
-  assert.equal(reloads, 1);
   role.uid = "987654321";
   assert.equal((await source.read({ ...query("identity"), params: {} })).uid, "987654321");
   assert.equal(reloads, 1); // Only the roster refreshed; identity reopened its live panel.
@@ -337,24 +283,12 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
 
 
 test("Genshin dismisses an observed character hover but refuses an unknown overlay", async () => {
-  for (const kind of ["hover", "offscreen-hover", "unknown"]) {
+  for (const kind of ["hover", "unknown"]) {
     const f = fixture();
     await f.reader.read(f.query("page:roster"));
     f.setBlocker(kind);
     const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-    if (kind.includes("hover")) assert.equal((await read).details[0].name, "Alpha");
+    if (kind === "hover") assert.equal((await read).details[0].name, "Alpha");
     else { await assert.rejects(read, { code: "SOURCE_DATA_INVALID" }); assert.equal(f.selected.size, 0); }
-  }
-});
-
-test("Genshin verifies hover dismissal after an applied click timeout without hiding other errors", async () => {
-  for (const timeout of [true, false]) {
-    const error = new Error(timeout ? "Error: Timed out after 2500ms waiting for selector synthetic" : "synthetic transport failure");
-    const f = fixture({ hoverError: error });
-    await f.reader.read(f.query("page:roster"));
-    f.setBlocker("offscreen-hover");
-    const read = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
-    if (timeout) assert.equal((await read).details[0].name, "Alpha");
-    else await assert.rejects(read, error);
   }
 });

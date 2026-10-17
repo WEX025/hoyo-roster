@@ -4,17 +4,6 @@ import { sourceFailure } from "../../client_network.mjs";
 export const PAGE = "https://act.mihoyo.com/ys/event/calculator/index.html#/character";
 export const sourceNames = pageSourceNames;
 const UNSUPPORTED = "完成特定任务可达成奇偶突破、升级条件，养成计算器中暂不支持奇偶相关的计算";
-function clickFailure(error, timeoutMs) {
-  const message = error.message ?? "";
-  if (/\b(?:ERR_|RPC|transport|connection|authority|approval|security check)/i.test(message)) return "unknown";
-  if (["no_matches", "element_detached", "element_not_found"].includes(error.code)) return "target-moved";
-  if (["TimeoutError", "actionability_timeout"].includes(error.code)) return "timeout";
-  if (error.code) return "unknown";
-  if (error.name === "TimeoutError" ||
-      new RegExp(`(?:Timed out after ${timeoutMs}\\s*ms waiting for (?:selector|locator|element)|Timeout ${timeoutMs}\\s*ms exceeded)`, "i").test(message)) return "timeout";
-  if (/\b(?:no_matches|element_detached|element_not_found)\b|No element matches selector|Element is not attached to the DOM|Target element has been detached/i.test(message)) return "target-moved";
-  return "unknown";
-}
 
 export function createGenshinPageSource(ui) {
   let prepared = null;
@@ -39,31 +28,8 @@ export function createGenshinPageSource(ui) {
     if (nickname.trim() !== role.nickname) throw sourceFailure("WRONG_ACCOUNT");
     return role;
   }
-  async function returnSelector(tab, signal) {
-    const current = new URL(await ui.call(signal, () => tab.url()));
-    if (current.hash === "#/character") return;
-    if (current.hash === "#/" || !current.hash) {
-      await ui.click(tab, tab.playwright.getByText("角色", { exact: true }), signal, { snapshot: false });
-      await ui.wait(signal, async () => new URL(await ui.call(signal, () => tab.url())).hash === "#/character" &&
-        await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible()), Boolean);
-      return;
-    }
-    if (current.hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
-    await measure("genshin.return-selector", signal, async () => {
-      await ui.call(signal, () => tab.back());
-      // The route and visible selector must both finish returning before reads.
-      await ui.wait(signal, async () => {
-        const returned = new URL(await ui.call(signal, () => tab.url()));
-        return returned.hash === "#/character" &&
-          await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
-      }, Boolean, { timeoutMs: 2500 });
-    });
-  }
-  async function owned(tab, signal, params, generation) {
-    if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-      tab = await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
-    }
-    await returnSelector(tab, signal);
+  async function owned(tab, signal, params) {
+    tab = await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
     const role = await measure("genshin.identity", signal, () => identity(tab, signal));
     ui.assertIdentity(role, params);
     const hasOwned = await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
@@ -98,7 +64,7 @@ export function createGenshinPageSource(ui) {
       !/^[1-9][0-9]{0,31}$/.test(params.uid) || typeof params.region !== "string") throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     if (source === "page:roster") {
       prepared = null;
-      const { rows, role, tab: selectedTab } = await owned(tab, signal, params, generation);
+      const { rows, role, tab: selectedTab } = await owned(tab, signal, params);
       tab = selectedTab;
       identityContext = { tab, generation };
       prepared = { rows, role, tab, generation, editing: false };
@@ -112,8 +78,18 @@ export function createGenshinPageSource(ui) {
       throw sourceFailure("SOURCE_DATA_INVALID");
     }
     if (prepared.editing) {
-      if (new URL(await ui.call(signal, () => tab.url())).hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
-      await returnSelector(tab, signal);
+      const current = new URL(await ui.call(signal, () => tab.url()));
+      if (current.hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
+      await measure("genshin.return-selector", signal, async () => {
+        await ui.call(signal, () => tab.back());
+        // back() may resolve before a Windows webview commits its SPA route;
+        // the old selector can already be visible beneath the editor transition.
+        await ui.wait(signal, async () => {
+          const returned = new URL(await ui.call(signal, () => tab.url()));
+          return returned.hash === "#/character" &&
+            await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
+        }, Boolean, { timeoutMs: 2500 });
+      });
       prepared.editing = false;
     }
     const nickname = await ui.call(signal, () => tab.playwright.locator(".user-wrapper .nickname").innerText({ timeoutMs: 1500 }));
@@ -122,19 +98,6 @@ export function createGenshinPageSource(ui) {
       Array.from(document.querySelectorAll(".character-item")).filter(e => e.querySelector(".gt-avatar-selected"))
         .map(e => e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim())));
     let selected = await selectedNames();
-    async function dismissHover(visible) {
-      try {
-        await measure("genshin.dismiss-hover", signal, () =>
-          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 2500 }));
-      } catch (error) {
-        const kind = clickFailure(error, 2500);
-        await measure("genshin.click-error." + kind, signal, async () => {});
-        if (kind !== "timeout") throw error;
-        // A client timeout can arrive after the click took effect. Read the
-        // actual hover state; never assume a completed dismissal or click again.
-      }
-      await ui.wait(signal, visible, open => !open, { timeoutMs: 1500 });
-    }
     async function visibleLabel(card, name) {
       const label = card.getByText(name, { exact: true });
       try {
@@ -143,16 +106,6 @@ export function createGenshinPageSource(ui) {
       } catch (error) {
         if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
         throw sourceFailure("SOURCE_DATA_INVALID");
-      }
-      // A retained round can leave a hover above a different card. Checking
-      // only this label's current center misses it before click auto-scroll.
-      const hoverOpen = () => readDom(tab.playwright, () =>
-        Array.from(document.querySelectorAll(".character-popper")).some(e => {
-          const r = e.getBoundingClientRect();
-          return getComputedStyle(e).visibility === "visible" && r.width > 0 && r.height > 0;
-        }));
-      if (await ui.call(signal, hoverOpen)) {
-        await dismissHover(hoverOpen);
       }
       const covered = () => readDom(label, e => {
         const r = e.getBoundingClientRect();
@@ -165,8 +118,9 @@ export function createGenshinPageSource(ui) {
       if (state.hover) {
         // Only the observed official character hover is dismissed. No generic
         // dialog handling or forced clicks through unknown overlays.
-        await dismissHover(async () => (await covered()).hover);
-        state = await ui.call(signal, covered);
+        await measure("genshin.dismiss-hover", signal, () =>
+          tab.playwright.getByText("选择角色", { exact: true }).click({ timeoutMs: 400 }));
+        state = await ui.wait(signal, covered, value => !value.hover, { timeoutMs: 1500 });
       }
       if (state.blocked) {
         // A returned selector may already be visible while its old modal is
@@ -193,9 +147,8 @@ export function createGenshinPageSource(ui) {
       catch (error) {
         // The supported client can wrap Playwright's timeout as a plain Error,
         // including after the click took effect. Never log its raw UI message.
-        const kind = clickFailure(error, 200);
-        await measure("genshin.click-error." + kind, signal, async () => {});
-        if (!["timeout", "target-moved"].includes(kind)) throw error;
+        if (error.name !== "TimeoutError" &&
+            !/^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "")) throw error;
       }
       try {
         await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,
