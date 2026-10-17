@@ -134,7 +134,10 @@ export function createGenshinPageSource(ui) {
       // the next label. Keep the click short; verify rendered state separately.
       try { await measure(operation, signal, () => label.click({ timeoutMs: 200 })); }
       catch (error) {
-        if (error.name !== "TimeoutError") throw error;
+        // The supported client can wrap Playwright's timeout as a plain Error,
+        // including after the click took effect. Never log its raw UI message.
+        if (error.name !== "TimeoutError" &&
+            !/^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "")) throw error;
       }
       try {
         await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,

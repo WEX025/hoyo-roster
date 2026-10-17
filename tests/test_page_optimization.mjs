@@ -4,7 +4,7 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture({ delayedSelection = false, delayedBack = false, missedClicks = 0 } = {}) {
+function fixture({ delayedSelection = false, delayedBack = false, missedClicks = 0, clickError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
   const counts = { reload: 0, back: 0, clicks: 0 };
   const pending = [];
@@ -40,6 +40,7 @@ function fixture({ delayedSelection = false, delayedBack = false, missedClicks =
       if (missedClicks-- > 0) return;
       const toggle = () => { if (selected.has(name)) selected.delete(name); else selected.add(name); };
       if (delayedSelection) pending.push({ reads: 3, toggle }); else toggle();
+      if (clickError) throw clickError;
     } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; backReads = delayedBack ? 3 : 0; },
@@ -125,6 +126,18 @@ test("Genshin waits for back navigation even when the old selector is already vi
   const result = await f.reader.read(f.query("page:detail", { names: ["Beta"] }));
   assert.equal(result.details[0].name, "Beta");
   assert.equal(f.counts.back, 1);
+});
+
+test("Genshin verifies an applied click after the client's wrapped timeout but propagates unrelated errors", async () => {
+  for (const timeout of [true, false]) {
+    const clickError = new Error(timeout ? "Error: Timed out after 200ms waiting for selector synthetic" : "Synthetic transport failure");
+    const f = fixture({ delayedSelection: true, clickError });
+    await f.reader.read(f.query("page:roster"));
+    const result = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+    if (timeout) assert.equal((await result).details[0].name, "Alpha");
+    else await assert.rejects(result, /Synthetic transport failure/);
+    assert.equal(f.counts.clicks, 1);
+  }
 });
 
 test("Genshin repairs one observed missed action and rejects a persistently missing selection", async () => {
