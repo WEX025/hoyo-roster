@@ -1,4 +1,4 @@
-import { pageSourceNames } from "../../client_page.mjs";
+import { pageSourceNames, readDom } from "../../client_page.mjs";
 import { sourceFailure } from "../../client_network.mjs";
 
 export const PAGE = "https://act.mihoyo.com/ys/event/calculator/index.html#/character";
@@ -35,10 +35,9 @@ export function createGenshinPageSource(ui) {
     const hasOwned = await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
     if (!hasOwned) await ui.click(tab, tab.playwright.getByText("角色", { exact: true }), signal);
     await ui.wait(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible(), Boolean);
-    const active = await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true })
-      .evaluate(e => e.parentElement.classList.contains("active")));
+    const active = await ui.call(signal, () => readDom(tab.playwright.getByText("已拥有", { exact: true }), e => e.parentElement.classList.contains("active")));
     if (!active) await ui.click(tab, tab.playwright.getByText("已拥有", { exact: true }), signal);
-    const rows = await measure("genshin.roster", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() =>
+    const rows = await measure("genshin.roster", signal, () => ui.wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".character-item")).map(e => ({
         name: e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim(),
         level: e.querySelector(".gt-avatar-name p")?.textContent?.trim(),
@@ -94,7 +93,7 @@ export function createGenshinPageSource(ui) {
     }
     const nickname = await ui.call(signal, () => tab.playwright.locator(".user-wrapper .nickname").innerText({ timeoutMs: 1500 }));
     if (nickname.trim() !== prepared.role.nickname) throw sourceFailure("WRONG_ACCOUNT");
-    const selectedNames = async () => ui.call(signal, () => tab.playwright.evaluate(() =>
+    const selectedNames = async () => ui.call(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".character-item")).filter(e => e.querySelector(".gt-avatar-selected"))
         .map(e => e.querySelector("p.gt-mobile-caption-c2-3")?.textContent?.trim())));
     let selected = await selectedNames();
@@ -107,7 +106,7 @@ export function createGenshinPageSource(ui) {
         if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
         throw sourceFailure("SOURCE_DATA_INVALID");
       }
-      const covered = () => label.evaluate(e => {
+      const covered = () => readDom(label, e => {
         const r = e.getBoundingClientRect();
         const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
         return { hover: Boolean(hit?.closest(".character-popper")),
@@ -196,7 +195,7 @@ export function createGenshinPageSource(ui) {
     if (!expected.length) return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: unavailable }, generation);
     await measure("genshin.confirm", signal, () => ui.click(tab, tab.playwright.getByRole("button", { name: "确认", exact: true }), signal));
     prepared.editing = true;
-    const details = await measure("genshin.details", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() =>
+    const details = await measure("genshin.details", signal, () => ui.wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".characters-list > .container")).map(e => {
         const pair = root => Array.from(root?.querySelectorAll("input") ?? []).map(i => i.value);
         const avatar = e.querySelector(".avatar-section"), weapon = e.querySelector(".weapon-section");

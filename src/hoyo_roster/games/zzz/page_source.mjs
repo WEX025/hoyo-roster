@@ -1,4 +1,4 @@
-import { pageSourceNames } from "../../client_page.mjs";
+import { pageSourceNames, readDom } from "../../client_page.mjs";
 import { sourceFailure } from "../../client_network.mjs";
 
 export const PAGE = "https://act.mihoyo.com/zzz/gt/character-builder-h/index.html#/";
@@ -47,7 +47,7 @@ export function createZzzPageSource(ui) {
       await ui.wait(signal, observedReady, Boolean);
     }
   }
-  const headerName = tab => tab.playwright.evaluate(() =>
+  const headerName = tab => readDom(tab.playwright, () =>
     Array.from(document.querySelectorAll("div.relative.z-2")).find(e => e.parentElement.classList.contains("mr-4"))?.textContent?.trim() ?? "");
   async function identity(tab, signal) {
     await dismissSchemeNotice(ui, tab, signal);
@@ -64,7 +64,7 @@ export function createZzzPageSource(ui) {
     const isOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
     await openPanel(tab, tab.playwright.locator("svg.more-icon"), isOpen, signal);
     if (!scan) return;
-    return measure("zzz.roster", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() =>
+    return measure("zzz.roster", signal, () => ui.wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".agent-list__row .gt-card")).map(e => ({
         name: e.querySelector(".gt-card__info-outside")?.textContent?.trim(), text: e.innerText?.trim(),
       }))), rows => rows.length > 0 && rows.every(r => r.name && /^(?:Lv\.[1-9][0-9]*|-)\s/.test(r.text ?? "")), { stable: true }));
@@ -110,11 +110,11 @@ export function createZzzPageSource(ui) {
     if (!/^Lv\.[1-9][0-9]*\s/.test(ownedLabel)) throw sourceFailure("SOURCE_DATA_INVALID");
     // The official visible active marker associates an unchanged header with
     // this owned card. Re-selecting it closes the panel without a title change.
-    const targetWasActive = await ui.call(signal, () => card.evaluate(e => Boolean(e.querySelector(".gt-card__content.active"))));
+    const targetWasActive = await ui.call(signal, () => readDom(card, e => Boolean(e.querySelector(".gt-card__content.active"))));
     const selectorOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
     await click(tab, card.getByText(name, { exact: true }), signal);
     await dismissSchemeNotice(ui, tab, signal);
-    const transition = await ui.call(signal, () => tab.playwright.evaluate(() =>
+    const transition = await ui.call(signal, () => readDom(tab.playwright, () =>
       !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
         e.textContent?.trim() === "当前技能等级" && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)));
     try { await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 750 }); }
@@ -123,7 +123,7 @@ export function createZzzPageSource(ui) {
       if (await ui.call(signal, selectorOpen)) await click(tab, card.getByText(name, { exact: true }), signal);
       await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 3000 });
     }
-    const detail = await measure("zzz.details", signal, () => ui.wait(signal, () => tab.playwright.evaluate(() => {
+    const detail = await measure("zzz.details", signal, () => ui.wait(signal, () => readDom(tab.playwright, () => {
       const find = text => Array.from(document.querySelectorAll("p,div")).find(e => e.textContent?.trim() === text && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0);
       const name = Array.from(document.querySelectorAll("div.relative.z-2")).find(e => e.parentElement.classList.contains("mr-4"))?.textContent?.trim();
       const weapon = find("当前音擎"), skills = find("当前技能等级"), discs = find("当前装备驱动盘");

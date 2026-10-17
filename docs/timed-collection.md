@@ -72,6 +72,8 @@ console.log(await workflow.advance(browser));
 
 全流程墙钟与采集尝试墙钟分别报告。人工等待、中断和交接空档计入所属阶段；中断前尚未落盘的浏览器跨度标为不完整，不补造数据。不同进程 performance.timeOrigin 不同，只在各次尝试内部计算跨度并集与交叠，不能跨进程直接合并。嵌套跨度不相加冒充端到端。
 
+公共页面层为 DOM evaluate 使用客户端支持的五秒 scope 建立/执行超时，并分别记录页面枚举、绑定、视口读取与 URL 读取的固定指标。来源仍受统一45秒截止约束；客户端传输若未及时返回，控制器必须等待在途调用收拢，不用新的浏览器动作绕过取消，也不把未收拢的截止时间称为硬性墙钟上限。
+
 旧实验记录仍可用 `hoyo-roster-analyze --run RUN_DIRECTORY --compare BASELINE_DIRECTORY --output REPORT_DIRECTORY` 离线分析；标注 replay，不当作新增真实采集。正常工作流不需要这一步。更换源码、数据范围或恢复任务后的性能差值不当作同条件提速。
 
 ## 验证边界

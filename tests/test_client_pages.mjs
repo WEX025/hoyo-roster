@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPageBrowser } from "../src/hoyo_roster/client_page.mjs";
+import { createPageBrowser, readDom } from "../src/hoyo_roster/client_page.mjs";
+import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 import { runInNewContext } from "node:vm";
 import { dismissSchemeNotice, createZzzPageSource } from "../src/hoyo_roster/games/zzz/page_source.mjs";
 
@@ -138,6 +139,31 @@ test("cancellation after a pending SDK call prevents retention and later actions
   f.page.playwright.evaluate = async () => { controller.abort(new Error("cancel")); return { width: 1280, height: 900 }; };
   await assert.rejects(f.ui.page(URL, controller.signal), /cancel/);
   assert.deepEqual(f.calls, []);
+});
+
+test("a DOM setup timeout stops preflight and records the failing public operation", async () => {
+  const f = fixture(), metrics = createMetrics();
+  const timeout = Object.assign(new Error("synthetic DOM setup timeout"), { name: "TimeoutError" });
+  f.page.playwright.evaluate = async (_read, _argument, options) => {
+    assert.ok(options.timeoutMs > 0 && options.timeoutMs < 45000);
+    throw timeout;
+  };
+  await assert.rejects(createPageBrowser(f.browser, metrics).page(URL, new AbortController().signal), timeout);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(metrics.drain().map(e => [e.operation, e.status]), [
+    ["page.tabs-list", "PASS"], ["page.tab-resolve", "PASS"],
+    ["page.viewport-read", "FAIL"], ["page.preflight", "FAIL"],
+  ]);
+});
+
+test("page and locator DOM reads preserve arguments and propagate client timeout failures", async () => {
+  const argument = { synthetic: true }, timeout = new Error("synthetic timeout");
+  const read = value => value;
+  await assert.rejects(readDom({ evaluate: async (fn, arg, options) => {
+    assert.equal(fn, read); assert.equal(arg, argument);
+    assert.deepEqual(options, { timeoutMs: 5000 });
+    throw timeout;
+  } }, read, argument), timeout);
 });
 
 test("a replaced retained tab at an unexpected origin fails before any UI action", async () => {

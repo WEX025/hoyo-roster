@@ -4,6 +4,12 @@ import { createMetrics } from "./client_metrics.mjs";
 
 export const pageSourceNames = Object.freeze(["page:identity", "page:roster", "page:detail"]);
 
+// Bound the client's supported DOM scope setup as well as script execution.
+// The source deadline still owns cancellation and drains pending UI calls.
+export function readDom(target, read, argument) {
+  return target.evaluate(read, argument, { timeoutMs: 5000 });
+}
+
 export function createPageBrowser(browser, metrics = createMetrics()) {
   const retained = new Map();
   let viewportLease = false;
@@ -14,7 +20,8 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     return value;
   }
   async function page(url, signal) {
-    const tabs = await call(signal, () => browser.tabs.list());
+    const step = (name, action) => metrics.measure(name, () => call(signal, action));
+    const tabs = await step("page.tabs-list", () => browser.tabs.list());
     const expected = new URL(url);
     const prior = retained.get(url);
     let found = tabs.find(t => t.id === prior?.id);
@@ -24,14 +31,14 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     };
     if (found && !matches(found.url)) throw sourceFailure("SOURCE_DATA_INVALID");
     found ??= tabs.filter(t => matches(t.url)).at(-1);
-    let tab = await call(signal, () => found ? (found.id === prior?.id ? prior : browser.tabs.get(found.id)) : browser.tabs.new());
+    let tab = await step("page.tab-resolve", () => found ? (found.id === prior?.id ? prior : browser.tabs.get(found.id)) : browser.tabs.new());
     if (![tab.playwright?.evaluate, tab.playwright?.domSnapshot, tab.playwright?.locator,
       tab.playwright?.getByText].every(f => typeof f === "function")) {
       if (!found) await call(signal, () => tab.close());
       throw sourceFailure("CLIENT_SOURCE_UNAVAILABLE");
     }
     if (!found) await call(signal, () => tab.goto(url));
-    let size = await call(signal, () => tab.playwright.evaluate(() => ({
+    let size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
       width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
     })));
     if (found && (!size.width || !size.height)) {
@@ -40,7 +47,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       tab = await call(signal, () => browser.tabs.new());
       await call(signal, () => tab.goto(url));
       await call(signal, () => tab.playwright.domSnapshot());
-      size = await call(signal, () => tab.playwright.evaluate(() => ({
+      size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
         width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
       })));
     }
@@ -52,12 +59,12 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       // repair, never a device-emulation or screenshot-size preference.
       await call(signal, () => viewport.set({ width: 1280, height: 900 }));
       viewportLease = true;
-      const repaired = await call(signal, () => tab.playwright.evaluate(() => ({
+      const repaired = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
         width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
       })));
       if (!repaired.width || !repaired.height) throw sourceFailure("CLIENT_PAGE_UNAVAILABLE");
     }
-    if (!matches(await call(signal, () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
+    if (!matches(await step("page.url-read", () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
     if (tab !== prior) await call(signal, () => tab.markHandoff());
     retained.set(url, tab);
     return tab;
@@ -86,7 +93,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   async function authentication(tab, signal) {
     // Only read rendered text and field presence, never any login input value.
-    return call(signal, () => tab.playwright.evaluate(() => {
+    return call(signal, () => readDom(tab.playwright, () => {
       const fields = Array.from(document.querySelectorAll("input"));
       const visible = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
       return fields.some(e => visible(e) && /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
@@ -110,7 +117,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       if (await authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
       throw error;
     }
-    const roles = await wait(signal, () => tab.playwright.evaluate(() =>
+    const roles = await wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".game-role-list > li")).map(e => ({
         uid: e.querySelector(".role-uid")?.textContent?.trim().replace(/^UID\s*/, ""),
         nickname: e.querySelector(".role-name")?.textContent?.trim(),
