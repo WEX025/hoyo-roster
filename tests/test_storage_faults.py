@@ -175,12 +175,19 @@ def test_wrong_identity_or_corrupted_generation_recovery_rejected(store):
 
 
 def test_new_intermediates_private_existing_shared_parent_unchanged(tmp_path):
+    def permissions(path):
+        descriptor = io.backend._descriptor(path)
+        acl = descriptor.GetSecurityDescriptorDacl()
+        return (
+            descriptor.GetSecurityDescriptorOwner(),
+            descriptor.GetSecurityDescriptorControl(),
+            tuple(acl.GetAce(i) for i in range(acl.GetAceCount())),
+        )
+
     parent = tmp_path / "shared"
     parent.mkdir(mode=0o755)
     make_shared(parent)
-    before = (
-        io.backend._descriptor(parent).GetSecurityDescriptorBinaryForm() if io.WINDOWS else None
-    )
+    before = permissions(parent) if io.WINDOWS else None
     leaf = workspace.private_directory(parent / "application" / "users" / "scope")
     assert not io.private(parent)
     for path in (leaf, leaf.parent, leaf.parent.parent):
@@ -188,7 +195,7 @@ def test_new_intermediates_private_existing_shared_parent_unchanged(tmp_path):
     with pytest.raises(workspace.WorkspaceError):
         workspace.private_directory(parent)
     if io.WINDOWS:
-        assert io.backend._descriptor(parent).GetSecurityDescriptorBinaryForm() == before
+        assert permissions(parent) == before
     else:
         assert stat.S_IMODE(parent.stat().st_mode) == 0o755
 
