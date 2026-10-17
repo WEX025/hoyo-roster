@@ -74,7 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--operation", choices=OPERATIONS, default="sync")
     parser.add_argument(
-        "--parallel-games", action="store_true", help="同一任务内交叠两游戏；共享会话锁和两秒节流"
+        "--parallel-games",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="默认交叠两游戏；--no-parallel-games 改为串行；共享会话锁和两秒节流",
     )
     parser.add_argument(
         "--storage-root",

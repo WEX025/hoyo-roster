@@ -14,7 +14,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const browser = () => ({ tabs: { list: async () => [], get: async () => {}, new: async () => {} } });
 import { record } from "./fixtures_collection_source.mjs";
 
-test("one real worker multiplexes games, throttles actual starts and commits both double passes", {timeout:90000}, async () => {
+for (const parallelGames of [undefined, false]) test(`one real worker ${parallelGames === false ? "explicitly serializes" : "defaults to overlapping"} games and commits both double passes`, {timeout:90000}, async () => {
+  const parallel = parallelGames !== false;
   const temp = await realpath(await mkdtemp(join(tmpdir(),"hoyo-parallel-")));
   const active = new Set(), starts = [], reads = [], completions = [];
   let peak = 0, insidePump = false;
@@ -25,12 +26,13 @@ test("one real worker multiplexes games, throttles actual starts and commits bot
     try { await sleep(q.game === "genshin" ? 2250 : 20);q.signal.throwIfAborted();return record(q.game,q.source); }
     finally {active.delete(q.game);completions.push(q.game);}
   } });
-  const task=host.startTask({python,cwd:root,parallelGames:true,runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
+  const task=host.startTask({python,cwd:root,...(parallelGames === undefined ? {} : {parallelGames}),runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
+  assert.equal(task.status().parallelGames, parallel);
   const logs = join(temp, "timing");
   await mkdir(logs, {mode:0o700});
   let released = false;
   const recorder = await recordCollection({drainMetrics:()=>[], releasePageSettings:async()=>{released=true;}},
-    task, logs, {source_sha:"synthetic"}, true);
+    task, logs, {source_sha:"synthetic"}, parallel);
   try {
     while(!task.status().done){
       insidePump=true;
@@ -39,9 +41,9 @@ test("one real worker multiplexes games, throttles actual starts and commits bot
     }
     const result=await task.completion;
     assert.equal(result.code,0,result.events.join("\n"));
-    assert.equal(peak,2);
-    assert.equal(completions[0],"zzz","out-of-order replies must stay correlated");
-    for(let n=1;n<starts.length;n++)assert.ok(starts[n]-starts[n-1]>=1995);
+    assert.equal(peak,parallel ? 2 : 1);
+    assert.equal(completions[0],parallel ? "zzz" : "genshin","replies must stay correlated in either mode");
+    if(parallel)for(let n=1;n<starts.length;n++)assert.ok(starts[n]-starts[n-1]>=1995);
     for(const game of ["genshin","zzz"]){
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:roster").length,2);
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:detail").length,2);

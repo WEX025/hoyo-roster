@@ -70,7 +70,7 @@ def config_options(options):
         "package_directory": str(package),
         "repository": str(repository) if repository else None,
         "python": sys.executable,
-        "parallel_games": options.get("parallelGames", False),
+        "parallel_games": options.get("parallelGames", True),
         "runtime_root": absolute("runtimeRoot") or str(default_private_root()),
         "update": options.get("update", False),
         "repair_installation": options.get("repairInstallation", True),

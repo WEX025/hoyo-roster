@@ -17,6 +17,14 @@ from hoyo_roster.storage.common import atomic_write_metadata
 from tests.test_page_workflow import PagePort
 
 
+@pytest.mark.parametrize(
+    "options, expected",
+    [({}, True), ({"parallelGames": True}, True), ({"parallelGames": False}, False)],
+)
+def test_new_workflow_defaults_to_parallel_and_preserves_explicit_serial(options, expected):
+    assert config_options(options)["parallel_games"] is expected
+
+
 @pytest.fixture
 def prepared(tmp_path, monkeypatch):
     async def reserve(self, **kwargs):
@@ -125,7 +133,8 @@ def test_reconnect_stops_on_account_or_snapshot_change_before_more_collection(pr
         port.uid = "987654321"
     assert collect(prepared, port) == 1
     assert port.counts[("genshin", "page:roster")] == 0
-    assert port.counts[("zzz", "page:identity")] == 0
+    # Parallel peers may already be checking identity; neither may collect a roster.
+    assert port.counts[("zzz", "page:roster")] == 0
 
 
 def test_no_resume_while_another_controller_or_worker_is_alive(prepared):

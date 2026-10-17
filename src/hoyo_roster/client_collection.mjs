@@ -80,7 +80,7 @@ export async function recordCollection(host, task, directory, version, parallelG
   };
 }
 
-export async function startTimedCollection(browser, { python, directory, runtimeRoot, parallelGames = false }) {
+export async function startTimedCollection(browser, { python, directory, runtimeRoot, parallelGames = true }) {
   if (typeof python !== "string" || !directory || !runtimeRoot || typeof parallelGames !== "boolean") {
     throw new Error("INVALID_COLLECTION_OPTIONS");
   }

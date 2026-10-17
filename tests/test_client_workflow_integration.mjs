@@ -36,7 +36,7 @@ test("a fresh process rechecks identity, reuses a committed game and automatical
   } finally { await rm(temp,{recursive:true,force:true}); }
 });
 
-test("Windows-compatible owner discovery and parallel workers retain double passes and one shared gate", {timeout:120000}, async () => {
+test("default workflow overlaps games and retains double passes and one shared gate", {timeout:120000}, async () => {
   const temp = await realpath(await mkdtemp(join(tmpdir(), "hoyo-workflow-parallel-")));
   try {
     const directory = join(temp, "run");

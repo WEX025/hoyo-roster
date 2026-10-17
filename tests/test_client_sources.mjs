@@ -220,7 +220,8 @@ test("Bundled donor readers drive raw browser events through real worker and bot
   const fixture=browserNetworkFixture({authenticated:false});
   const temporary=await realpath(await mkdtemp(join(tmpdir(),"hoyo-donor-network-")));
   const host=createRosterHost(fixture.browser);
-  const task=host.startTask({python,cwd:root,runtimeRoot:join(temporary,"runtime"),storageRoot:join(temporary,"results")});
+  // API fallback is intentionally exercised in serial mode; parallel collection requires page sources.
+  const task=host.startTask({python,cwd:root,parallelGames:false,runtimeRoot:join(temporary,"runtime"),storageRoot:join(temporary,"results")});
   try {
     for(let i=0;i<1000&&!host.pendingQuestion()&&!task.status().done;i++) await task.pump({waitMs:25,maxRequests:1});
     assert.ok(host.pendingQuestion(),JSON.stringify(task.status()));

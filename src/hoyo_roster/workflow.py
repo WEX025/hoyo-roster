@@ -120,7 +120,7 @@ async def run_task(args, client=None):
                 print("LOGIN_STATUS=USER_CONFIRMED", flush=True)
                 return 0
             if (
-                getattr(args, "parallel_games", False)
+                getattr(args, "parallel_games", True)
                 and session.client.page_reader
                 and len(games) > 1
             ):

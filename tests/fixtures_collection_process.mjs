@@ -17,7 +17,7 @@ let initial;
 for (let n = 0; n < 40; n++) {
   try {
     initial = await control(fresh ? "create" : "claim", { owner,
-      ...(fresh ? { options: { runtimeRoot: join(dirname(directory), "runtime"), parallelGames: mode === "parallel" } } : {}) });
+      ...(fresh ? { options: { runtimeRoot: join(dirname(directory), "runtime"), ...(mode === "interrupt" ? { parallelGames: false } : {}) } } : {}) });
     break;
   } catch (error) {
     if (error.code !== "WORKFLOW_WORKER_STILL_RUNNING") throw error;

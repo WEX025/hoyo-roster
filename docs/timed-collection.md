@@ -10,12 +10,11 @@
 var { openCollectionWorkflow } = await import(PACKAGE_FILE_URL + "/client_workflow.mjs");
 var workflow = await openCollectionWorkflow({
   directory: NEW_PRIVATE_RUN_DIRECTORY,
-  parallelGames: true,
 });
 console.log(await workflow.advance(browser));
 ```
 
-`PACKAGE_FILE_URL` 指向源码 `src/hoyo_roster` 或实际安装包目录，目录参数为私有 run 目录。必填配置只有 directory；不从 cwd 猜仓库、不扫描用户目录。默认串行，示例显式启用跨游戏并发。Python 从安装环境、源码 .venv、已知 Python 命令中检测 3.12；歧义时显式传 python。缺少基础依赖时尝试安装选中的公开包；无法建立安全控制环境时返回固定错误，不假装已经创建可恢复任务。
+`PACKAGE_FILE_URL` 指向源码 `src/hoyo_roster` 或实际安装包目录，目录参数为私有 run 目录。必填配置只有 directory；不从 cwd 猜仓库、不扫描用户目录。新任务默认启用跨游戏并发；显式 `parallelGames:false` 可串行执行。已有 run 按其保存的配置恢复，不因默认值变化切换模式。Python 从安装环境、源码 .venv、已知 Python 命令中检测 3.12；歧义时显式传 python。缺少基础依赖时尝试安装选中的公开包；无法建立安全控制环境时返回固定错误，不假装已经创建可恢复任务。
 
 最小依赖引导与正式 PREPARING 共用 installation 的单次 Git 信任、stdin 隔离与私有临时目录策略。引导临时目录是所选 run 的新建私有同级目录，不提前创建 workflow.json 或复用旧 runtime；安装后核验依赖并只清理可证明归属的临时范围。Windows 必须先具备 `pywin32==311` 原生权限支持；缺失时明确返回 `WORKFLOW_PLATFORM_DEPENDENCIES_REQUIRED`，由环境安装步骤补齐依赖，不用 chmod 或继承 TEMP 降低权限要求。`repairInstallation:false` 仍禁止自动安装。正式阶段继续固定源码、逐文件核对并修复安装，不复制第二套业务编排。
 
@@ -92,7 +91,7 @@ reload 返回成功不证明页面已经可读：会继续通过只读 DOM scope
 
 ### Windows
 
-Windows 使用同一入口和 `parallelGames:true`，Python 由所选虚拟环境的 `Scripts/python.exe` 提供。`platform_io.launch_parent_pid()` 在 Windows 只跳过与 `sys.executable` 精确匹配的一个 venv redirector，使用进程句柄核对存活、映像和创建时间；控制器与 worker 都走此函数，仍拒绝不同控制器。无法核验时停止，不枚举任意祖先进程来放行。Node 启动辅助进程使用 `windowsHide:true`，不弹出额外终端。
+Windows 使用同一默认并行入口，Python 由所选虚拟环境的 `Scripts/python.exe` 提供。`platform_io.launch_parent_pid()` 在 Windows 只跳过与 `sys.executable` 精确匹配的一个 venv redirector，使用进程句柄核对存活、映像和创建时间；控制器与 worker 都走此函数，仍拒绝不同控制器。无法核验时停止，不枚举任意祖先进程来放行。Node 启动辅助进程使用 `windowsHide:true`，不弹出额外终端。
 
 客户端沙箱 SID 可能与显式选择的源码仓库所有者不同。Git 命令只在本次调用信任模块所锚定的确切 checkout，不写全局 `safe.directory`；来源无法核验或要求更新却没有源码时明确失败。普通安装通过 PEP 610 核验本地源码后同样记录 SHA，并逐文件比较安装内容。
 
