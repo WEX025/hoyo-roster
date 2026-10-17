@@ -28,22 +28,22 @@ async function selectPython(selected) {
   throw failure("WORKFLOW_PYTHON_312_REQUIRED");
 }
 
-async function ensureDependencies(python, options) {
+async function ensureDependencies(python, options, directory) {
   try {
     await execute(python, ["-I", "-c", "import portalocker,platformdirs,jsonschema"], { timeout: 10000 });
     return;
   } catch { /* A bare interpreter may bootstrap from the selected public package. */ }
   if (options.repairInstallation === false) throw failure("WORKFLOW_DEPENDENCIES_REQUIRED");
   const repository = dirname(moduleDirectory).endsWith("src") ? dirname(dirname(moduleDirectory)) : null;
-  const target = options.installationArtifact ?? repository;
-  if (!target) throw failure("WORKFLOW_INSTALLATION_SOURCE_REQUIRED");
-  if (repository) {
-    const { stdout } = await execute("git", ["status", "--porcelain"], { cwd: repository, timeout: 5000 });
-    if (stdout.trim()) throw failure("WORKFLOW_SOURCE_DIRTY");
-  }
-  try {
-    await execute(python, ["-m", "pip", "install", "--no-cache-dir", target], { timeout: 180000, maxBuffer: 65536 });
-  } catch { throw failure("WORKFLOW_ENVIRONMENT_INSTALL_FAILED"); }
+  const bootstrap = "import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_module('hoyo_roster.bootstrap',run_name='__main__')";
+  const pending = execute(python, ["-I", "-c", bootstrap, dirname(moduleDirectory)], { timeout: 210000, maxBuffer: 65536 });
+  pending.child.stdin.on("error", () => {});
+  pending.child.stdin.end(JSON.stringify({ directory, repository, artifact: options.installationArtifact ?? null }));
+  let stdout;
+  try { ({ stdout } = await pending); } catch (error) { stdout = error.stdout; }
+  let result;
+  try { result = JSON.parse(stdout); } catch { throw failure("WORKFLOW_BOOTSTRAP_FAILED"); }
+  if (result?.ok !== true) throw failure(/^[A-Z][A-Z_]{1,80}$/.test(result?.errorCode ?? "") ? result.errorCode : "WORKFLOW_BOOTSTRAP_FAILED");
 }
 
 export function createWorkflowDriver({ directory, control, startSession, initial }) {
@@ -169,7 +169,7 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
   try { await access(join(directory, "workflow.json")); exists = true; } catch { /* New run. */ }
   if (exists && Object.keys(options).length) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
   const python = await selectPython(selectedPython);
-  await ensureDependencies(python, options);
+  await ensureDependencies(python, options, directory);
   const owner = await resolveWorkflowOwner(python);
   const control = createWorkflowControl(python, directory, owner);
   const initial = await control(exists ? "claim" : "create", exists ? { owner } : { owner, options,

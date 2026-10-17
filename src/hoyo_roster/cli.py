@@ -252,7 +252,11 @@ def main(argv: list[str] | None = None, *, client=None) -> int:
     try:
         return run_async(run(args, client=client))
     except WorkspaceError as error:
-        hint = "执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
+        hint = (
+            "当前 Python 的 Windows asyncio 接口未经兼容审阅；使用已验证的 CPython 3.12.14，或按 platform-support 文档重新验证运行时。"
+            if str(error) == "WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME"
+            else "执行 --operation inspect；按 local-use 文档恢复。归属不明时保留并私下备份，核实来源后人工处置，不按 UUID 删除。"
+        )
         print(f"LOCAL_WORKSPACE=FAIL\nERROR_CODE={error}\n提示={hint}")
         return 1
     except OperationError as error:

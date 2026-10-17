@@ -4,7 +4,9 @@
 
 ## Python 与宿主
 
-Python 3.12；宿主模块使用 Node.js 内置模块和客户端提供的 browser 对象，不引入独立浏览器驱动。源码和 wheel 均分发 client_host.mjs。解释器由调用方显式提供，不根据 OS 选择浏览器。macOS 与 Windows Codex 内置浏览器的页面同步均有实测记录；Linux、其他客户端及真实客户端重启持久化未验收，详见[验证记录](release-validation.md)。
+Python 3.12；宿主模块使用 Node.js 内置模块和客户端提供的 browser 对象，不引入独立浏览器驱动。源码和 wheel 均分发 client_host.mjs。解释器由调用方显式提供，不根据 OS 选择浏览器。Windows 与 macOS 的当前版本验收统一见[当前平台状态](release-validation.md#当前平台状态)，不以历史实测替代最新版验收。Linux、其他客户端及真实客户端重启持久化未验收。
+
+Windows IOCP 管道适配只接受已审阅的 CPython 3.12 私有接口结构。启动前对实际使用的构造、关闭、自唤醒和管道接收方法做规范化 AST 指纹检查；未知结构在分配管道前返回 `WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME`。参考指纹来自 CPython 3.12.14；同结构的补丁版本可用，结构变化须先重新审阅并运行原生契约测试，不静默回退到曾挂起的回环 TCP，也不影响非 Windows 的 asyncio.run 路径。
 
 ## 文件系统
 

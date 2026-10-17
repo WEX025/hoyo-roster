@@ -11,8 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterator
 
-import portalocker
-
 WINDOWS = os.name == "nt"
 if WINDOWS:
     from . import windows_io as backend
@@ -37,6 +35,13 @@ def run_async(coroutine):
         with asyncio.Runner(loop_factory=backend.new_event_loop) as runner:
             return runner.run(coroutine)
     finally:
+        import inspect
+
+        if (
+            inspect.iscoroutine(coroutine)
+            and inspect.getcoroutinestate(coroutine) == inspect.CORO_CREATED
+        ):
+            coroutine.close()
         asyncio.set_event_loop(None)
 
 
@@ -175,6 +180,8 @@ def open_private(path: Path, flags: int) -> int:
 
 @contextmanager
 def exclusive_lock(path: Path) -> Iterator[None]:
+    import portalocker
+
     descriptor = open_private(path, os.O_CREAT | os.O_RDWR)
     with os.fdopen(descriptor, "r+b", buffering=0) as stream:
         acquired = False

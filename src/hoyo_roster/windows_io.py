@@ -20,6 +20,48 @@ import win32process
 import win32security
 
 
+def _check_asyncio_compatibility():
+    """Refuse an unreviewed private asyncio ABI before allocating any handles.
+
+    Fingerprints are normalized ASTs from CPython 3.12.14. Patch releases with
+    identical contracts are accepted; edits, missing source, other versions or
+    implementations require explicit review plus the native contract tests.
+    """
+    import ast
+    import hashlib
+    import inspect
+    import textwrap
+    from asyncio import proactor_events, windows_events
+    from .errors import WorkspaceError
+
+    expected = {
+        "BaseProactorEventLoop.__init__": "8502c6ea7b7f920563fa80af5626ab8de8db6c3a449d240f2eee9b3b2079ed77",
+        "BaseProactorEventLoop.close": "2fd286c7656d443b144d4d919cf54fd8496ba335cdca1fa7705cfc22891121d2",
+        "BaseProactorEventLoop._make_self_pipe": "1f130b7849233216615c60406f1b5fffd63aec5b69d4669c2e7720473610ebd9",
+        "BaseProactorEventLoop._close_self_pipe": "51235f1f17087ae900ab52fcb72d3bea72421e14046e4f9bdc18bebfef164eba",
+        "BaseProactorEventLoop._loop_self_reading": "97c3ae3c2c89febd5a62799ff76e3a15c314a6f5d902e0a23a91f3a879aa7749",
+        "ProactorEventLoop.__init__": "aedf8de6b88c6db755cbdde12b09bbfb94d5f3aa034e1279c84ded6c46f40020",
+        "ProactorEventLoop.run_forever": "3dc0de76b3a3f5121825fb70f73d136e2dfbda07c7b937eef5ed4032812d1305",
+        "IocpProactor.recv": "b120427b0a394a635fe6b7f5c1eaebc13abd4d1cf201b5d7457c06eb6fb491e3",
+    }
+    try:
+        if sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 12):
+            raise ValueError()
+        classes = {
+            "BaseProactorEventLoop": proactor_events.BaseProactorEventLoop,
+            "ProactorEventLoop": windows_events.ProactorEventLoop,
+            "IocpProactor": windows_events.IocpProactor,
+        }
+        for qualified, digest in expected.items():
+            owner, method = qualified.split(".")
+            source = inspect.getsource(getattr(classes[owner], method))
+            normalized = ast.dump(ast.parse(textwrap.dedent(source)), include_attributes=False)
+            if hashlib.sha256(normalized.encode()).hexdigest() != digest:
+                raise ValueError()
+    except (AttributeError, OSError, TypeError, ValueError, SyntaxError):
+        raise WorkspaceError("WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME") from None
+
+
 def new_event_loop():
     """Python 3.12 IOCP loop with a local pipe instead of a TCP wakeup socket."""
     import asyncio
@@ -27,6 +69,8 @@ def new_event_loop():
     import win32pipe
     from asyncio.windows_utils import PipeHandle, pipe
     from asyncio.windows_events import IocpProactor
+
+    _check_asyncio_compatibility()
 
     class PipeProactor(IocpProactor):
         def select(self, timeout=None):

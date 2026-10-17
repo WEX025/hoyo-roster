@@ -90,3 +90,47 @@ def test_unreadable_prior_sid_directory_is_rejected(monkeypatch, tmp_path):
 
     monkeypatch.setattr(io.backend, "_descriptor", denied)
     assert not io.private(tmp_path)
+
+
+def test_asyncio_private_contract_change_stops_before_pipe_creation(monkeypatch):
+    from asyncio import proactor_events
+    from hoyo_roster.errors import WorkspaceError
+
+    def changed_constructor(self):
+        raise AssertionError("unreviewed constructor must never run")
+
+    monkeypatch.setattr(proactor_events.BaseProactorEventLoop, "__init__", changed_constructor)
+    with pytest.raises(WorkspaceError, match="WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME"):
+        io.backend.new_event_loop()
+
+
+def test_loop_initialization_failure_closes_unstarted_coroutine(monkeypatch):
+    import inspect
+    from hoyo_roster.errors import WorkspaceError
+
+    def unsupported():
+        raise WorkspaceError("WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME")
+
+    async def pending():
+        pytest.fail("unsupported runtime cannot start business work")
+
+    monkeypatch.setattr(io.backend, "new_event_loop", unsupported)
+    coroutine = pending()
+    with pytest.raises(WorkspaceError, match="WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME"):
+        io.run_async(coroutine)
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
+
+
+def test_unsupported_runtime_cli_points_to_runtime_not_storage_recovery(monkeypatch, capsys):
+    from hoyo_roster import cli
+    from hoyo_roster.errors import WorkspaceError
+
+    def unsupported():
+        raise WorkspaceError("WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME")
+
+    monkeypatch.setattr(io.backend, "new_event_loop", unsupported)
+    assert cli.main(["--game", "genshin", "--uid", "123456789", "--operation", "inspect"]) == 1
+    output = capsys.readouterr().out
+    assert "ERROR_CODE=WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME" in output
+    assert "CPython 3.12.14" in output
+    assert "执行 --operation inspect" not in output

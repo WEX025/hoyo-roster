@@ -10,17 +10,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
 from platformdirs import user_data_path
+from .installation import repository_git as repository_git
 
 
 def default_private_root() -> Path:
     return user_data_path("hoyo-roster", appauthor=False, roaming=False)
-
-
-def repository_git(candidate: Path, *args: str) -> list[str]:
-    # The caller has explicitly selected this local source checkout. Client tools
-    # may use a sandbox SID different from its owner. Trust only this invocation
-    # and exact anchored checkout; never change global safe.directory settings.
-    return ["git", "-c", f"safe.directory={candidate.resolve().as_posix()}", *args]
 
 
 def verified_repository(candidate: Path) -> Path | None:

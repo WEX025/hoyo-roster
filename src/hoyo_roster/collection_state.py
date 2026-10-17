@@ -10,6 +10,7 @@ import uuid
 
 from . import platform_io as io
 from .errors import WorkspaceError, WrongAccount
+from .installation import validate_workflow_directory
 from .storage.common import atomic_write_metadata, load_metadata
 from .user_workspace import private_directory
 
@@ -51,16 +52,8 @@ class RunStore:
         if store.root.exists():
             raise WorkspaceError("WORKFLOW_DIRECTORY_EXISTS")
         repository = config.get("repository")
-        if repository and (
-            store.root.resolve().is_relative_to(Path(repository).resolve())
-            or Path(repository).resolve().is_relative_to(store.root.resolve())
-        ):
-            raise WorkspaceError("UNSAFE_WORKFLOW_DIRECTORY")
         package = Path(config["package_directory"]).resolve()
-        if store.root.resolve().is_relative_to(package) or package.is_relative_to(
-            store.root.resolve()
-        ):
-            raise WorkspaceError("UNSAFE_WORKFLOW_DIRECTORY")
+        validate_workflow_directory(store.root, Path(repository) if repository else None, package)
         private_directory(store.root)
         with io.exclusive_lock(store.root / "workflow.lock"):
             if store.path.exists():

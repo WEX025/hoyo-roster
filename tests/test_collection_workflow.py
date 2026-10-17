@@ -217,7 +217,7 @@ def test_preparation_updates_once_repairs_only_when_needed_and_rechecks(
         if "pip" in args:
             environment = kwargs["env"]
             temporary = Path(environment["TEMP"])
-            assert temporary == prepared.root / "preparation-temp"
+            assert temporary == io.filesystem_path(prepared.root / "preparation-temp")
             assert environment["TMP"] == environment["TMPDIR"] == str(temporary)
             assert io.private(temporary)
             installed = True
