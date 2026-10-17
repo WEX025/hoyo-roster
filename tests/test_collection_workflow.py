@@ -3,6 +3,7 @@
 from hashlib import sha256
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -210,10 +211,15 @@ def test_preparation_updates_once_repairs_only_when_needed_and_rechecks(
         nonlocal installed
         commands.append(args)
         if args[0] == "git":
-            if args[3:5] == ["rev-parse", "--abbrev-ref"]:
+            if args[-4:] == ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]:
                 return "origin/main\n"
-            return "synthetic\n" if args[3:5] == ["rev-parse", "HEAD"] else ""
+            return "synthetic\n" if args[-2:] == ["rev-parse", "HEAD"] else ""
         if "pip" in args:
+            environment = kwargs["env"]
+            temporary = Path(environment["TEMP"])
+            assert temporary == prepared.root / "preparation-temp"
+            assert environment["TMP"] == environment["TMPDIR"] == str(temporary)
+            assert io.private(temporary)
             installed = True
             return ""
         return json.dumps(expected if installed else {})

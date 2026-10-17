@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,11 +12,12 @@ from .user_workspace import private_directory
 from .paths import repository_git
 
 
-def command(args, *, cwd=None, timeout=120):
+def command(args, *, cwd=None, timeout=120, env=None):
     try:
         result = subprocess.run(
             args,
             cwd=cwd,
+            env=env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=timeout,
@@ -77,6 +79,13 @@ print(json.dumps({f.relative_to(p).as_posix(): hashlib.sha256(f.read_bytes()).he
         target = config.get("installation_artifact") or (str(repository) if repository else None)
         if target is None:
             raise WorkspaceError("WORKFLOW_INSTALLATION_SOURCE_REQUIRED")
+        # Desktop sandbox identities can inherit an inaccessible Windows TEMP.
+        # Keep pip's transient build state in this run's verified private scope.
+        temporary = store.root / "preparation-temp"
+        private_directory(temporary)
+        environment = dict(
+            os.environ, TMPDIR=str(temporary), TEMP=str(temporary), TMP=str(temporary)
+        )
         command(
             [
                 sys.executable,
@@ -90,6 +99,7 @@ print(json.dumps({f.relative_to(p).as_posix(): hashlib.sha256(f.read_bytes()).he
                 target,
             ],
             timeout=120,
+            env=environment,
         )
         installed = json.loads(command([sys.executable, "-I", "-c", probe], timeout=10))
         repaired = True
