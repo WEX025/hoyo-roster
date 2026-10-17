@@ -81,7 +81,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
   };
   const reader = createGenshinPageSource(ui);
   const query = (source, extra = {}, generation = 0) => ({ source, params: { uid: role.uid, region: role.region, ...extra }, body: null, generation, signal: new AbortController().signal });
-  return { counts, reader, query, selected, setUid: uid => { role.uid = uid; }, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
+  return { counts, reader, query, selected, removeLastRow: () => cards.pop(), setUid: uid => { role.uid = uid; }, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
 }
 
 test("Genshin reuses only the current round, reconciles selected cards and returns the requested details", async () => {
@@ -94,8 +94,12 @@ test("Genshin reuses only the current round, reconciles selected cards and retur
   assert.deepEqual(Array.from(second.details, d => d.name), ["Gamma", "Delta"]);
   assert.equal(f.counts.reload, 1);
   assert.equal(f.counts.back, 1);
-  await f.reader.read(f.query("page:roster"));
-  assert.equal(f.counts.reload, 2); // A second pass must prepare fresh observations.
+  f.removeLastRow();
+  const nextRound = await f.reader.read(f.query("page:roster"));
+  assert.equal(nextRound.rows.length, 3); // The second pass rereads the live selector.
+  assert.equal(f.counts.reload, 1);
+  assert.equal(f.counts.back, 2); // The new round returns from the last editor too.
+  await assert.rejects(f.reader.read(f.query("page:detail", { names: ["Delta"] })), { code: "SOURCE_DATA_INVALID" });
 });
 
 test("Genshin refuses stale login generations, replaced pages and an observed changed nickname", async () => {
@@ -109,6 +113,15 @@ test("Genshin refuses stale login generations, replaced pages and an observed ch
     f.setNickname("Synthetic");
     await assert.rejects(f.reader.read(f.query("page:detail", { names: ["Alpha"] })), { code: "SOURCE_DATA_INVALID" });
   }
+});
+
+test("Genshin rechecks identity when a new round returns from the editor", async () => {
+  const f = fixture(), nextRoster = f.query("page:roster");
+  await f.reader.read(nextRoster);
+  await f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+  f.setUid("987654321");
+  await assert.rejects(f.reader.read(nextRoster), { code: "WRONG_ACCOUNT" });
+  assert.equal(f.counts.reload, 1);
 });
 
 test("Genshin waits for delayed selection rendering without toggling a pending click twice", async () => {
@@ -227,14 +240,15 @@ test("active runner pumps only single requests and hands back login questions im
 test("ZZZ reuses a roster and verifies both changed and already-active owned cards", async () => {
   const { createZzzPageSource } = await import("../src/hoyo_roster/games/zzz/page_source.mjs");
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
-  let opened = false, currentName = "Initial", scans = 0, reloads = 0;
+  let opened = false, currentName = "Initial", scans = 0, reloads = 0, skillVersion = 1;
+  let names = ["Alpha", "Beta"];
   const rect = () => ({ width: 100, height: 100 });
   const cardFor = name => ({ querySelector: () => ({ textContent: name }), innerText: "Lv.50 " + name });
   const marker = text => ({ textContent: text, children: [], getBoundingClientRect: rect,
-    parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName } },
+    parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName + " v" + skillVersion } },
     closest: () => ({ innerText: text + " synthetic " + currentName }) });
   const document = { body: { innerText: "Synthetic" }, querySelectorAll(selector) {
-    if (selector === ".agent-list__row .gt-card") { scans++; return [cardFor("Alpha"), cardFor("Beta")]; }
+    if (selector === ".agent-list__row .gt-card") { scans++; return names.map(cardFor); }
     if (selector === "div.relative.z-2") return [{ textContent: currentName, parentElement: { classList: { contains: () => true } } }];
     if (selector === "p,div") return ["当前音擎", "当前技能等级", "当前装备驱动盘"].map(marker);
     if (selector === ".agent-list__row") return opened ? [{ getBoundingClientRect: rect }] : [];
@@ -274,6 +288,12 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   assert.equal(repeated.details[0].display_name, "Beta");
   assert.ok(repeated.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
+  names = ["Alpha"]; skillVersion = 2;
+  assert.equal((await source.read(query("roster"))).rows.length, 1);
+  assert.equal(scans, 2);
+  assert.ok((await source.read(query("detail", ["Alpha"]))).details[0].current_skills.includes("v2"));
+  await assert.rejects(source.read(query("detail", ["Beta"])), { code: "SOURCE_DATA_INVALID" });
+  assert.equal(reloads, 1);
   role.uid = "987654321";
   assert.equal((await source.read({ ...query("identity"), params: {} })).uid, "987654321");
   assert.equal(reloads, 1); // Only the roster refreshed; identity reopened its live panel.

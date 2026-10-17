@@ -89,7 +89,9 @@ export function createZzzPageSource(ui) {
       !/^[1-9][0-9]{0,31}$/.test(params.uid) || typeof params.region !== "string") throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     if (source === "page:roster") {
       roster = null; epoch = null;
-      await measure("zzz.reload", signal, () => tab.reload());
+      if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+        await measure("zzz.reload", signal, () => tab.reload());
+      }
       ui.assertIdentity(await measure("zzz.identity", signal, () => identity(tab, signal)), params);
       identityContext = { tab, generation };
       const cards = await selector(tab, signal);

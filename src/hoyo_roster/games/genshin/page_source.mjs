@@ -28,8 +28,25 @@ export function createGenshinPageSource(ui) {
     if (nickname.trim() !== role.nickname) throw sourceFailure("WRONG_ACCOUNT");
     return role;
   }
-  async function owned(tab, signal, params) {
-    await measure("genshin.reload", signal, () => tab.reload());
+  async function returnSelector(tab, signal) {
+    const current = new URL(await ui.call(signal, () => tab.url()));
+    if (current.hash === "#/character") return;
+    if (current.hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
+    await measure("genshin.return-selector", signal, async () => {
+      await ui.call(signal, () => tab.back());
+      // The route and visible selector must both finish returning before reads.
+      await ui.wait(signal, async () => {
+        const returned = new URL(await ui.call(signal, () => tab.url()));
+        return returned.hash === "#/character" &&
+          await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
+      }, Boolean, { timeoutMs: 2500 });
+    });
+  }
+  async function owned(tab, signal, params, generation) {
+    if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+      await measure("genshin.reload", signal, () => tab.reload());
+    }
+    await returnSelector(tab, signal);
     const role = await measure("genshin.identity", signal, () => identity(tab, signal));
     ui.assertIdentity(role, params);
     const hasOwned = await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
@@ -64,7 +81,7 @@ export function createGenshinPageSource(ui) {
       !/^[1-9][0-9]{0,31}$/.test(params.uid) || typeof params.region !== "string") throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     if (source === "page:roster") {
       prepared = null;
-      const { rows, role } = await owned(tab, signal, params);
+      const { rows, role } = await owned(tab, signal, params, generation);
       identityContext = { tab, generation };
       prepared = { rows, role, tab, generation, editing: false };
       return ui.record("genshin", await ui.call(signal, () => tab.url()), "owned-selector", { rows }, generation);
@@ -77,18 +94,8 @@ export function createGenshinPageSource(ui) {
       throw sourceFailure("SOURCE_DATA_INVALID");
     }
     if (prepared.editing) {
-      const current = new URL(await ui.call(signal, () => tab.url()));
-      if (current.hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
-      await measure("genshin.return-selector", signal, async () => {
-        await ui.call(signal, () => tab.back());
-        // back() may resolve before a Windows webview commits its SPA route;
-        // the old selector can already be visible beneath the editor transition.
-        await ui.wait(signal, async () => {
-          const returned = new URL(await ui.call(signal, () => tab.url()));
-          return returned.hash === "#/character" &&
-            await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible());
-        }, Boolean, { timeoutMs: 2500 });
-      });
+      if (new URL(await ui.call(signal, () => tab.url())).hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
+      await returnSelector(tab, signal);
       prepared.editing = false;
     }
     const nickname = await ui.call(signal, () => tab.playwright.locator(".user-wrapper .nickname").innerText({ timeoutMs: 1500 }));
