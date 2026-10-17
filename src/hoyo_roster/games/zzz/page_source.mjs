@@ -22,6 +22,7 @@ export async function dismissSchemeNotice(ui, tab, signal) {
 
 export function createZzzPageSource(ui) {
   let roster = null, epoch = null;
+  let identityContext = null;
   const measure = (name, signal, action) => ui.measure(name, signal, action);
   async function click(tab, locator, signal) {
     await dismissSchemeNotice(ui, tab, signal);
@@ -76,8 +77,12 @@ export function createZzzPageSource(ui) {
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Reset transient selector/dialog overlays left by a previous interrupted
       // collection. Reloading this tab retains the SAME browser login session.
-      await measure("zzz.reload", signal, () => tab.reload());
-      return ui.record("zzz", await ui.call(signal, () => tab.url()), "role-selector", await measure("zzz.identity", signal, () => identity(tab, signal)), generation);
+      if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+        await measure("zzz.reload", signal, () => tab.reload());
+      }
+      const role = await measure("zzz.identity", signal, () => identity(tab, signal));
+      identityContext = { tab, generation };
+      return ui.record("zzz", await ui.call(signal, () => tab.url()), "role-selector", role, generation);
     }
     const fields = source === "page:detail" ? "names,region,uid" : "region,uid";
     if (!sourceNames.includes(source) || Object.keys(params).sort().join(",") !== fields ||
@@ -86,6 +91,7 @@ export function createZzzPageSource(ui) {
       roster = null; epoch = null;
       await measure("zzz.reload", signal, () => tab.reload());
       ui.assertIdentity(await measure("zzz.identity", signal, () => identity(tab, signal)), params);
+      identityContext = { tab, generation };
       const cards = await selector(tab, signal);
       roster = cards.filter(r => /^Lv\./.test(r.text)).map(r => ({ name: r.name, level: r.text.match(/^Lv\.[0-9]+/)[0] }));
       epoch = { uid: params.uid, region: params.region, generation, tab };

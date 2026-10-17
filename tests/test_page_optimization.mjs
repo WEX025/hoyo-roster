@@ -81,7 +81,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
   };
   const reader = createGenshinPageSource(ui);
   const query = (source, extra = {}, generation = 0) => ({ source, params: { uid: role.uid, region: role.region, ...extra }, body: null, generation, signal: new AbortController().signal });
-  return { counts, reader, query, selected, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
+  return { counts, reader, query, selected, setUid: uid => { role.uid = uid; }, setBlocker: value => { blocker = value; }, setNickname: n => { nickname = n; }, replacePage: () => { current = { ...tab, id: "replacement" }; } };
 }
 
 test("Genshin reuses only the current round, reconciles selected cards and returns the requested details", async () => {
@@ -168,6 +168,20 @@ test("Genshin refreshes the official identity page after shared login instead of
   await assert.rejects(f.reader.read(f.query("page:detail",{names:["Alpha"]},1)),{code:"SOURCE_DATA_INVALID"});
 });
 
+test("Genshin rereads live identity without reloading an established page, refreshing for a new login generation", async () => {
+  const f = fixture();
+  const identityQuery = generation => ({ ...f.query("page:identity", {}, generation), params: {} });
+  await f.reader.read(identityQuery(0));
+  f.setUid("987654321");
+  assert.equal((await f.reader.read(identityQuery(0))).uid, "987654321");
+  assert.equal(f.counts.reload, 1);
+  await f.reader.read(identityQuery(1));
+  assert.equal(f.counts.reload, 2);
+  f.replacePage();
+  await f.reader.read(identityQuery(1));
+  assert.equal(f.counts.reload, 3);
+});
+
 test("Genshin waits for a closing overlay without dismissing it or accepting a persistent blocker", async () => {
   const f=fixture();
   await f.reader.read(f.query("page:roster"));
@@ -213,7 +227,7 @@ test("active runner pumps only single requests and hands back login questions im
 test("ZZZ reuses a roster and verifies both changed and already-active owned cards", async () => {
   const { createZzzPageSource } = await import("../src/hoyo_roster/games/zzz/page_source.mjs");
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
-  let opened = false, currentName = "Initial", scans = 0;
+  let opened = false, currentName = "Initial", scans = 0, reloads = 0;
   const rect = () => ({ width: 100, height: 100 });
   const cardFor = name => ({ querySelector: () => ({ textContent: name }), innerText: "Lv.50 " + name });
   const marker = text => ({ textContent: text, children: [], getBoundingClientRect: rect,
@@ -228,7 +242,7 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   } };
   const target = name => ({ isVisible: async () => name === "选择代理人" ? opened : true,
     click: async () => { currentName = name; opened = false; } });
-  const tab = { id: "synthetic", reload: async () => {}, url: async () => "https://act.mihoyo.com/zzz/gt/character-builder-h/index.html#/",
+  const tab = { id: "synthetic", reload: async () => { reloads++; }, url: async () => "https://act.mihoyo.com/zzz/gt/character-builder-h/index.html#/",
     playwright: { evaluate: async fn => runInNewContext("(" + fn.toString() + ")()", { document }),
       getByRole: () => ({ isVisible: async () => false }), getByText: target,
       locator: () => ({ click: async () => { opened = true; }, filter: ({ has }) => ({
@@ -260,6 +274,11 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   assert.equal(repeated.details[0].display_name, "Beta");
   assert.ok(repeated.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
+  role.uid = "987654321";
+  assert.equal((await source.read({ ...query("identity"), params: {} })).uid, "987654321");
+  assert.equal(reloads, 1); // Only the roster refreshed; identity reopened its live panel.
+  await source.read({ ...query("identity"), params: {}, generation: 1 });
+  assert.equal(reloads, 2);
 });
 
 
