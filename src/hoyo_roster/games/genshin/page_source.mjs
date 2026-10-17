@@ -31,6 +31,12 @@ export function createGenshinPageSource(ui) {
   async function returnSelector(tab, signal) {
     const current = new URL(await ui.call(signal, () => tab.url()));
     if (current.hash === "#/character") return;
+    if (current.hash === "#/" || !current.hash) {
+      await ui.click(tab, tab.playwright.getByText("角色", { exact: true }), signal, { snapshot: false });
+      await ui.wait(signal, async () => new URL(await ui.call(signal, () => tab.url())).hash === "#/character" &&
+        await ui.call(signal, () => tab.playwright.getByText("已拥有", { exact: true }).isVisible()), Boolean);
+      return;
+    }
     if (current.hash !== "#/character/edit") throw sourceFailure("SOURCE_DATA_INVALID");
     await measure("genshin.return-selector", signal, async () => {
       await ui.call(signal, () => tab.back());
@@ -44,7 +50,7 @@ export function createGenshinPageSource(ui) {
   }
   async function owned(tab, signal, params, generation) {
     if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-      await measure("genshin.reload", signal, () => tab.reload());
+      await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
     }
     await returnSelector(tab, signal);
     const role = await measure("genshin.identity", signal, () => identity(tab, signal));
@@ -70,7 +76,7 @@ export function createGenshinPageSource(ui) {
       // Another game tab may have completed shared login while this SPA still
       // renders its anonymous catalog. Re-read the official page in this session.
       if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-        await measure("genshin.reload", signal, () => tab.reload());
+        await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("genshin.identity", signal, () => identity(tab, signal));
       identityContext = { tab, generation };

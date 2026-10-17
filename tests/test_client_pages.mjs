@@ -30,7 +30,7 @@ test("ZZZ retries only an explicit official error once, preserving the same page
       playwright: { getByRole: () => ({ isVisible: async () => false }),
         getByText: text => ({ text, isVisible: async () => failed && text === "出错了，请重试" && scenario !== "unknown" }),
         locator: () => ({ count: async () => 1 }) } };
-    const ui = { measure: async (_name, _signal, action) => action(), page: async () => tab, call: async (_signal, action) => action(),
+    const ui = { measure: async (_name, _signal, action) => action(), navigate: async selected => selected.reload(), page: async () => tab, call: async (_signal, action) => action(),
       identity: async selected => { assert.equal(selected, tab); identities++;
         if (failed) throw Object.assign(new Error("synthetic"), { code: scenario === "auth" ? "AUTHENTICATION_REQUIRED" : "SOURCE_REQUEST_NOT_OBSERVED" });
         return { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };
@@ -121,6 +121,43 @@ test("page record is explicitly UI provenance, without invented HTTP facts", () 
   assert.equal(record.evidence.generation, 3);
   assert.equal(record.json, '{"rows":[]}');
   assert.equal(Object.hasOwn(record.origin, "status"), false);
+});
+
+test("navigation retries a fixed transient error once at the identical official HTTPS URL", async () => {
+  for (const mode of ["throw", "error-page", "repeated-error-page"]) {
+    let current = URL, retries = 0;
+    const networkPage = "data:text/html," + encodeURIComponent("<p>net::ERR_DNS_NO_MATCHING_SUPPORTED_ALPN</p>");
+    const metrics = createMetrics(), ui = createPageBrowser({ tabs: {} }, metrics);
+    const tab = { url: async () => current, reload: async () => {
+      if (mode === "throw") throw new Error("Browser reported: net::ERR_CONNECTION_RESET");
+      current = networkPage;
+    }, goto: async target => {
+      assert.equal(target, URL); retries++;
+      current = mode === "repeated-error-page" ? networkPage : URL;
+    } };
+    const navigation = ui.navigate(tab, URL, new AbortController().signal, { reload: true });
+    if (mode === "repeated-error-page") await assert.rejects(navigation, { code: "CLIENT_REQUEST_FAILED" });
+    else await navigation;
+    assert.equal(retries, 1);
+    assert.equal(metrics.drain().filter(e => e.operation === "page.navigation-retry").length, 1);
+  }
+});
+
+test("navigation does not recover certificates, authentication, unknown redirects or cancelled calls", async () => {
+  for (const mode of ["certificate", "authentication", "redirect", "unknown-data", "cancelled"]) {
+    const controller = new AbortController(), ui = createPageBrowser({ tabs: {} });
+    const reason = new Error("synthetic cancellation");
+    const problem = Object.assign(new Error(mode === "certificate" ? "net::ERR_CERT_AUTHORITY_INVALID" :
+      "net::ERR_TIMED_OUT"), mode === "authentication" ? { code: "AUTHENTICATION_REQUIRED" } : {});
+    let current = URL;
+    const tab = { url: async () => current, goto: async () => assert.fail("forbidden navigation retry"), reload: async () => {
+      if (mode === "redirect") current = "https://example.org/";
+      else if (mode === "unknown-data") current = "data:text/html,unknown";
+      else { if (mode === "cancelled") controller.abort(reason); throw problem; }
+    } };
+    await assert.rejects(ui.navigate(tab, URL, controller.signal, { reload: true }),
+      mode === "cancelled" ? reason : ["redirect", "unknown-data"].includes(mode) ? { code: "SOURCE_DATA_INVALID" } : problem);
+  }
 });
 
 test("stable loading rejects an intermediate roster before accepting two equal reads", async () => {

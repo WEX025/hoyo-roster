@@ -19,6 +19,40 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     checkSignal(signal);
     return value;
   }
+  async function navigate(tab, url, signal, { reload = false } = {}) {
+    const expected = new URL(url);
+    if (expected.protocol !== "https:") throw sourceFailure("SOURCE_DATA_INVALID");
+    const transient = value => !/\bERR_(?:CERT_|SSL_)/.test(value) &&
+      /\b(?:ERR_DNS_NO_MATCHING_SUPPORTED_ALPN|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_CONNECTION_TIMED_OUT|ERR_NETWORK_CHANGED|ERR_INTERNET_DISCONNECTED)\b/.test(value);
+    const matches = value => {
+      try { const actual = new URL(value); return actual.origin === expected.origin && actual.pathname === expected.pathname; }
+      catch { return false; }
+    };
+    async function landed() {
+      const actual = await call(signal, () => tab.url());
+      if (matches(actual)) return true;
+      // Inspect only the fixed code in metadata from OUR navigation, not the
+      // error page DOM. Unknown redirects/interstitials are never recovered.
+      if (actual.startsWith("data:text/html")) {
+        try { if (transient(decodeURIComponent(actual))) return false; }
+        catch { /* Malformed metadata is not a recognized network error. */ }
+      }
+      throw sourceFailure("SOURCE_DATA_INVALID");
+    }
+    try {
+      await metrics.measure("page.navigation", () => call(signal, () => reload ? tab.reload() : tab.goto(url)));
+    } catch (error) {
+      checkSignal(signal);
+      if (error.code && !transient(error.code)) throw error;
+      if (!transient(error.message ?? "") && !transient(error.code ?? "")) throw error;
+      return retry();
+    }
+    if (!(await landed())) return retry();
+    async function retry() {
+      await metrics.measure("page.navigation-retry", () => call(signal, () => tab.goto(url)));
+      if (!(await landed())) throw sourceFailure("CLIENT_REQUEST_FAILED");
+    }
+  }
   async function page(url, signal) {
     const step = (name, action) => metrics.measure(name, () => call(signal, action));
     const tabs = await step("page.tabs-list", () => browser.tabs.list());
@@ -37,7 +71,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       if (!found) await call(signal, () => tab.close());
       throw sourceFailure("CLIENT_SOURCE_UNAVAILABLE");
     }
-    if (!found) await call(signal, () => tab.goto(url));
+    if (!found) await navigate(tab, url, signal);
     let size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
       width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
     })));
@@ -45,7 +79,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       // Retained panel webviews can become unmounted. A new tab in this SAME
       // browser shares its live session; do not copy credentials or close user tabs.
       tab = await call(signal, () => browser.tabs.new());
-      await call(signal, () => tab.goto(url));
+      await navigate(tab, url, signal);
       await call(signal, () => tab.playwright.domSnapshot());
       size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
         width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
@@ -153,5 +187,5 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
   return Object.freeze({ page: (url, signal) => measure("page.preflight", signal, () => page(url, signal)),
-    available, call, wait, click, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
+    available, navigate, call, wait, click, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
 }

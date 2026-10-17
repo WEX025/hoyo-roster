@@ -4,9 +4,9 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture({ delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
+function fixture({ home = false, delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
-  const counts = { reload: 0, back: 0, clicks: 0 };
+  const counts = { reload: 0, back: 0, clicks: 0, characterNav: 0 };
   const pending = [];
   let edit = false, nickname = "Synthetic", current, blocker = "none";
   let backReads = 0;
@@ -36,9 +36,10 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
     const state={hover:blocker === "hover",blocked:["unknown", "closing"].includes(blocker)};
     if(blocker === "closing")blocker="none";
     return state;
-  }, isVisible: async () => !edit && (name === "已拥有" || hiddenReads-- <= 0),
+  }, isVisible: async () => !edit && (name === "已拥有" ? !home : hiddenReads-- <= 0),
     click: async () => {
       if (name === "选择角色") { blocker = "none"; return; }
+      if (name === "角色") { home = false; counts.characterNav++; return; }
       counts.clicks++;
       if (blocker === "offscreen-hover") return;
       if (missedClicks-- > 0) return;
@@ -48,7 +49,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
     } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; backReads = delayedBack ? 3 : 0; hiddenReads = delayedLabels ? 3 : 0; },
-    url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
+    url: async () => home ? "https://act.mihoyo.com/ys/event/calculator/index.html#/" : "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
     playwright: {
       evaluate: async fn => {
         for (const action of [...pending]) if (--action.reads === 0) {
@@ -66,7 +67,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
       }),
     } };
   current = tab;
-  const ui = { page: async () => current, identity: async () => ({ ...role }),
+  const ui = { page: async () => current, navigate: async selected => selected.reload(), identity: async () => ({ ...role }),
     assertIdentity: (a, b) => { if (a.uid !== b.uid || a.region !== b.region) throw Object.assign(new Error(), { code: "WRONG_ACCOUNT" }); },
     call: async (signal, action) => { signal.throwIfAborted(); const result = await action(); signal.throwIfAborted(); return result; },
     measure: async (_name, signal, action) => ui.call(signal, action),
@@ -125,6 +126,13 @@ test("Genshin rechecks identity when a new round returns from the editor", async
   f.setUid("987654321");
   await assert.rejects(f.reader.read(nextRoster), { code: "WRONG_ACCOUNT" });
   assert.equal(f.counts.reload, 1);
+});
+
+test("Genshin returns from the refreshed official home through its visible character control", async () => {
+  const f = fixture({ home: true });
+  assert.equal((await f.reader.read(f.query("page:roster"))).rows.length, 4);
+  assert.equal(f.counts.characterNav, 1);
+  assert.equal((await f.reader.read(f.query("page:detail", { names: ["Alpha"] }))).details[0].name, "Alpha");
 });
 
 test("Genshin waits for delayed selection rendering without toggling a pending click twice", async () => {
@@ -271,7 +279,7 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   // The card locator's text is only a synthetic matching label.
   const oldTarget = tab.playwright.getByText;
   tab.playwright.getByText = name => ({ ...oldTarget(name), text: name });
-  const ui = { page: async () => tab, identity: async () => role, assertIdentity: () => {},
+  const ui = { page: async () => tab, navigate: async selected => selected.reload(), identity: async () => role, assertIdentity: () => {},
     call: async (signal, fn) => { signal.throwIfAborted(); return fn(); },
     measure: async (_name, _signal, fn) => fn(),
     click: async (_tab, locator) => { await locator.click(); return "当前技能等级"; },

@@ -78,7 +78,7 @@ export function createZzzPageSource(ui) {
       // Reset transient selector/dialog overlays left by a previous interrupted
       // collection. Reloading this tab retains the SAME browser login session.
       if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-        await measure("zzz.reload", signal, () => tab.reload());
+        await measure("zzz.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("zzz.identity", signal, () => identity(tab, signal));
       identityContext = { tab, generation };
@@ -90,7 +90,7 @@ export function createZzzPageSource(ui) {
     if (source === "page:roster") {
       roster = null; epoch = null;
       if (identityContext?.tab !== tab || identityContext.generation !== generation) {
-        await measure("zzz.reload", signal, () => tab.reload());
+        await measure("zzz.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       ui.assertIdentity(await measure("zzz.identity", signal, () => identity(tab, signal)), params);
       identityContext = { tab, generation };
