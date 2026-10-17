@@ -130,7 +130,9 @@ export function createGenshinPageSource(ui) {
       const label = await visibleLabel(card, name);
       // Selection reorders the cards. A completed click is not evidence that
       // the rendered selection marker has updated yet (especially on Windows).
-      try { await measure(operation, signal, () => label.click({ timeoutMs: 1500 })); }
+      // A long actionability window lets the official hover card appear over
+      // the next label. Keep the click short; verify rendered state separately.
+      try { await measure(operation, signal, () => label.click({ timeoutMs: 200 })); }
       catch (error) {
         if (error.name !== "TimeoutError") throw error;
       }
