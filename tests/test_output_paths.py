@@ -118,7 +118,7 @@ def test_explicit_results_and_shared_runtime_roots(checkout, tmp_path, monkeypat
     assert len({store.root for store in stores}) == 4
     assert not paths.default_private_root().exists()
     for store in stores:
-        assert store.root.is_relative_to(checkout / "data/game-results-v3")
+        assert store.root.is_relative_to(io.filesystem_path(checkout / "data/game-results-v3"))
         assert io.private(store.root)
     shared = runtime_scope(tmp_path / "auth")
     assert shared == runtime_scope(tmp_path / "auth")
@@ -263,7 +263,7 @@ def test_cli_reports_current_json_location(checkout, monkeypatch, local_tool, ca
         for line in output.splitlines()
         if line.startswith("CURRENT_RESULT=")
     )
-    assert Path(current).is_relative_to(checkout / "data")
+    assert io.filesystem_path(Path(current)).is_relative_to(io.filesystem_path(checkout / "data"))
     assert (Path(current) / "roster.json").is_file()
     assert (Path(current) / "bangboos.json").is_file()
     assert UID not in output
