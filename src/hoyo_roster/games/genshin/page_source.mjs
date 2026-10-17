@@ -122,16 +122,18 @@ export function createGenshinPageSource(ui) {
     async function selectLabel(name, operation) {
       const card = tab.playwright.locator(".character-item").filter({ has: tab.playwright.getByText(name, { exact: true }) });
       const label = await visibleLabel(card, name);
-      // Selection reorders the cards. Keep ordinary actionability checks, but
-      // bound each label action instead of waiting 2.5s for card movement.
-      // A timeout is accepted only when the requested state was actually observed.
-      try { await measure(operation, signal, () => label.click({ timeoutMs: 200 })); }
+      // Selection reorders the cards. A completed click is not evidence that
+      // the rendered selection marker has updated yet (especially on Windows).
+      try { await measure(operation, signal, () => label.click({ timeoutMs: 1500 })); }
       catch (error) {
         if (error.name !== "TimeoutError") throw error;
-        const observed = await selectedNames();
-        // The batch's observed-set reconciliation below gives a missed action
-        // one repair; a missing target can never pass the final set check.
-        if (observed.includes(name) !== (operation === "genshin.select")) return;
+      }
+      try {
+        await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,
+          names => names.includes(name) === (operation === "genshin.select"), { timeoutMs: 1500, stable: true }));
+      } catch (error) {
+        // A genuinely missed action gets only the observed-set repair below.
+        if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
       }
     }
     for (const name of selected.filter(n => !params.names.includes(n))) {
@@ -162,7 +164,13 @@ export function createGenshinPageSource(ui) {
     }
     if (repaired) selected = await selectedNames();
     const expected = params.names.filter(n => !unavailable.some(u => u.name === n));
-    if (selected.length !== expected.length || selected.some(n => !expected.includes(n))) throw sourceFailure("SOURCE_DATA_INVALID");
+    try {
+      selected = await measure("genshin.verify-selection", signal, () => ui.wait(signal, selectedNames,
+        names => names.length === expected.length && names.every(n => expected.includes(n)), { timeoutMs: 1500, stable: true }));
+    } catch (error) {
+      if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
+      throw sourceFailure("SOURCE_DATA_INVALID");
+    }
     if (!expected.length) return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: unavailable }, generation);
     await measure("genshin.confirm", signal, () => ui.click(tab, tab.playwright.getByRole("button", { name: "确认", exact: true }), signal));
     prepared.editing = true;

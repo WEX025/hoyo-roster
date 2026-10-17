@@ -4,9 +4,10 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture() {
+function fixture({ delayedSelection = false, missedClicks = 0 } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
-  const counts = { reload: 0, back: 0 };
+  const counts = { reload: 0, back: 0, clicks: 0 };
+  const pending = [];
   let edit = false, nickname = "Synthetic", current, blocker = "none";
   const role = { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };
   const inputs = value => [{ value: String(value) }, { value: "90" }];
@@ -32,12 +33,23 @@ function fixture() {
     if(blocker === "closing")blocker="none";
     return state;
   }, isVisible: async () => !edit,
-    click: async () => { if (name === "选择角色") { blocker = "none"; return; } if (selected.has(name)) selected.delete(name); else selected.add(name); } });
+    click: async () => {
+      if (name === "选择角色") { blocker = "none"; return; }
+      counts.clicks++;
+      if (missedClicks-- > 0) return;
+      const toggle = () => { if (selected.has(name)) selected.delete(name); else selected.add(name); };
+      if (delayedSelection) pending.push({ reads: 3, toggle }); else toggle();
+    } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
     back: async () => { counts.back++; edit = false; },
     url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit ? "/edit" : ""),
     playwright: {
-      evaluate: async fn => runInNewContext("(" + fn.toString() + ")()", { document }),
+      evaluate: async fn => {
+        for (const action of [...pending]) if (--action.reads === 0) {
+          action.toggle(); pending.splice(pending.indexOf(action), 1);
+        }
+        return runInNewContext("(" + fn.toString() + ")()", { document });
+      },
       domSnapshot: async () => "Synthetic state",
       getByText: target,
       getByRole: () => ({ click: async () => { edit = true; } }),
@@ -52,7 +64,15 @@ function fixture() {
     assertIdentity: (a, b) => { if (a.uid !== b.uid || a.region !== b.region) throw Object.assign(new Error(), { code: "WRONG_ACCOUNT" }); },
     call: async (signal, action) => { signal.throwIfAborted(); const result = await action(); signal.throwIfAborted(); return result; },
     measure: async (_name, signal, action) => ui.call(signal, action),
-    wait: async (signal, read, accept) => { const value = await ui.call(signal, read); if(!accept(value))throw Object.assign(new Error("synthetic wait"),{code:"SOURCE_REQUEST_NOT_OBSERVED"}); return value; },
+    wait: async (signal, read, accept, { stable = false } = {}) => {
+      let prior;
+      for (let i = 0; i < 8; i++) {
+        const value = await ui.call(signal, read), encoded = JSON.stringify(value);
+        if (accept(value)) { if (!stable || encoded === prior) return value; prior = encoded; }
+        else prior = undefined;
+      }
+      throw Object.assign(new Error("synthetic wait"), { code: "SOURCE_REQUEST_NOT_OBSERVED" });
+    },
     click: async (_tab, locator, signal) => { await ui.call(signal, locator.click); return "Synthetic state"; },
     record: (_game, _url, _surface, data) => data,
   };
@@ -85,6 +105,26 @@ test("Genshin refuses stale login generations, replaced pages and an observed ch
       { code: scenario === "identity" ? "WRONG_ACCOUNT" : "SOURCE_DATA_INVALID" });
     f.setNickname("Synthetic");
     await assert.rejects(f.reader.read(f.query("page:detail", { names: ["Alpha"] })), { code: "SOURCE_DATA_INVALID" });
+  }
+});
+
+test("Genshin waits for delayed selection rendering without toggling a pending click twice", async () => {
+  const f = fixture({ delayedSelection: true });
+  await f.reader.read(f.query("page:roster"));
+  await f.reader.read(f.query("page:detail", { names: ["Alpha", "Beta"] }));
+  const result = await f.reader.read(f.query("page:detail", { names: ["Gamma", "Delta"] }));
+  assert.deepEqual(Array.from(result.details, d => d.name), ["Gamma", "Delta"]);
+  assert.equal(f.counts.clicks, 6);
+});
+
+test("Genshin repairs one observed missed action and rejects a persistently missing selection", async () => {
+  for (const missedClicks of [1, 2]) {
+    const f = fixture({ missedClicks });
+    await f.reader.read(f.query("page:roster"));
+    const result = f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+    if (missedClicks === 1) assert.equal((await result).details.length, 1);
+    else await assert.rejects(result, { code: "SOURCE_DATA_INVALID" });
+    assert.equal(f.counts.clicks, 2);
   }
 });
 
