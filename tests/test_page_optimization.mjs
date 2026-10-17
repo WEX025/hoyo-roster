@@ -4,12 +4,13 @@ import { runInNewContext } from "node:vm";
 import { createGenshinPageSource } from "../src/hoyo_roster/games/genshin/page_source.mjs";
 import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
-function fixture({ delayedSelection = false, delayedBack = false, missedClicks = 0, clickError = null } = {}) {
+function fixture({ delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
   const counts = { reload: 0, back: 0, clicks: 0 };
   const pending = [];
   let edit = false, nickname = "Synthetic", current, blocker = "none";
   let backReads = 0;
+  let hiddenReads = 0;
   const role = { uid: "123456789", nickname: "Synthetic", region: "Synthetic region" };
   const inputs = value => [{ value: String(value) }, { value: "90" }];
   const cards = names.map(name => ({
@@ -33,7 +34,7 @@ function fixture({ delayedSelection = false, delayedBack = false, missedClicks =
     const state={hover:blocker === "hover",blocked:blocker !== "none"};
     if(blocker === "closing")blocker="none";
     return state;
-  }, isVisible: async () => !edit,
+  }, isVisible: async () => !edit && (name === "已拥有" || hiddenReads-- <= 0),
     click: async () => {
       if (name === "选择角色") { blocker = "none"; return; }
       counts.clicks++;
@@ -43,7 +44,7 @@ function fixture({ delayedSelection = false, delayedBack = false, missedClicks =
       if (clickError) throw clickError;
     } });
   const tab = { id: "synthetic", reload: async () => { counts.reload++; edit = false; selected.clear(); },
-    back: async () => { counts.back++; edit = false; backReads = delayedBack ? 3 : 0; },
+    back: async () => { counts.back++; edit = false; backReads = delayedBack ? 3 : 0; hiddenReads = delayedLabels ? 3 : 0; },
     url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
     playwright: {
       evaluate: async fn => {
@@ -126,6 +127,14 @@ test("Genshin waits for back navigation even when the old selector is already vi
   const result = await f.reader.read(f.query("page:detail", { names: ["Beta"] }));
   assert.equal(result.details[0].name, "Beta");
   assert.equal(f.counts.back, 1);
+});
+
+test("Genshin waits for returned card labels to render after route and owned-tab readiness", async () => {
+  const f = fixture({ delayedLabels: true });
+  await f.reader.read(f.query("page:roster"));
+  await f.reader.read(f.query("page:detail", { names: ["Alpha"] }));
+  const result = await f.reader.read(f.query("page:detail", { names: ["Beta"] }));
+  assert.equal(result.details[0].name, "Beta");
 });
 
 test("Genshin verifies an applied click after the client's wrapped timeout but propagates unrelated errors", async () => {

@@ -95,7 +95,13 @@ export function createGenshinPageSource(ui) {
     let selected = await selectedNames();
     async function visibleLabel(card, name) {
       const label = card.getByText(name, { exact: true });
-      if (!(await ui.call(signal, () => label.isVisible()))) throw sourceFailure("SOURCE_DATA_INVALID");
+      try {
+        await measure("genshin.wait-label", signal, () => ui.wait(signal,
+          () => label.isVisible(), Boolean, { timeoutMs: 1500 }));
+      } catch (error) {
+        if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
+        throw sourceFailure("SOURCE_DATA_INVALID");
+      }
       const covered = () => label.evaluate(e => {
         const r = e.getBoundingClientRect();
         const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
