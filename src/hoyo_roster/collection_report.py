@@ -23,9 +23,9 @@ def validate_completed(store, *, require_current=True):
     snapshots = {}
     for game, normalize in NORMALIZERS.items():
         entry = value["completed"][game]
-        path = store.root / entry["snapshot"]
+        path = io.filesystem_path(store.root / entry["snapshot"])
         if (
-            not path.resolve().is_relative_to((store.root / "results").resolve())
+            not path.resolve().is_relative_to(io.filesystem_path(store.root / "results").resolve())
             or entry["double_pass"] is not True
             or (
                 require_current and entry.get("verified_attempt") != value["attempts"][-1]["number"]

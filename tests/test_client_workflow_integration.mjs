@@ -35,3 +35,25 @@ test("a fresh process rechecks identity, reuses a committed game and automatical
     assert.equal(JSON.stringify(report).includes("123456789"),false);
   } finally { await rm(temp,{recursive:true,force:true}); }
 });
+
+test("Windows-compatible owner discovery and parallel workers retain double passes and one shared gate", {timeout:120000}, async () => {
+  const temp = await realpath(await mkdtemp(join(tmpdir(), "hoyo-workflow-parallel-")));
+  try {
+    const directory = join(temp, "run");
+    const result = await execute(process.execPath, [join(root, "tests/fixtures_collection_process.mjs"), directory, python, "parallel"], {timeout:110000, windowsHide:true});
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.state,"SUCCEEDED");
+    for (const game of ["genshin","zzz"]) {
+      assert.equal(output.reads.filter(([g,s])=>g===game&&s==="page:roster").length,2);
+      const spans = output.spans.filter(s=>s.game===game);
+      for (let n=1;n<spans.length;n++) assert.ok(spans[n].start >= spans[n-1].end);
+    }
+    const spans = output.spans;
+    for (let n=1;n<spans.length;n++) assert.ok(spans[n].start-spans[n-1].start >= 1990);
+    assert.ok(spans.some((a,n)=>spans.slice(n+1).some(b=>a.game!==b.game&&b.start<a.end)), "different games must actually overlap");
+    const state = JSON.parse(await readFile(join(directory,"workflow.json"),"utf8"));
+    assert.equal(state.config.parallel_games,true);
+    assert.ok(state.version.source_sha);
+    assert.equal(state.version.installation_matches_source,true);
+  } finally { await rm(temp,{recursive:true,force:true}); }
+});

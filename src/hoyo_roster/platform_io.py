@@ -11,8 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterator
 
-import portalocker
-
 WINDOWS = os.name == "nt"
 if WINDOWS:
     from . import windows_io as backend
@@ -20,6 +18,31 @@ if WINDOWS:
 
 class UnsafePath(ValueError):
     """A fixed, privacy-safe filesystem rejection."""
+
+
+def launch_parent_pid() -> int:
+    """The process that launched Python, accounting for a Windows venv redirector."""
+    return backend.launch_parent_pid() if WINDOWS else os.getppid()
+
+
+def run_async(coroutine):
+    """Keep worker event-loop setup inside the platform boundary."""
+    import asyncio
+
+    if not WINDOWS:
+        return asyncio.run(coroutine)
+    try:
+        with asyncio.Runner(loop_factory=backend.new_event_loop) as runner:
+            return runner.run(coroutine)
+    finally:
+        import inspect
+
+        if (
+            inspect.iscoroutine(coroutine)
+            and inspect.getcoroutinestate(coroutine) == inspect.CORO_CREATED
+        ):
+            coroutine.close()
+        asyncio.set_event_loop(None)
 
 
 def process_alive(pid: int) -> bool:
@@ -157,6 +180,8 @@ def open_private(path: Path, flags: int) -> int:
 
 @contextmanager
 def exclusive_lock(path: Path) -> Iterator[None]:
+    import portalocker
+
     descriptor = open_private(path, os.O_CREAT | os.O_RDWR)
     with os.fdopen(descriptor, "r+b", buffering=0) as stream:
         acquired = False

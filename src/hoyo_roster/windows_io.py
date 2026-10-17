@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 import msvcrt
@@ -17,6 +18,196 @@ import win32con
 import win32file
 import win32process
 import win32security
+
+
+def _check_asyncio_compatibility():
+    """Refuse an unreviewed private asyncio ABI before allocating any handles.
+
+    Fingerprints are normalized ASTs from CPython 3.12.14. Patch releases with
+    identical contracts are accepted; edits, missing source, other versions or
+    implementations require explicit review plus the native contract tests.
+    """
+    import ast
+    import hashlib
+    import inspect
+    import textwrap
+    from asyncio import proactor_events, windows_events
+    from .errors import WorkspaceError
+
+    expected = {
+        "BaseProactorEventLoop.__init__": "8502c6ea7b7f920563fa80af5626ab8de8db6c3a449d240f2eee9b3b2079ed77",
+        "BaseProactorEventLoop.close": "2fd286c7656d443b144d4d919cf54fd8496ba335cdca1fa7705cfc22891121d2",
+        "BaseProactorEventLoop._make_self_pipe": "1f130b7849233216615c60406f1b5fffd63aec5b69d4669c2e7720473610ebd9",
+        "BaseProactorEventLoop._close_self_pipe": "51235f1f17087ae900ab52fcb72d3bea72421e14046e4f9bdc18bebfef164eba",
+        "BaseProactorEventLoop._loop_self_reading": "97c3ae3c2c89febd5a62799ff76e3a15c314a6f5d902e0a23a91f3a879aa7749",
+        "ProactorEventLoop.__init__": "aedf8de6b88c6db755cbdde12b09bbfb94d5f3aa034e1279c84ded6c46f40020",
+        "ProactorEventLoop.run_forever": "3dc0de76b3a3f5121825fb70f73d136e2dfbda07c7b937eef5ed4032812d1305",
+        "IocpProactor.recv": "b120427b0a394a635fe6b7f5c1eaebc13abd4d1cf201b5d7457c06eb6fb491e3",
+    }
+    try:
+        if sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 12):
+            raise ValueError()
+        classes = {
+            "BaseProactorEventLoop": proactor_events.BaseProactorEventLoop,
+            "ProactorEventLoop": windows_events.ProactorEventLoop,
+            "IocpProactor": windows_events.IocpProactor,
+        }
+        for qualified, digest in expected.items():
+            owner, method = qualified.split(".")
+            source = inspect.getsource(getattr(classes[owner], method))
+            normalized = ast.dump(ast.parse(textwrap.dedent(source)), include_attributes=False)
+            if hashlib.sha256(normalized.encode()).hexdigest() != digest:
+                raise ValueError()
+    except (AttributeError, OSError, TypeError, ValueError, SyntaxError):
+        raise WorkspaceError("WINDOWS_ASYNCIO_UNSUPPORTED_RUNTIME") from None
+
+
+def new_event_loop():
+    """Python 3.12 IOCP loop with a local pipe instead of a TCP wakeup socket."""
+    import asyncio
+    import _winapi
+    import win32pipe
+    from asyncio.windows_utils import PipeHandle, pipe
+    from asyncio.windows_events import IocpProactor
+
+    _check_asyncio_compatibility()
+
+    class PipeProactor(IocpProactor):
+        def select(self, timeout=None):
+            # Windows set_wakeup_fd requires a socket. Bound IOCP's idle wait
+            # instead, so Runner's normal SIGINT cancellation remains prompt.
+            return super().select(0.1 if timeout is None else min(timeout, 0.1))
+
+    class PipeEventLoop(asyncio.ProactorEventLoop):
+        def __init__(self):
+            # CPython 3.12's Proactor constructor/close install a socket-only
+            # signal fd. Initialize the same IOCP state without changing any
+            # process-global signal fd or event-loop policy.
+            asyncio.BaseEventLoop.__init__(self)
+            self._proactor = self._selector = PipeProactor()
+            self._self_reading_future = None
+            self._accept_futures = {}
+            self._proactor.set_loop(self)
+            self._make_self_pipe()
+
+        def close(self):
+            if self.is_running():
+                raise RuntimeError("Cannot close a running event loop")
+            if self.is_closed():
+                return
+            self._stop_accept_futures()
+            self._close_self_pipe()
+            self._proactor.close()
+            self._proactor = self._selector = None
+            asyncio.BaseEventLoop.close(self)
+
+        def _make_self_pipe(self):
+            reader, writer = pipe(overlapped=(True, False))
+            self._ssock, self._csock = PipeHandle(reader), PipeHandle(writer)
+            try:
+                # A full wakeup buffer already guarantees a pending wakeup.
+                # Never block the notifying thread while writing another byte.
+                win32pipe.SetNamedPipeHandleState(writer, win32pipe.PIPE_NOWAIT, None, None)
+            except BaseException:
+                self._ssock.close()
+                self._csock.close()
+                raise
+            self._internal_fds += 1
+
+        def _write_to_self(self):
+            writer = self._csock
+            if writer is not None:
+                try:
+                    _winapi.WriteFile(writer.fileno(), b"\0")
+                except (OSError, ValueError):
+                    # Same close/full-buffer race as the standard self socket.
+                    pass
+
+    loop = PipeEventLoop()
+    asyncio.set_event_loop(loop)
+    return loop
+
+
+def _process_parent(handle) -> int:
+    # The documented ProcessBasicInformation layout is pointer-sized on both
+    # Windows architectures. Query this exact open handle, not a guessed PID.
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicInformation(ctypes.Structure):
+        _fields_ = [
+            ("reserved1", ctypes.c_void_p),
+            ("peb", ctypes.c_void_p),
+            ("reserved2", ctypes.c_void_p * 2),
+            ("pid", ctypes.c_size_t),
+            ("parent", ctypes.c_size_t),
+        ]
+
+    query = ctypes.WinDLL("ntdll").NtQueryInformationProcess
+    query.argtypes = [
+        wintypes.HANDLE,
+        wintypes.ULONG,
+        ctypes.c_void_p,
+        wintypes.ULONG,
+        ctypes.POINTER(wintypes.ULONG),
+    ]
+    query.restype = wintypes.LONG
+    info, length = BasicInformation(), wintypes.ULONG()
+    if query(int(handle), 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(length)) < 0:
+        raise OSError("PROCESS_PARENT_UNAVAILABLE")
+    if length.value != ctypes.sizeof(info) or info.parent <= 0:
+        raise OSError("PROCESS_PARENT_UNAVAILABLE")
+    return info.parent
+
+
+def _process_image(handle) -> Path:
+    import ctypes
+    from ctypes import wintypes
+
+    query = ctypes.WinDLL("kernel32", use_last_error=True).QueryFullProcessImageNameW
+    query.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    query.restype = wintypes.BOOL
+    buffer, length = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+    if not query(int(handle), 0, buffer, ctypes.byref(length)):
+        raise OSError("PROCESS_PARENT_UNAVAILABLE")
+    return Path(buffer.value).resolve()
+
+
+def launch_parent_pid() -> int:
+    """Skip exactly one verified CPython venv launcher; never search ancestors."""
+    parent = os.getppid()
+    if sys.prefix == sys.base_prefix:
+        return parent
+    try:
+        handle = win32api.OpenProcess(0x1000, False, parent)
+        try:
+            if _process_image(handle) != Path(sys.executable).resolve():
+                return parent  # A direct interpreter launch has no redirector.
+            if win32process.GetExitCodeProcess(handle) != 259:
+                raise OSError("PROCESS_PARENT_UNAVAILABLE")
+            created = win32process.GetProcessTimes(handle)["CreationTime"]
+            if created > win32process.GetProcessTimes(win32api.GetCurrentProcess())["CreationTime"]:
+                raise OSError("PROCESS_PARENT_UNAVAILABLE")
+            controller = _process_parent(handle)
+            owner = win32api.OpenProcess(0x1000, False, controller)
+            try:
+                if (
+                    win32process.GetExitCodeProcess(owner) != 259
+                    or win32process.GetProcessTimes(owner)["CreationTime"] > created
+                ):
+                    raise OSError("PROCESS_PARENT_UNAVAILABLE")
+            finally:
+                owner.Close()
+            return controller
+        finally:
+            handle.Close()
+    except pywintypes.error:
+        raise OSError("PROCESS_PARENT_UNAVAILABLE") from None
 
 
 def process_alive(pid: int) -> bool:
@@ -129,7 +320,12 @@ def _private_descriptor(descriptor) -> bool:
 
 
 def private(path: Path) -> bool:
-    return _private_descriptor(_descriptor(path))
+    try:
+        return _private_descriptor(_descriptor(path))
+    except pywintypes.error:
+        # A prior desktop sandbox SID may own a preserved private directory.
+        # Treat an unreadable DACL as unsafe, never as a generic task failure.
+        return False
 
 
 def container_safe(path: Path) -> bool:

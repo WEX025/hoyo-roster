@@ -7,7 +7,8 @@ import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const execute = promisify(execFile);
+const executeFile = promisify(execFile);
+const execute = (file, args, options = {}) => executeFile(file, args, { ...options, windowsHide: true });
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const live = globalThis[Symbol.for("hoyo-roster.workflows")] ??= new Map();
 const failure = code => Object.assign(new Error(code), { code });
@@ -27,28 +28,29 @@ async function selectPython(selected) {
   throw failure("WORKFLOW_PYTHON_312_REQUIRED");
 }
 
-async function ensureDependencies(python, options) {
+async function ensureDependencies(python, options, directory) {
   try {
     await execute(python, ["-I", "-c", "import portalocker,platformdirs,jsonschema"], { timeout: 10000 });
     return;
   } catch { /* A bare interpreter may bootstrap from the selected public package. */ }
   if (options.repairInstallation === false) throw failure("WORKFLOW_DEPENDENCIES_REQUIRED");
   const repository = dirname(moduleDirectory).endsWith("src") ? dirname(dirname(moduleDirectory)) : null;
-  const target = options.installationArtifact ?? repository;
-  if (!target) throw failure("WORKFLOW_INSTALLATION_SOURCE_REQUIRED");
-  if (repository) {
-    const { stdout } = await execute("git", ["status", "--porcelain"], { cwd: repository, timeout: 5000 });
-    if (stdout.trim()) throw failure("WORKFLOW_SOURCE_DIRTY");
-  }
-  try {
-    await execute(python, ["-m", "pip", "install", target], { timeout: 180000, maxBuffer: 65536 });
-  } catch { throw failure("WORKFLOW_ENVIRONMENT_INSTALL_FAILED"); }
+  const bootstrap = "import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_module('hoyo_roster.bootstrap',run_name='__main__')";
+  const pending = execute(python, ["-I", "-c", bootstrap, dirname(moduleDirectory)], { timeout: 210000, maxBuffer: 65536 });
+  pending.child.stdin.on("error", () => {});
+  pending.child.stdin.end(JSON.stringify({ directory, repository, artifact: options.installationArtifact ?? null }));
+  let stdout;
+  try { ({ stdout } = await pending); } catch (error) { stdout = error.stdout; }
+  let result;
+  try { result = JSON.parse(stdout); } catch { throw failure("WORKFLOW_BOOTSTRAP_FAILED"); }
+  if (result?.ok !== true) throw failure(/^[A-Z][A-Z_]{1,80}$/.test(result?.errorCode ?? "") ? result.errorCode : "WORKFLOW_BOOTSTRAP_FAILED");
 }
 
 export function createWorkflowDriver({ directory, control, startSession, initial }) {
-  let data = initial, session = null, browser = null, inFlight = null, cancelling = false;
+  let data = initial, session = null, browser = null, inFlight = null, cancelling = false, progress = [];
   const view = () => ({ ...data.status,
     nextAction: data.status.state === "WAITING_BROWSER" && browser ? "CONTINUE" : data.status.nextAction,
+    progress,
     ...(data.status.state === "SUCCEEDED" ? { report: { json: join(directory, "report/summary.json"), markdown: join(directory, "report/summary.md") } } : {}) });
   const call = async (action, extra = {}) => { data = await control(action, extra); return data; };
   async function advance(attachedBrowser, { launchMs = 180000 } = {}) {
@@ -73,6 +75,7 @@ export function createWorkflowDriver({ directory, control, startSession, initial
         if (["COLLECTING", "WAITING_LOGIN"].includes(data.status.state)) {
           if (!session) throw failure("WORKFLOW_RECONNECT_REQUIRED");
           const state = await session.advance({ launchMs });
+          progress = state.progress ?? [];
           if (cancelling) { await call("cancel"); return view(); }
           if (state.done) await call("finish");
           else await call("observe", { attempt: state.question?.attempt ?? null });
@@ -139,6 +142,16 @@ export function createWorkflowControl(python, directory, owner) {
   };
 }
 
+export async function resolveWorkflowOwner(python) {
+  // No process global is required in the client sandbox. The platform layer
+  // recognizes the one verified Windows venv redirector on both launch paths.
+  const probe = "import sys; sys.path.insert(0,sys.argv[1]); from hoyo_roster.platform_io import launch_parent_pid; print(launch_parent_pid())";
+  const { stdout } = await execute(python, ["-I", "-c", probe, dirname(moduleDirectory)], { timeout: 10000 });
+  const owner = { pid: Number(stdout.trim()), token: randomUUID() };
+  if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) throw failure("WORKFLOW_OWNER_UNAVAILABLE");
+  return owner;
+}
+
 export async function openCollectionWorkflow({ directory, python: selectedPython, ...options }) {
   const started = performance.now(), start_at = new Date().toISOString();
   if (typeof directory !== "string" || !directory || directory.includes("\0")) throw failure("WORKFLOW_OPTIONS_INVALID");
@@ -156,12 +169,8 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
   try { await access(join(directory, "workflow.json")); exists = true; } catch { /* New run. */ }
   if (exists && Object.keys(options).length) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
   const python = await selectPython(selectedPython);
-  await ensureDependencies(python, options);
-  // The client sandbox need not expose Node's process global. The same
-  // child-process boundary used by the worker supplies its real parent PID.
-  const { stdout: parentPid } = await execute(python, ["-I", "-c", "import os; print(os.getppid())"], { timeout: 10000 });
-  const owner = { pid: Number(parentPid.trim()), token: randomUUID() };
-  if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) throw failure("WORKFLOW_OWNER_UNAVAILABLE");
+  await ensureDependencies(python, options, directory);
+  const owner = await resolveWorkflowOwner(python);
   const control = createWorkflowControl(python, directory, owner);
   const initial = await control(exists ? "claim" : "create", exists ? { owner } : { owner, options,
     bootstrap: { start_at, end_at: new Date().toISOString(), duration_ms: performance.now() - started } });

@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
 from platformdirs import user_data_path
+from .installation import repository_git as repository_git
 
 
 def default_private_root() -> Path:
@@ -27,8 +28,9 @@ def verified_repository(candidate: Path) -> Path | None:
         if not (candidate / ".git").exists():
             return None
         result = subprocess.run(
-            ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
+            repository_git(candidate, "-C", str(candidate), "rev-parse", "--show-toplevel"),
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             check=False,
             timeout=5,
         )

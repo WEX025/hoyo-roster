@@ -4,6 +4,12 @@ import { createMetrics } from "./client_metrics.mjs";
 
 export const pageSourceNames = Object.freeze(["page:identity", "page:roster", "page:detail"]);
 
+// Bound the client's supported DOM scope setup as well as script execution.
+// The source deadline still owns cancellation and drains pending UI calls.
+export function readDom(target, read, argument) {
+  return target.evaluate(read, argument, { timeoutMs: 5000 });
+}
+
 export function createPageBrowser(browser, metrics = createMetrics()) {
   const retained = new Map();
   let viewportLease = false;
@@ -13,8 +19,69 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     checkSignal(signal);
     return value;
   }
+  async function navigate(tab, url, signal, { reload = false } = {}) {
+    const expected = new URL(url);
+    if (expected.protocol !== "https:") throw sourceFailure("SOURCE_DATA_INVALID");
+    const transient = value => !/\bERR_(?:CERT_|SSL_)/.test(value) &&
+      /\b(?:ERR_DNS_NO_MATCHING_SUPPORTED_ALPN|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_CONNECTION_TIMED_OUT|ERR_NETWORK_CHANGED|ERR_INTERNET_DISCONNECTED)\b/.test(value);
+    const matches = value => {
+      try { const actual = new URL(value); return actual.origin === expected.origin && actual.pathname === expected.pathname; }
+      catch { return false; }
+    };
+    const errorPage = value => {
+      if (!value?.startsWith("data:text/html")) return false;
+      try { return transient(decodeURIComponent(value)); }
+      catch { return false; }
+    };
+    async function landed() {
+      const actual = await call(signal, () => tab.url());
+      // Inspect only the fixed code in metadata from OUR navigation, not the
+      // error page DOM. Unknown redirects/interstitials are never recovered.
+      if (errorPage(actual)) return false;
+      if (!matches(actual)) throw sourceFailure("SOURCE_DATA_INVALID");
+      let visibleURL;
+      try {
+        visibleURL = await call(signal, () => readDom(tab.playwright, () => location.href));
+      } catch (error) {
+        checkSignal(signal);
+        // reload() can resolve before a delayed error document replaces the
+        // old URL. A blocked DOM scope is not itself proof of a network error.
+        const current = (await call(signal, () => browser.tabs.list())).find(t => t.id === tab.id);
+        if (current && errorPage(current.url)) return false;
+        throw error;
+      }
+      if (!matches(visibleURL)) throw sourceFailure("SOURCE_DATA_INVALID");
+      return true;
+    }
+    try {
+      await metrics.measure("page.navigation", () => call(signal, () => reload ? tab.reload() : tab.goto(url)));
+    } catch (error) {
+      checkSignal(signal);
+      if (/\bERR_(?:CERT_|SSL_)/.test(`${error.code ?? ""} ${error.message ?? ""}`)) throw error;
+      if (error.code && !transient(error.code)) throw error;
+      if (transient(error.message ?? "") || transient(error.code ?? "")) return retry();
+      const current = (await call(signal, () => browser.tabs.list())).find(t => t.id === tab.id);
+      if (current && errorPage(current.url)) return retry();
+      throw error;
+    }
+    if (!(await landed())) return retry();
+    return tab;
+    async function retry() {
+      return metrics.measure("page.navigation-retry", async () => {
+        // Some clients cannot operate a data: error document at all. Open the
+        // SAME approved HTTPS address in this browser; retain the original tab.
+        tab = await call(signal, () => browser.tabs.new());
+        await call(signal, () => tab.goto(url));
+        if (!(await landed())) throw sourceFailure("CLIENT_REQUEST_FAILED");
+        await call(signal, () => tab.markHandoff());
+        retained.set(url, tab);
+        return tab;
+      });
+    }
+  }
   async function page(url, signal) {
-    const tabs = await call(signal, () => browser.tabs.list());
+    const step = (name, action) => metrics.measure(name, () => call(signal, action));
+    const tabs = await step("page.tabs-list", () => browser.tabs.list());
     const expected = new URL(url);
     const prior = retained.get(url);
     let found = tabs.find(t => t.id === prior?.id);
@@ -24,23 +91,23 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     };
     if (found && !matches(found.url)) throw sourceFailure("SOURCE_DATA_INVALID");
     found ??= tabs.filter(t => matches(t.url)).at(-1);
-    let tab = await call(signal, () => found ? (found.id === prior?.id ? prior : browser.tabs.get(found.id)) : browser.tabs.new());
+    let tab = await step("page.tab-resolve", () => found ? (found.id === prior?.id ? prior : browser.tabs.get(found.id)) : browser.tabs.new());
     if (![tab.playwright?.evaluate, tab.playwright?.domSnapshot, tab.playwright?.locator,
       tab.playwright?.getByText].every(f => typeof f === "function")) {
       if (!found) await call(signal, () => tab.close());
       throw sourceFailure("CLIENT_SOURCE_UNAVAILABLE");
     }
-    if (!found) await call(signal, () => tab.goto(url));
-    let size = await call(signal, () => tab.playwright.evaluate(() => ({
+    if (!found) tab = await navigate(tab, url, signal);
+    let size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
       width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
     })));
     if (found && (!size.width || !size.height)) {
       // Retained panel webviews can become unmounted. A new tab in this SAME
       // browser shares its live session; do not copy credentials or close user tabs.
       tab = await call(signal, () => browser.tabs.new());
-      await call(signal, () => tab.goto(url));
+      tab = await navigate(tab, url, signal);
       await call(signal, () => tab.playwright.domSnapshot());
-      size = await call(signal, () => tab.playwright.evaluate(() => ({
+      size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
         width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
       })));
     }
@@ -52,12 +119,12 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       // repair, never a device-emulation or screenshot-size preference.
       await call(signal, () => viewport.set({ width: 1280, height: 900 }));
       viewportLease = true;
-      const repaired = await call(signal, () => tab.playwright.evaluate(() => ({
+      const repaired = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
         width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
       })));
       if (!repaired.width || !repaired.height) throw sourceFailure("CLIENT_PAGE_UNAVAILABLE");
     }
-    if (!matches(await call(signal, () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
+    if (!matches(await step("page.url-read", () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
     if (tab !== prior) await call(signal, () => tab.markHandoff());
     retained.set(url, tab);
     return tab;
@@ -86,11 +153,20 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   async function authentication(tab, signal) {
     // Only read rendered text and field presence, never any login input value.
-    return call(signal, () => tab.playwright.evaluate(() => {
+    return call(signal, () => readDom(tab.playwright, () => {
       const fields = Array.from(document.querySelectorAll("input"));
-      return fields.some(e => /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
-        Array.from(document.querySelectorAll("button,a,div,span")).some(e => !e.children.length && e.innerText?.trim() === "登录");
+      const visible = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
+      return fields.some(e => visible(e) && /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
+        Array.from(document.querySelectorAll("button,a,div,span,p")).some(e => visible(e) && !e.children.length &&
+          ["登录", "去登录", "立即登录", "你还没有登录哦", "登录后可查看已有角色数据",
+            "需要先登录才能使用养成指南工具"].includes(e.innerText?.trim()));
     }));
+  }
+  async function authenticatedControl(tab, selector, signal) {
+    return wait(signal, async () => {
+      if (await authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
+      return call(signal, () => tab.playwright.locator(selector).count());
+    }, count => count === 1);
   }
   async function identity(tab, signal, open) {
     if (await authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
@@ -101,7 +177,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       if (await authentication(tab, signal)) throw sourceFailure("AUTHENTICATION_REQUIRED");
       throw error;
     }
-    const roles = await wait(signal, () => tab.playwright.evaluate(() =>
+    const roles = await wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".game-role-list > li")).map(e => ({
         uid: e.querySelector(".role-uid")?.textContent?.trim().replace(/^UID\s*/, ""),
         nickname: e.querySelector(".role-name")?.textContent?.trim(),
@@ -137,5 +213,5 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
   return Object.freeze({ page: (url, signal) => measure("page.preflight", signal, () => page(url, signal)),
-    available, call, wait, click, authentication, identity, assertIdentity, record, release, measure });
+    available, navigate, call, wait, click, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
 }

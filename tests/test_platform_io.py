@@ -36,7 +36,9 @@ except portalocker.exceptions.LockException:
 def test_unsafe_lock_does_not_modify_file(tmp_path):
     lock = tmp_path / "workspace.lock"
     lock.write_bytes(b"synthetic")
-    lock.chmod(0o644)
+    from tests import make_shared
+
+    make_shared(lock, 0o644)
     with pytest.raises(OSError if io.WINDOWS else io.UnsafePath):
         with io.exclusive_lock(lock):
             pytest.fail("unsafe lock admitted")
@@ -257,6 +259,55 @@ def test_windows_process_query_errors_do_not_prove_a_dead_owner(
         assert windows.process_alive(123) is expected
 
 
+@pytest.mark.parametrize("redirected", [True, False])
+def test_windows_launch_parent_skips_only_the_exact_venv_image(windows, monkeypatch, redirected):
+    monkeypatch.setattr(windows.sys, "prefix", "synthetic-venv")
+    monkeypatch.setattr(windows.sys, "base_prefix", "synthetic-base")
+    monkeypatch.setattr(windows.os, "getppid", lambda: 200)
+    launcher, controller = SimpleNamespace(Close=Mock()), SimpleNamespace(Close=Mock())
+    monkeypatch.setattr(
+        windows.win32api, "OpenProcess", Mock(side_effect=[launcher, controller]), raising=False
+    )
+    monkeypatch.setattr(windows.win32api, "GetCurrentProcess", lambda: "self", raising=False)
+    monkeypatch.setattr(
+        windows,
+        "_process_image",
+        lambda h: Path(windows.sys.executable).resolve() if redirected else Path("unrelated.exe"),
+    )
+    monkeypatch.setattr(windows, "_process_parent", lambda h: 100)
+    monkeypatch.setattr(
+        windows.win32process,
+        "GetProcessTimes",
+        lambda h: {"CreationTime": 1 if h is controller else 2 if h is launcher else 3},
+        raising=False,
+    )
+    assert windows.launch_parent_pid() == (100 if redirected else 200)
+    launcher.Close.assert_called_once()
+    assert controller.Close.call_count == int(redirected)
+
+
+def test_windows_launch_parent_rejects_reused_controller_pid(windows, monkeypatch):
+    monkeypatch.setattr(windows.sys, "prefix", "synthetic-venv")
+    monkeypatch.setattr(windows.sys, "base_prefix", "synthetic-base")
+    launcher, controller = SimpleNamespace(Close=Mock()), SimpleNamespace(Close=Mock())
+    monkeypatch.setattr(
+        windows.win32api, "OpenProcess", Mock(side_effect=[launcher, controller]), raising=False
+    )
+    monkeypatch.setattr(windows.win32api, "GetCurrentProcess", lambda: "self", raising=False)
+    monkeypatch.setattr(windows, "_process_image", lambda h: Path(windows.sys.executable).resolve())
+    monkeypatch.setattr(windows, "_process_parent", lambda h: 100)
+    monkeypatch.setattr(
+        windows.win32process,
+        "GetProcessTimes",
+        lambda h: {"CreationTime": 4 if h is controller else 2 if h is launcher else 3},
+        raising=False,
+    )
+    with pytest.raises(OSError, match="PROCESS_PARENT_UNAVAILABLE"):
+        windows.launch_parent_pid()
+    launcher.Close.assert_called_once()
+    controller.Close.assert_called_once()
+
+
 def descriptor(owner="current", entries=None):
     return SimpleNamespace(
         GetSecurityDescriptorOwner=lambda: owner,
@@ -343,6 +394,9 @@ def test_existing_insecure_browser_profile_preserved(tmp_path):
 
     profile = tmp_path / "profile"
     profile.mkdir(mode=0o755)
+    from tests import make_shared
+
+    make_shared(profile)
     with pytest.raises(MetadataError):
         secure_private_directory(profile)
     if io.WINDOWS:

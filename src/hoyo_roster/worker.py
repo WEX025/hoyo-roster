@@ -8,6 +8,7 @@ from .client import ClientSession, StdioPort
 from .errors import OperationError, WorkspaceError
 from .jsonio import json_bytes
 from .workflow import run_task
+from .platform_io import run_async
 
 
 def serve(args):
@@ -39,7 +40,7 @@ def serve(args):
     code = 1
     with redirect_stdout(Reports()):
         try:
-            code = asyncio.run(run_task(args, client=ClientSession(port)))
+            code = run_async(run_task(args, client=ClientSession(port)))
         except (OperationError, WorkspaceError) as error:
             print("ERROR_CODE=" + (error.code if isinstance(error, OperationError) else str(error)))
         except (KeyboardInterrupt, asyncio.CancelledError):

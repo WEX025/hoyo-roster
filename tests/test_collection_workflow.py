@@ -3,10 +3,11 @@
 from hashlib import sha256
 import json
 import os
+from pathlib import Path
 
 import pytest
 
-from hoyo_roster import cli, collection_environment
+from hoyo_roster import cli, collection_environment, platform_io as io
 from hoyo_roster.collection_control import dispatch, config_options
 from hoyo_roster.collection_environment import inventory
 from hoyo_roster.collection_state import RunStore
@@ -23,7 +24,9 @@ def prepared(tmp_path, monkeypatch):
 
     monkeypatch.setattr(RequestGate, "reserve", reserve)
     config = config_options({"runtimeRoot": str(tmp_path / "runtime")})
-    store = RunStore.create(tmp_path / "run", config, {"pid": os.getppid(), "token": "synthetic"})
+    store = RunStore.create(
+        tmp_path / "run", config, {"pid": io.launch_parent_pid(), "token": "synthetic"}
+    )
     digest = sha256(
         json.dumps(
             inventory(__import__("pathlib").Path(config["package_directory"])), sort_keys=True
@@ -57,7 +60,7 @@ def reconnect(store):
     with store.edit() as value:
         value["owner"]["pid"] = 0
         value["attempts"][-1]["worker_pid"] = None  # the interrupted worker has exited
-    store.claim({"pid": os.getppid(), "token": "synthetic"})
+    store.claim({"pid": io.launch_parent_pid(), "token": "synthetic"})
     with store.edit() as value:
         store.phase(value, "WAITING_BROWSER")
     dispatch({"action": "begin", "directory": str(store.root), "token": "synthetic"})
@@ -111,7 +114,9 @@ def test_reconnect_stops_on_account_or_snapshot_change_before_more_collection(pr
     assert collect(prepared, PagePort()) == 0
     reconnect(prepared)
     if damage == "snapshot":
-        file = prepared.root / prepared.read()["completed"]["genshin"]["snapshot"]
+        file = io.filesystem_path(
+            prepared.root / prepared.read()["completed"]["genshin"]["snapshot"]
+        )
         value = json.loads(file.read_text())
         value["profile"]["nickname"] = "Changed synthetic"
         atomic_write_metadata(file, value)
@@ -174,7 +179,7 @@ def test_prepare_rejects_dirty_source_before_install_or_browser(prepared, monkey
     monkeypatch.setattr(collection_environment, "command", command)
     with pytest.raises(WorkspaceError, match="WORKFLOW_SOURCE_DIRTY"):
         collection_environment.prepare(prepared)
-    assert len(calls) == 1 and calls[0][1:3] == ["status", "--porcelain"]
+    assert len(calls) == 1 and calls[0][-2:] == ["status", "--porcelain"]
 
 
 def test_worker_rejects_a_changed_package_before_browser_access(prepared):
@@ -206,10 +211,15 @@ def test_preparation_updates_once_repairs_only_when_needed_and_rechecks(
         nonlocal installed
         commands.append(args)
         if args[0] == "git":
-            if args[1:3] == ["rev-parse", "--abbrev-ref"]:
+            if args[-4:] == ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]:
                 return "origin/main\n"
-            return "synthetic\n" if args[1:3] == ["rev-parse", "HEAD"] else ""
+            return "synthetic\n" if args[-2:] == ["rev-parse", "HEAD"] else ""
         if "pip" in args:
+            environment = kwargs["env"]
+            temporary = Path(environment["TEMP"])
+            assert temporary == io.filesystem_path(prepared.root / "preparation-temp")
+            assert environment["TMP"] == environment["TMPDIR"] == str(temporary)
+            assert io.private(temporary)
             installed = True
             return ""
         return json.dumps(expected if installed else {})
@@ -217,7 +227,7 @@ def test_preparation_updates_once_repairs_only_when_needed_and_rechecks(
     monkeypatch.setattr(collection_environment, "command", command)
     version = collection_environment.prepare(prepared)
     assert version["installation_repaired"]
-    assert [c[1] for c in commands if c[0] == "git"] == [
+    assert [c[3] for c in commands if c[0] == "git"] == [
         "status",
         "rev-parse",
         "fetch",
@@ -230,3 +240,11 @@ def test_preparation_updates_once_repairs_only_when_needed_and_rechecks(
     commands.clear()
     assert not collection_environment.prepare(prepared)["installation_repaired"]
     assert all("pip" not in c and "fetch" not in c for c in commands)
+
+
+def test_worker_rejects_unrelated_launch_parent_before_reading(prepared):
+    with prepared.edit() as value:
+        value["owner"]["pid"] = os.getpid()
+    port = PagePort()
+    assert collect(prepared, port) == 1
+    assert port.calls == []

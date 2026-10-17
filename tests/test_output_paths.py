@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import candidate_policy_for
-from hoyo_roster import paths
+from hoyo_roster import paths, platform_io as io
 from hoyo_roster.cli import build_parser, select_configuration
 from hoyo_roster.storage.common import tree_digest
 from hoyo_roster.user_workspace import LocalSnapshotStore, WorkspaceError, direct_configuration
@@ -118,12 +118,13 @@ def test_explicit_results_and_shared_runtime_roots(checkout, tmp_path, monkeypat
     assert len({store.root for store in stores}) == 4
     assert not paths.default_private_root().exists()
     for store in stores:
-        assert store.root.is_relative_to(checkout / "data/game-results-v3")
-        assert store.root.stat().st_mode & 0o777 == 0o700
+        assert store.root.is_relative_to(io.filesystem_path(checkout / "data/game-results-v3"))
+        assert io.private(store.root)
     shared = runtime_scope(tmp_path / "auth")
     assert shared == runtime_scope(tmp_path / "auth")
     assert not shared.is_relative_to(checkout)
-    assert (checkout / "data").stat().st_mode & 0o777 == 0o755
+    if not io.WINDOWS:
+        assert (checkout / "data").stat().st_mode & 0o777 == 0o755
 
 
 @pytest.mark.parametrize(
@@ -262,7 +263,7 @@ def test_cli_reports_current_json_location(checkout, monkeypatch, local_tool, ca
         for line in output.splitlines()
         if line.startswith("CURRENT_RESULT=")
     )
-    assert Path(current).is_relative_to(checkout / "data")
+    assert io.filesystem_path(Path(current)).is_relative_to(io.filesystem_path(checkout / "data"))
     assert (Path(current) / "roster.json").is_file()
     assert (Path(current) / "bangboos.json").is_file()
     assert UID not in output
@@ -275,7 +276,7 @@ def test_misplaced_legacy_profile_is_rejected_and_preserved(checkout, monkeypatc
         source, config, "genshin", candidate_policy=candidate_policy_for("genshin")
     )
     misplaced = store.root / "browser-profile"
-    misplaced.mkdir(mode=0o700)
+    io.mkdir_private(misplaced)
     (misplaced / "synthetic-state").write_text("synthetic")
     before = tree_digest(store.root)
     with pytest.raises(WorkspaceError, match="AUTH_STATE_IN_RESULT_DIRECTORY"):

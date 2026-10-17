@@ -76,6 +76,28 @@ def document_problems(text: str, relative: str, operations: set[str]) -> list[st
     return problems
 
 
+def validation_status_problems(text: str) -> list[str]:
+    """One current status table; historical evidence must not declare current failure."""
+    blocks = re.findall(
+        r"<!-- platform-status:start -->(.*?)<!-- platform-status:end -->", text, re.S
+    )
+    if len(blocks) != 1:
+        return ["PLATFORM_STATUS_BLOCK_INVALID"]
+    rows = re.findall(r"^\| (Windows|macOS) \| (PASS|PENDING) \| .+ \|$", blocks[0], re.M)
+    problems = (
+        []
+        if sorted(platform for platform, _ in rows) == ["Windows", "macOS"]
+        else ["PLATFORM_STATUS_ROWS_INVALID"]
+    )
+    historical = text.replace(blocks[0], "")
+    if re.search(
+        r"当前\s*(?:Windows|macOS)[^\n]*(?:未通过|已通过|\bPASS\b|\bFAILED\b|\bSUCCEEDED\b)",
+        historical,
+    ):
+        problems.append("CONFLICTING_CURRENT_PLATFORM_CLAIM")
+    return problems
+
+
 def check():
     from hoyo_roster.cli import build_parser
 
@@ -91,7 +113,7 @@ def check():
         if "contracts" in path.parts:
             continue
         modules += 1
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         problems.extend(document_problems(source, path.relative_to(ROOT).as_posix(), operations))
         tree = ast.parse(source)
         for node in ast.walk(tree):
@@ -113,7 +135,11 @@ def check():
                 if path.name == "login.py" and any("games" in name.split(".") for name in names):
                     problems.append("LOGIN_IMPORTS_GAME")
     help_result = subprocess.run(
-        [sys.executable, "-m", "hoyo_roster", "--help"], capture_output=True, text=True, check=True
+        [sys.executable, "-X", "utf8", "-m", "hoyo_roster", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     if any(option in help_result.stdout for option in OLD_FLAGS):
         problems.append("OLD_PUBLIC_OPTION_PRESENT")
@@ -125,8 +151,17 @@ def check():
         + list((ROOT / ".agents").rglob("SKILL.md"))
     ):
         documents += 1
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         problems.extend(document_problems(source, path.relative_to(ROOT).as_posix(), operations))
+        if path == ROOT / "docs/release-validation.md":
+            problems.extend(validation_status_problems(source))
+        if (
+            path in {ROOT / "README.md", ROOT / "docs/platform-support.md"}
+            and "release-validation.md#当前平台状态" not in source
+        ):
+            problems.append(
+                "MISSING_CURRENT_PLATFORM_STATUS_LINK:" + path.relative_to(ROOT).as_posix()
+            )
         for reference in re.findall(r"\]\(([^\n)]+)\)", source):
             reference = reference.strip().strip("<>")
             if re.match(r"^[a-z][a-z0-9+.-]*:", reference, re.I) or reference.startswith("#"):

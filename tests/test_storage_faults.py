@@ -5,7 +5,8 @@ import stat
 import uuid
 import pytest
 import hoyo_roster.user_workspace as workspace
-from tests import candidate_policy_for
+from tests import candidate_policy_for, make_shared
+from hoyo_roster import platform_io as io
 from hoyo_roster.storage.common import (
     load_metadata,
     tree_digest,
@@ -32,6 +33,7 @@ def test_atomic_failure_explicit_phase(tmp_path, monkeypatch, stage):
     target = tmp_path / "state.json"
     atomic_write_metadata(target, {"old": True})
     original_fsync = os.fsync
+    original_sync = io.sync_directory
 
     def fsync(fd):
         isdir = stat.S_ISDIR(os.fstat(fd).st_mode)
@@ -43,7 +45,13 @@ def test_atomic_failure_explicit_phase(tmp_path, monkeypatch, stage):
         if stage == "before_replace":
             raise OSError("synthetic")
 
+    def sync(path):
+        if stage == "parent_fsync":
+            raise OSError("synthetic post-replace directory confirmation")
+        return original_sync(path)
+
     monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(io, "sync_directory", sync)
     with pytest.raises(AtomicWriteError if stage == "parent_fsync" else OSError):
         atomic_write_metadata(target, {"new": True}, before_replace=before_replace)
     assert load_metadata(target) == ({"new": True} if stage == "parent_fsync" else {"old": True})
@@ -58,20 +66,15 @@ def test_pointer_post_replace_fsync_retains_both_and_recovers(store, monkeypatch
     def injected(path, value):
         if path != store.current_file:
             return original(path, value)
-        original_fsync = os.fsync
-        parent = path.parent.stat()
+        original_sync = io.sync_directory
 
-        def fsync(fd):
-            meta = os.fstat(fd)
-            if stat.S_ISDIR(meta.st_mode) and (meta.st_dev, meta.st_ino) == (
-                parent.st_dev,
-                parent.st_ino,
-            ):
-                raise OSError("synthetic parent fsync")
-            return original_fsync(fd)
+        def sync(directory):
+            if directory == path.parent:
+                raise OSError("synthetic post-replace directory confirmation")
+            return original_sync(directory)
 
         with monkeypatch.context() as patch:
-            patch.setattr(os, "fsync", fsync)
+            patch.setattr(io, "sync_directory", sync)
             return original(path, value)
 
     monkeypatch.setattr(workspace, "atomic_write_metadata", injected)
@@ -151,7 +154,7 @@ def test_invalid_pointer_inspect_and_verified_explicit_recovery(store):
 def test_uuid_is_not_cleanup_or_recovery_authority(store):
     current = store._install(None)
     unowned = store.root / str(uuid.uuid4())
-    unowned.mkdir(mode=0o700)
+    io.mkdir_private(unowned)
     with pytest.raises((workspace.WorkspaceError, ValueError)):
         store.recover(unowned.name)
     assert unowned.exists() and store.current() == current
@@ -172,16 +175,29 @@ def test_wrong_identity_or_corrupted_generation_recovery_rejected(store):
 
 
 def test_new_intermediates_private_existing_shared_parent_unchanged(tmp_path):
+    def permissions(path):
+        descriptor = io.backend._descriptor(path)
+        acl = descriptor.GetSecurityDescriptorDacl()
+        return (
+            descriptor.GetSecurityDescriptorOwner(),
+            descriptor.GetSecurityDescriptorControl(),
+            tuple(acl.GetAce(i) for i in range(acl.GetAceCount())),
+        )
+
     parent = tmp_path / "shared"
     parent.mkdir(mode=0o755)
-    parent.chmod(0o755)
+    make_shared(parent)
+    before = permissions(parent) if io.WINDOWS else None
     leaf = workspace.private_directory(parent / "application" / "users" / "scope")
-    assert stat.S_IMODE(parent.stat().st_mode) == 0o755
+    assert not io.private(parent)
     for path in (leaf, leaf.parent, leaf.parent.parent):
-        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+        assert io.private(path)
     with pytest.raises(workspace.WorkspaceError):
         workspace.private_directory(parent)
-    assert stat.S_IMODE(parent.stat().st_mode) == 0o755
+    if io.WINDOWS:
+        assert permissions(parent) == before
+    else:
+        assert stat.S_IMODE(parent.stat().st_mode) == 0o755
 
 
 def test_symlink_rejected_without_touching_target(tmp_path):
@@ -237,7 +253,7 @@ def test_explicit_cleanup_never_deletes_current_or_unowned(store):
     with pytest.raises(workspace.WorkspaceError, match="CURRENT_GENERATION_PROTECTED"):
         store.cleanup_generation(current.name)
     unowned = store.root / str(uuid.uuid4())
-    unowned.mkdir(mode=0o700)
+    io.mkdir_private(unowned)
     with pytest.raises((workspace.WorkspaceError, ValueError)):
         store.cleanup_generation(unowned.name)
     assert unowned.exists() and store.current() == current

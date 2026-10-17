@@ -2,15 +2,14 @@
 
 import importlib
 import shutil
-import stat
 import uuid
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from tests import candidate_policy_for
-from hoyo_roster import cli
+from tests import candidate_policy_for, make_shared
+from hoyo_roster import cli, platform_io as io
 from hoyo_roster.storage import candidate as storage
 from hoyo_roster.storage.common import (
     atomic_write_metadata,
@@ -61,9 +60,9 @@ def protocol(tmp_path):
 @pytest.mark.parametrize("shape", ("empty", "temporary", "unrelated", "legacy-v2"))
 def test_uuid_or_temporary_shape_never_proves_ownership(protocol, shape):
     policy, _ = protocol
-    policy.candidate_base.mkdir(mode=0o700)
+    io.mkdir_private(policy.candidate_base)
     root = policy.candidate_base / str(uuid.uuid4())
-    root.mkdir(mode=0o700)
+    io.mkdir_private(root)
     if shape == "temporary":
         path = root / f".candidate-state.json.{uuid.uuid4()}.tmp"
         path.write_text("unrelated synthetic evidence")
@@ -169,7 +168,7 @@ def test_candidate_scope_content_and_permissions_are_rechecked(protocol, mutatio
     elif mutation == "contract":
         atomic_write_metadata(workspace.root / "contract.json", {"changed": True})
     elif mutation == "mode":
-        marker.chmod(0o644)
+        make_shared(marker, 0o644)
     elif mutation == "symlink":
         (workspace.target_dir / "foreign-link").symlink_to(workspace.root.parent)
     elif mutation == "missing-marker":
@@ -259,10 +258,7 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
             GAMES[game], UID_A, "cn_gf01" if game == "genshin" else "prod_gf_cn"
         ).document()
     )
-    assert all(
-        stat.S_IMODE(p.stat().st_mode) == (0o700 if p.is_dir() else 0o600)
-        for p in (candidate, *candidate.rglob("*"))
-    )
+    assert all(io.private(p) for p in (candidate, *candidate.rglob("*")))
     foreign_store = LocalSnapshotStore(
         cli.CONTRACT_ROOT,
         direct_configuration(game, UID_B, storage_root=root),
@@ -271,7 +267,7 @@ def test_real_creation_binds_scope_and_cli_rejects_foreign_copy(
     )
     with foreign_store.locked():
         foreign_current = foreign_store.prepare()
-    foreign_store.candidate_base.mkdir(mode=0o700)
+    io.mkdir_private(foreign_store.candidate_base)
     foreign = foreign_store.candidate_base / item.run_id
     shutil.copytree(candidate, foreign)
     before = tree_digest(foreign)

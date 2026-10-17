@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-import socket
+import os
 import threading
 
 import pytest
@@ -101,9 +101,12 @@ def test_completed_game_is_preserved_when_peer_needs_recovery(tmp_path):
 
 @pytest.mark.parametrize("bad_id", [False, True])
 def test_private_pipe_routes_out_of_order_replies_and_rejects_unknown_ids(bad_id):
-    local, remote = socket.socketpair()
-    reader, writer = local.makefile("rb"), local.makefile("wb")
-    incoming, outgoing = remote.makefile("rb"), remote.makefile("wb")
+    # Exercise the production private-pipe transport. Windows socket.makefile
+    # exposes a WinSock handle, not the CRT descriptor required by os.read.
+    incoming_fd, writer_fd = os.pipe()
+    reader_fd, outgoing_fd = os.pipe()
+    reader, writer = os.fdopen(reader_fd, "rb"), os.fdopen(writer_fd, "wb")
+    incoming, outgoing = os.fdopen(incoming_fd, "rb"), os.fdopen(outgoing_fd, "wb")
 
     def respond():
         requests = [json.loads(incoming.readline()) for _ in range(2)]
@@ -141,8 +144,5 @@ def test_private_pipe_routes_out_of_order_replies_and_rejects_unknown_ids(bad_id
         thread.join(timeout=1)
         assert not thread.is_alive()
     finally:
-        remote.shutdown(socket.SHUT_RDWR)
-        for stream in [reader, writer, incoming, outgoing]:
+        for stream in [outgoing, writer, incoming, reader]:
             stream.close()
-        local.close()
-        remote.close()
