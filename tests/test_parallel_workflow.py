@@ -45,10 +45,15 @@ class ConcurrentPort(PagePort):
             self.active.remove(game)
 
 
-def test_parallel_games_overlap_and_save_two_complete_passes(tmp_path, capsys):
+@pytest.mark.parametrize(
+    "flags, peak", [((), 2), (("--parallel-games",), 2), (("--no-parallel-games",), 1)]
+)
+def test_default_parallel_and_explicit_serial_save_two_complete_passes(
+    tmp_path, capsys, flags, peak
+):
     port = ConcurrentPort()
-    assert cli.main(arguments(tmp_path, "--parallel-games"), client=port.client()) == 0
-    assert port.peak == 2
+    assert cli.main(arguments(tmp_path, *flags), client=port.client()) == 0
+    assert port.peak == peak
     assert len(snapshots(tmp_path)) == 2
     for game in ["genshin", "zzz"]:
         assert port.counts[game, "page:roster"] == 2

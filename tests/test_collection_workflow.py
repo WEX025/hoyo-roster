@@ -17,6 +17,14 @@ from hoyo_roster.storage.common import atomic_write_metadata
 from tests.test_page_workflow import PagePort
 
 
+@pytest.mark.parametrize(
+    "options, expected",
+    [({}, True), ({"parallelGames": True}, True), ({"parallelGames": False}, False)],
+)
+def test_new_workflow_defaults_to_parallel_and_preserves_explicit_serial(options, expected):
+    assert config_options(options)["parallel_games"] is expected
+
+
 @pytest.fixture
 def prepared(tmp_path, monkeypatch):
     async def reserve(self, **kwargs):
