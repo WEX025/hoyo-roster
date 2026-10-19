@@ -1,0 +1,21 @@
+{
+  "schema_version": "repository-manifest/v1",
+  "games": {
+    "genshin-impact": {
+      "profile": "data/genshin-impact/profile.json",
+      "roster": "data/genshin-impact/roster.json",
+      "builds_dir": "data/genshin-impact/builds"
+    },
+    "honkai-star-rail": {
+      "profile": "data/honkai-star-rail/profile.json",
+      "roster": "data/honkai-star-rail/roster.json",
+      "builds_dir": "data/honkai-star-rail/builds"
+    },
+    "zenless-zone-zero": {
+      "profile": "data/zenless-zone-zero/profile.json",
+      "roster": "data/zenless-zone-zero/roster.json",
+      "builds_dir": "data/zenless-zone-zero/builds",
+      "bangboos": "data/zenless-zone-zero/bangboos.json"
+    }
+  }
+}

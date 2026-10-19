@@ -1,0 +1,781 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:zenless-zone-zero:build:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game"
+  ],
+  "dependentRequired": {
+    "panel_context": [
+      "panel"
+    ],
+    "panel": [
+      "panel_context"
+    ]
+  },
+  "properties": {
+    "schema_version": {
+      "const": "zenless-zone-zero-build/v1"
+    },
+    "game": {
+      "const": "zenless-zone-zero"
+    },
+    "panel_context": {
+      "const": "out_of_combat"
+    },
+    "progression": {
+      "$ref": "#/$defs/progression"
+    },
+    "w_engine": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/w_engine"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "drive_discs": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "slot_1": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/slot_1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot_2": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/slot_2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot_3": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/slot_3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot_4": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/slot_4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot_5": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/slot_5"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot_6": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/slot_6"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "panel": {
+      "$ref": "#/$defs/panel"
+    }
+  },
+  "$defs": {
+    "progression": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "basic_attack_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "dodge_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "assist_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "special_attack_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "chain_attack_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "core_skill_rank": {
+          "type": "string",
+          "enum": [
+            "0",
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F"
+          ]
+        },
+        "potential_vision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/potential_vision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "potential_vision": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "max_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        }
+      }
+    },
+    "w_engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "w_engine_id": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+        },
+        "name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "rarity": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "modification": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        }
+      }
+    },
+    "drive_disc": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "set_id": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+        },
+        "set_name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "rarity": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "main_stat": {
+          "$ref": "#/$defs/main_stat"
+        },
+        "substats": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/substat"
+          }
+        }
+      }
+    },
+    "slot_1": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "hp"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "slot_2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "attack"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "slot_3": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "defense"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "slot_4": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "crit_rate",
+                    "crit_damage",
+                    "anomaly_proficiency"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "slot_5": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "penetration_ratio",
+                    "physical_damage_bonus",
+                    "fire_damage_bonus",
+                    "ice_damage_bonus",
+                    "electric_damage_bonus",
+                    "ether_damage_bonus",
+                    "wind_damage_bonus"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "slot_6": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "impact",
+                    "anomaly_mastery",
+                    "energy_regeneration"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "main_stat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "hp",
+            "hp_percent",
+            "attack",
+            "attack_percent",
+            "defense",
+            "defense_percent",
+            "impact",
+            "crit_rate",
+            "crit_damage",
+            "anomaly_proficiency",
+            "anomaly_mastery",
+            "penetration_ratio",
+            "energy_regeneration",
+            "physical_damage_bonus",
+            "fire_damage_bonus",
+            "ice_damage_bonus",
+            "electric_damage_bonus",
+            "ether_damage_bonus",
+            "wind_damage_bonus"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "substat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "hp",
+            "hp_percent",
+            "attack",
+            "attack_percent",
+            "defense",
+            "defense_percent",
+            "crit_rate",
+            "crit_damage",
+            "anomaly_proficiency",
+            "penetration"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "hp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attack": {
+          "type": "number",
+          "minimum": 0
+        },
+        "defense": {
+          "type": "number",
+          "minimum": 0
+        },
+        "impact": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crit_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crit_damage": {
+          "type": "number",
+          "minimum": 0
+        },
+        "anomaly_proficiency": {
+          "type": "number",
+          "minimum": 0
+        },
+        "anomaly_mastery": {
+          "type": "number",
+          "minimum": 0
+        },
+        "penetration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "penetration_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "energy_regeneration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sheer_force": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "flash_energy_accumulation": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "physical_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "fire_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "ice_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "electric_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "ether_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "wind_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        }
+      }
+    },
+    "complete_potential_vision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/potential_vision"
+        },
+        {
+          "required": [
+            "level",
+            "max_level"
+          ]
+        }
+      ]
+    },
+    "complete_progression": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/progression"
+        },
+        {
+          "required": [
+            "basic_attack_level",
+            "dodge_level",
+            "assist_level",
+            "special_attack_level",
+            "chain_attack_level",
+            "core_skill_rank",
+            "potential_vision"
+          ],
+          "properties": {
+            "potential_vision": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_potential_vision"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "complete_w_engine": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/w_engine"
+        },
+        {
+          "required": [
+            "w_engine_id",
+            "name",
+            "rarity",
+            "level",
+            "modification"
+          ]
+        }
+      ]
+    },
+    "complete_drive_disc": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/drive_disc"
+        },
+        {
+          "required": [
+            "set_id",
+            "set_name",
+            "rarity",
+            "level",
+            "main_stat",
+            "substats"
+          ]
+        }
+      ]
+    },
+    "complete_slot_1": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slot_1"
+        },
+        {
+          "$ref": "#/$defs/complete_drive_disc"
+        }
+      ]
+    },
+    "complete_slot_2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slot_2"
+        },
+        {
+          "$ref": "#/$defs/complete_drive_disc"
+        }
+      ]
+    },
+    "complete_slot_3": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slot_3"
+        },
+        {
+          "$ref": "#/$defs/complete_drive_disc"
+        }
+      ]
+    },
+    "complete_slot_4": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slot_4"
+        },
+        {
+          "$ref": "#/$defs/complete_drive_disc"
+        }
+      ]
+    },
+    "complete_slot_5": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slot_5"
+        },
+        {
+          "$ref": "#/$defs/complete_drive_disc"
+        }
+      ]
+    },
+    "complete_slot_6": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slot_6"
+        },
+        {
+          "$ref": "#/$defs/complete_drive_disc"
+        }
+      ]
+    },
+    "complete_drive_discs": {
+      "allOf": [
+        {
+          "$ref": "#/properties/drive_discs"
+        },
+        {
+          "required": [
+            "slot_1",
+            "slot_2",
+            "slot_3",
+            "slot_4",
+            "slot_5",
+            "slot_6"
+          ],
+          "properties": {
+            "slot_1": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_slot_1"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "slot_2": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_slot_2"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "slot_3": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_slot_3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "slot_4": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_slot_4"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "slot_5": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_slot_5"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "slot_6": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_slot_6"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "complete_panel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/panel"
+        },
+        {
+          "required": [
+            "hp",
+            "attack",
+            "defense",
+            "impact",
+            "crit_rate",
+            "crit_damage",
+            "anomaly_proficiency",
+            "anomaly_mastery",
+            "penetration",
+            "penetration_ratio",
+            "energy_regeneration",
+            "sheer_force",
+            "flash_energy_accumulation",
+            "physical_damage_bonus",
+            "fire_damage_bonus",
+            "ice_damage_bonus",
+            "electric_damage_bonus",
+            "ether_damage_bonus",
+            "wind_damage_bonus"
+          ]
+        }
+      ]
+    },
+    "complete_build": {
+      "allOf": [
+        {
+          "$ref": "#"
+        },
+        {
+          "required": [
+            "schema_version",
+            "game",
+            "panel_context",
+            "progression",
+            "w_engine",
+            "drive_discs",
+            "panel"
+          ],
+          "properties": {
+            "progression": {
+              "$ref": "#/$defs/complete_progression"
+            },
+            "w_engine": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_w_engine"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "drive_discs": {
+              "$ref": "#/$defs/complete_drive_discs"
+            },
+            "panel": {
+              "$ref": "#/$defs/complete_panel"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

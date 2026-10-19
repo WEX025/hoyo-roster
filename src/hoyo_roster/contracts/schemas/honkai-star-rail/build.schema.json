@@ -1,0 +1,882 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:honkai-star-rail:build:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game"
+  ],
+  "dependentRequired": {
+    "panel_context": [
+      "panel"
+    ],
+    "panel": [
+      "panel_context"
+    ]
+  },
+  "properties": {
+    "schema_version": {
+      "const": "honkai-star-rail-build/v1"
+    },
+    "game": {
+      "const": "honkai-star-rail"
+    },
+    "panel_context": {
+      "const": "out_of_combat"
+    },
+    "progression": {
+      "$ref": "#/$defs/progression"
+    },
+    "light_cone": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/light_cone"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "relics": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "head": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/head"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hands": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/hands"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/body"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feet": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/feet"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planar_sphere": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/planar_sphere"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "link_rope": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/link_rope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "panel": {
+      "$ref": "#/$defs/panel"
+    }
+  },
+  "$defs": {
+    "progression": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "basic_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "skill_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "ultimate_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "talent_level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "trace_nodes": {
+          "$ref": "#/$defs/trace_nodes"
+        },
+        "memosprite": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/memosprite"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "trace_nodes": {
+      "type": "object",
+      "default": {},
+      "propertyNames": {
+        "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/trace_node"
+      }
+    },
+    "trace_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "unlocked": {
+          "type": "boolean"
+        }
+      }
+    },
+    "memosprite": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "skills": {
+          "$ref": "#/$defs/abilities"
+        },
+        "talents": {
+          "$ref": "#/$defs/abilities"
+        }
+      }
+    },
+    "abilities": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/ability"
+      }
+    },
+    "ability": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        }
+      }
+    },
+    "light_cone": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "light_cone_id": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+        },
+        "name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "rarity": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "promotion": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "superimposition": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        }
+      }
+    },
+    "relic": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "set_id": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+        },
+        "set_name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "rarity": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "main_stat": {
+          "$ref": "#/$defs/main_stat"
+        },
+        "substats": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/substat"
+          }
+        }
+      }
+    },
+    "head": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "hp"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hands": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "const": "attack"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "body": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "crit_rate",
+                    "crit_damage",
+                    "effect_hit_rate",
+                    "outgoing_healing_boost"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "feet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "speed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "planar_sphere": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "physical_damage_bonus",
+                    "fire_damage_bonus",
+                    "ice_damage_bonus",
+                    "lightning_damage_bonus",
+                    "wind_damage_bonus",
+                    "quantum_damage_bonus",
+                    "imaginary_damage_bonus"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "link_rope": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "properties": {
+            "main_stat": {
+              "properties": {
+                "key": {
+                  "enum": [
+                    "hp_percent",
+                    "attack_percent",
+                    "defense_percent",
+                    "break_effect",
+                    "energy_regeneration_rate"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "main_stat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "hp",
+            "hp_percent",
+            "attack",
+            "attack_percent",
+            "defense_percent",
+            "speed",
+            "crit_rate",
+            "crit_damage",
+            "break_effect",
+            "effect_hit_rate",
+            "energy_regeneration_rate",
+            "outgoing_healing_boost",
+            "physical_damage_bonus",
+            "fire_damage_bonus",
+            "ice_damage_bonus",
+            "lightning_damage_bonus",
+            "wind_damage_bonus",
+            "quantum_damage_bonus",
+            "imaginary_damage_bonus"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "substat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "hp",
+            "hp_percent",
+            "attack",
+            "attack_percent",
+            "defense",
+            "defense_percent",
+            "speed",
+            "crit_rate",
+            "crit_damage",
+            "break_effect",
+            "effect_hit_rate",
+            "effect_res"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "hp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attack": {
+          "type": "number",
+          "minimum": 0
+        },
+        "defense": {
+          "type": "number",
+          "minimum": 0
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crit_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "crit_damage": {
+          "type": "number",
+          "minimum": 0
+        },
+        "break_effect": {
+          "type": "number",
+          "minimum": 0
+        },
+        "effect_hit_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "effect_res": {
+          "type": "number",
+          "minimum": 0
+        },
+        "energy_regeneration_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "outgoing_healing_boost": {
+          "type": "number",
+          "minimum": 0
+        },
+        "physical_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "fire_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "ice_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "lightning_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "wind_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "quantum_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        },
+        "imaginary_damage_bonus": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nullable_nonnegative_number"
+        }
+      }
+    },
+    "complete_trace_node": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/trace_node"
+        },
+        {
+          "required": [
+            "level",
+            "unlocked"
+          ]
+        }
+      ]
+    },
+    "complete_trace_nodes": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/trace_nodes"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/complete_trace_node"
+          }
+        }
+      ]
+    },
+    "complete_ability": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ability"
+        },
+        {
+          "required": [
+            "name",
+            "level"
+          ]
+        }
+      ]
+    },
+    "complete_abilities": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/abilities"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/complete_ability"
+          }
+        }
+      ]
+    },
+    "complete_memosprite": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/memosprite"
+        },
+        {
+          "required": [
+            "skills",
+            "talents"
+          ],
+          "properties": {
+            "skills": {
+              "$ref": "#/$defs/complete_abilities"
+            },
+            "talents": {
+              "$ref": "#/$defs/complete_abilities"
+            }
+          }
+        }
+      ]
+    },
+    "complete_progression": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/progression"
+        },
+        {
+          "required": [
+            "basic_level",
+            "skill_level",
+            "ultimate_level",
+            "talent_level",
+            "trace_nodes",
+            "memosprite"
+          ],
+          "properties": {
+            "trace_nodes": {
+              "$ref": "#/$defs/complete_trace_nodes"
+            },
+            "memosprite": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_memosprite"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "complete_light_cone": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/light_cone"
+        },
+        {
+          "required": [
+            "light_cone_id",
+            "name",
+            "rarity",
+            "level",
+            "promotion",
+            "superimposition"
+          ]
+        }
+      ]
+    },
+    "complete_relic": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/relic"
+        },
+        {
+          "required": [
+            "set_id",
+            "set_name",
+            "rarity",
+            "level",
+            "main_stat",
+            "substats"
+          ]
+        }
+      ]
+    },
+    "complete_head": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/head"
+        },
+        {
+          "$ref": "#/$defs/complete_relic"
+        }
+      ]
+    },
+    "complete_hands": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/hands"
+        },
+        {
+          "$ref": "#/$defs/complete_relic"
+        }
+      ]
+    },
+    "complete_body": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/body"
+        },
+        {
+          "$ref": "#/$defs/complete_relic"
+        }
+      ]
+    },
+    "complete_feet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/feet"
+        },
+        {
+          "$ref": "#/$defs/complete_relic"
+        }
+      ]
+    },
+    "complete_planar_sphere": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/planar_sphere"
+        },
+        {
+          "$ref": "#/$defs/complete_relic"
+        }
+      ]
+    },
+    "complete_link_rope": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/link_rope"
+        },
+        {
+          "$ref": "#/$defs/complete_relic"
+        }
+      ]
+    },
+    "complete_relics": {
+      "allOf": [
+        {
+          "$ref": "#/properties/relics"
+        },
+        {
+          "required": [
+            "head",
+            "hands",
+            "body",
+            "feet",
+            "planar_sphere",
+            "link_rope"
+          ],
+          "properties": {
+            "head": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_head"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hands": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_hands"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_body"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "feet": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_feet"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "planar_sphere": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_planar_sphere"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "link_rope": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_link_rope"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "complete_panel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/panel"
+        },
+        {
+          "required": [
+            "hp",
+            "attack",
+            "defense",
+            "speed",
+            "crit_rate",
+            "crit_damage",
+            "break_effect",
+            "effect_hit_rate",
+            "effect_res",
+            "energy_regeneration_rate",
+            "outgoing_healing_boost",
+            "physical_damage_bonus",
+            "fire_damage_bonus",
+            "ice_damage_bonus",
+            "lightning_damage_bonus",
+            "wind_damage_bonus",
+            "quantum_damage_bonus",
+            "imaginary_damage_bonus"
+          ]
+        }
+      ]
+    },
+    "complete_build": {
+      "allOf": [
+        {
+          "$ref": "#"
+        },
+        {
+          "required": [
+            "schema_version",
+            "game",
+            "panel_context",
+            "progression",
+            "light_cone",
+            "relics",
+            "panel"
+          ],
+          "properties": {
+            "progression": {
+              "$ref": "#/$defs/complete_progression"
+            },
+            "light_cone": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/complete_light_cone"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "relics": {
+              "$ref": "#/$defs/complete_relics"
+            },
+            "panel": {
+              "$ref": "#/$defs/complete_panel"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:genshin-impact:roster:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game",
+    "characters"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "genshin-impact-roster/v1"
+    },
+    "game": {
+      "const": "genshin-impact"
+    },
+    "characters": {
+      "type": "object",
+      "default": {},
+      "propertyNames": {
+        "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/stable_id"
+      },
+      "properties": {
+        "10000005": {
+          "$ref": "#/$defs/traveler_character"
+        },
+        "10000007": {
+          "$ref": "#/$defs/traveler_character"
+        }
+      },
+      "patternProperties": {
+        "^(?!10000005$|10000007$)[1-9][0-9]*$": {
+          "$ref": "#/$defs/character"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "character_fields": {
+      "type": "object",
+      "required": [
+        "name",
+        "level",
+        "ascension",
+        "constellation"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonempty_string"
+        },
+        "level": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "ascension": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "constellation": {
+          "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/nonnegative_integer"
+        },
+        "friendship_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        }
+      }
+    },
+    "character": {
+      "$ref": "#/$defs/character_fields",
+      "unevaluatedProperties": false
+    },
+    "traveler_character": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/character_fields"
+        }
+      ],
+      "properties": {
+        "current_element": {
+          "type": "string",
+          "enum": [
+            "anemo",
+            "geo",
+            "electro",
+            "dendro",
+            "hydro",
+            "pyro",
+            "cryo"
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

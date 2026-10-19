@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:common:definitions:v1",
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "nonempty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonnegative_integer": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nullable_nonnegative_number": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "account_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uid",
+        "server",
+        "nickname",
+        "player_level"
+      ],
+      "properties": {
+        "uid": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "server": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "player_level": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "sync_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "source",
+        "synced_at"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "not_synced",
+            "partial",
+            "complete"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "miyoushe-web",
+            "hoyolab-web",
+            "manual",
+            null
+          ]
+        },
+        "synced_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "not_synced"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "const": null
+              },
+              "synced_at": {
+                "const": null
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "partial",
+                  "complete"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "miyoushe-web",
+                  "hoyolab-web",
+                  "manual"
+                ]
+              },
+              "synced_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
