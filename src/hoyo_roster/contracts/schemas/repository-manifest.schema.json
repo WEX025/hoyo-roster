@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:repository-manifest:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "games"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "repository-manifest/v1"
+    },
+    "games": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "genshin-impact",
+        "honkai-star-rail",
+        "zenless-zone-zero"
+      ],
+      "properties": {
+        "genshin-impact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "roster",
+            "builds_dir"
+          ],
+          "properties": {
+            "profile": {
+              "const": "data/genshin-impact/profile.json"
+            },
+            "roster": {
+              "const": "data/genshin-impact/roster.json"
+            },
+            "builds_dir": {
+              "const": "data/genshin-impact/builds"
+            }
+          }
+        },
+        "honkai-star-rail": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "roster",
+            "builds_dir"
+          ],
+          "properties": {
+            "profile": {
+              "const": "data/honkai-star-rail/profile.json"
+            },
+            "roster": {
+              "const": "data/honkai-star-rail/roster.json"
+            },
+            "builds_dir": {
+              "const": "data/honkai-star-rail/builds"
+            }
+          }
+        },
+        "zenless-zone-zero": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "roster",
+            "builds_dir",
+            "bangboos"
+          ],
+          "properties": {
+            "profile": {
+              "const": "data/zenless-zone-zero/profile.json"
+            },
+            "roster": {
+              "const": "data/zenless-zone-zero/roster.json"
+            },
+            "builds_dir": {
+              "const": "data/zenless-zone-zero/builds"
+            },
+            "bangboos": {
+              "const": "data/zenless-zone-zero/bangboos.json"
+            }
+          }
+        }
+      }
+    }
+  }
+}

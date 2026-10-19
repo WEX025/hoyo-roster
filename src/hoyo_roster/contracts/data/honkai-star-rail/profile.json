@@ -1,0 +1,15 @@
+{
+  "schema_version": "game-profile/v1",
+  "game": "honkai-star-rail",
+  "account": {
+    "uid": null,
+    "server": null,
+    "nickname": null,
+    "player_level": null
+  },
+  "sync": {
+    "state": "not_synced",
+    "source": null,
+    "synced_at": null
+  }
+}

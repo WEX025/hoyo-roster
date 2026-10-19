@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hoyo-game-data:schema:genshin-impact:profile:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "game",
+    "account",
+    "sync"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "game-profile/v1"
+    },
+    "game": {
+      "const": "genshin-impact"
+    },
+    "account": {
+      "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/account_identity"
+    },
+    "sync": {
+      "$ref": "urn:hoyo-game-data:schema:common:definitions:v1#/$defs/sync_metadata"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sync": {
+            "properties": {
+              "state": {
+                "const": "not_synced"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        "required": [
+          "sync"
+        ]
+      },
+      "then": {
+        "properties": {
+          "account": {
+            "properties": {
+              "uid": {
+                "const": null
+              },
+              "server": {
+                "const": null
+              },
+              "nickname": {
+                "const": null
+              },
+              "player_level": {
+                "const": null
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "sync": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "partial",
+                  "complete"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        "required": [
+          "sync"
+        ]
+      },
+      "then": {
+        "properties": {
+          "account": {
+            "properties": {
+              "uid": {
+                "type": "string",
+                "minLength": 1
+              },
+              "server": {
+                "type": "string",
+                "minLength": 1
+              },
+              "nickname": {
+                "type": "string",
+                "minLength": 1
+              },
+              "player_level": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

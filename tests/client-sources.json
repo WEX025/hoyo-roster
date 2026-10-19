@@ -1,0 +1,99 @@
+{
+  "genshin": {
+    "binding": {
+      "json": "{\"retcode\": 0, \"data\": {\"list\": [{\"game_biz\": \"hk4e_cn\", \"game_uid\": \"123456789\", \"region\": \"cn_gf01\", \"nickname\": \"Synthetic\", \"level\": 50}]}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://passport-api.mihoyo.com/binding/api/getUserGameRolesByLtoken",
+        "method": "GET",
+        "status": 200,
+        "redirected": false
+      }
+    },
+    "cultivation-avatar-list": {
+      "json": "{\"retcode\": 0, \"data\": {\"list\": [{\"id\": 10000005, \"name\": \"Synthetic Traveler\", \"avatar_level\": 5, \"level_current\": 90, \"promote_level\": 6, \"constellation_num\": 0, \"fetter_level\": 1, \"element_attr_id\": 3, \"weapon\": null, \"skill_list\": [{\"id\": 100545, \"group_id\": 730, \"level_current\": 5, \"max_level\": 10}, {\"id\": 10077, \"group_id\": 932, \"level_current\": 6, \"max_level\": 10}, {\"id\": 10078, \"group_id\": 939, \"level_current\": 7, \"max_level\": 10}]}], \"total\": 1}}",
+      "evidence": {
+        "request": {
+          "uid": "123456789",
+          "region": "cn_gf01",
+          "lang": "zh-cn",
+          "element_attr_ids": [],
+          "weapon_cat_ids": [],
+          "page": 1,
+          "size": 100
+        },
+        "pages_observed": [
+          1
+        ]
+      },
+      "origin": {
+        "url": "https://api-takumi.mihoyo.com/event/e20200928calculate/v1/sync/avatar/list",
+        "method": "POST",
+        "status": 200,
+        "redirected": false
+      }
+    }
+  },
+  "zzz": {
+    "binding": {
+      "json": "{\"retcode\": 0, \"data\": {\"list\": [{\"game_biz\": \"nap_cn\", \"game_uid\": \"123456789\", \"region\": \"prod_gf_cn\", \"nickname\": \"Synthetic\", \"level\": 50}]}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie",
+        "method": "GET",
+        "status": 200,
+        "redirected": false
+      }
+    },
+    "record:avatar/basic": {
+      "json": "{\"retcode\": 0, \"data\": {\"avatar_list\": [{\"id\": 1011, \"name\": \"Synthetic Agent\", \"level\": 20, \"rank\": 1}]}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://api-takumi-record.mihoyo.com/event/game_record_zzz/api/zzz/avatar/basic",
+        "method": "GET",
+        "status": 200,
+        "redirected": false
+      }
+    },
+    "record:avatar/info": {
+      "json": "{\"retcode\": 0, \"data\": {\"avatar_list\": [{\"id\": 1011, \"skills\": [{\"skill_type\": 0, \"level\": 1}, {\"skill_type\": 2, \"level\": 1}, {\"skill_type\": 6, \"level\": 1}, {\"skill_type\": 1, \"level\": 1}, {\"skill_type\": 3, \"level\": 1}, {\"skill_type\": 5, \"level\": 1}], \"properties\": [{\"property_id\": 1, \"final\": \"100\"}, {\"property_id\": 2, \"final\": \"100\"}, {\"property_id\": 3, \"final\": \"100\"}, {\"property_id\": 4, \"final\": \"100\"}, {\"property_id\": 5, \"final\": \"5.1234567890123456789%\"}, {\"property_id\": 6, \"final\": \"100\"}, {\"property_id\": 7, \"final\": \"100\"}, {\"property_id\": 8, \"final\": \"100\"}], \"weapon\": null, \"equip\": []}]}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://api-takumi-record.mihoyo.com/event/game_record_zzz/api/zzz/avatar/info",
+        "method": "GET",
+        "status": 200,
+        "redirected": false
+      }
+    },
+    "record:buddy/info": {
+      "json": "{\"retcode\": 0, \"data\": {\"list\": []}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://api-takumi-record.mihoyo.com/event/game_record_zzz/api/zzz/buddy/info",
+        "method": "GET",
+        "status": 200,
+        "redirected": false
+      }
+    },
+    "cultivate:user/avatar_basic_list": {
+      "json": "{\"retcode\": 0, \"data\": {\"list\": [{\"avatar\": {\"id\": 1011}, \"unlocked\": true, \"is_teaser\": false}]}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://api-takumi.mihoyo.com/event/nap_cultivate_tool/user/avatar_basic_list",
+        "method": "GET",
+        "status": 200,
+        "redirected": false
+      }
+    },
+    "cultivate:user/batch_avatar_detail_v2": {
+      "json": "{\"retcode\": 0, \"data\": {\"list\": [{\"avatar\": {\"id\": 1011, \"promotes\": 2}}]}}",
+      "evidence": null,
+      "origin": {
+        "url": "https://api-takumi.mihoyo.com/event/nap_cultivate_tool/user/batch_avatar_detail_v2",
+        "method": "POST",
+        "status": 200,
+        "redirected": false
+      }
+    }
+  }
+}
