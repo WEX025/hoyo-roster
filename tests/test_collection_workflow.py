@@ -119,6 +119,7 @@ def test_automatic_validation_and_report_require_actual_commits(prepared, capsys
             {"action": action, "directory": str(prepared.root), "token": "synthetic"}
         )
         assert response["status"]["state"] == expected
+        assert response["status"]["gameStates"] == {"genshin": "COMPLETED", "zzz": "COMPLETED"}
     summary = json.loads((prepared.root / "report/summary.json").read_text())
     assert len(summary["games"]) == 2
     assert summary["collection_modes"] == ["PARALLEL"]
@@ -130,6 +131,18 @@ def test_automatic_validation_and_report_require_actual_commits(prepared, capsys
         assert summary["source_active_seconds_recorded"] == (10 * len(rows) - 10) / 1000
     assert "123456789" not in json.dumps(summary)
     assert (prepared.root / "workflow-steps.md").is_file()
+
+
+def test_status_preserves_independent_states_and_closes_interrupted_attempt(prepared):
+    request = {"directory": str(prepared.root), "token": "synthetic"}
+    states = {"genshin": "FAILED", "zzz": "COLLECTING"}
+    assert (
+        dispatch({**request, "action": "observe", "gameStates": states})["status"]["gameStates"]
+        == states
+    )
+    assert dispatch({**request, "action": "inspect"})["status"]["gameStates"] == states
+    stopped = dispatch({**request, "action": "cancel"})
+    assert stopped["status"]["gameStates"] == {"genshin": "FAILED", "zzz": "CANCELLED"}
 
 
 def test_reconnect_reuses_committed_game_after_fresh_identity_only(prepared):

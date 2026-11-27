@@ -18,3 +18,19 @@ LABELS = {
 
 def emit(state):
     print("PROGRESS=" + state + "\n提示=" + LABELS[state], flush=True)
+
+
+class GameProgress:
+    """One game's observable transaction in this worker attempt."""
+
+    unfinished = {"PENDING", "CHECKING_IDENTITY", "COLLECTING", "WAITING_LOGIN"}
+
+    def __init__(self, game):
+        self.game = game
+        self.state = "PENDING"
+
+    def update(self, state):
+        if state == self.state:
+            return
+        self.state = state
+        print(f"GAME_STATE={self.game}:{state}", flush=True)

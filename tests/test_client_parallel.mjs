@@ -19,12 +19,25 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
   const parallel = parallelGames !== false;
   const temp = await realpath(await mkdtemp(join(tmpdir(),"hoyo-parallel-")));
   const active = new Set(), starts = [], reads = [], completions = [];
-  let peak = 0, insidePump = false;
+  let peak = 0, insidePump = false, releaseIdentity;
+  const peerRosterStarted = new Promise(resolve => { releaseIdentity = resolve; });
   const host = createClientHost(browser(), { pageReader:true, readSource:async q=>{
     assert.ok(insidePump);
     assert.equal(active.has(q.game),false);
     active.add(q.game);peak=Math.max(peak,active.size); starts.push(performance.now());reads.push([q.game,q.source]);
-    try { await sleep(q.game === "genshin" ? 2250 : 20);q.signal.throwIfAborted();return record(q.game,q.source); }
+    try {
+      if (parallel && reads.length === 1 && q.game === "genshin") {
+        // Hold one initial identity until the other game reaches an actual business read.
+        await Promise.race([peerRosterStarted, sleep(8000)]);
+      }
+      if (parallel && q.game === "zzz" && q.source === "page:roster" && reads.filter(([g,s]) => g === "zzz" && s === "page:roster").length === 1) {
+        assert.deepEqual(recorder.gameStates(), { genshin: "CHECKING_IDENTITY", zzz: "COLLECTING" });
+        releaseIdentity();
+      }
+      await sleep(q.game === "genshin" ? 2250 : 20);
+      q.signal.throwIfAborted();
+      return record(q.game, q.source);
+    }
     finally {active.delete(q.game);completions.push(q.game);}
   } });
   const task=host.startTask({python,cwd:root,...(parallelGames === undefined ? {} : {parallelGames}),runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
@@ -52,6 +65,7 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
     assert.equal(result.events.filter(x=>x==="COMMIT_STATE=COMMITTED").length,2);
     assert.ok(result.events.includes("TASK_STATUS=PASS"));
     assert.ok(result.events.some(x=>x.startsWith("CLIENT_TIMING=")));
+    assert.deepEqual(result.gameStates, { genshin: "COMPLETED", zzz: "COMPLETED" });
     assert.equal(released,true);
     assert.equal(JSON.parse(await readFile(join(logs,"result.json"),"utf8")).code,0);
     await assert.rejects(readFile(join(temp,"results","snapshot.json")),{code:"ENOENT"});
@@ -74,6 +88,7 @@ test("cancelling an overlapped worker aborts both sources and discards late repl
     await pumping;
     const result=await task.completion;
     assert.equal(result.code,1);
+    assert.deepEqual(result.gameStates, { genshin: "CANCELLED", zzz: "CANCELLED" });
     assert.ok(calls.every(q=>q.signal.aborted));
     release.forEach(fn=>fn());
     await sleep(20);

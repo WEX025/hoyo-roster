@@ -10,7 +10,7 @@ AI 在当前客户端的 JavaScript 运行时导入 src/hoyo_roster/client_runti
 
 先安装当前 Python 包，核对与所选源码一致，再调用 host.startTask，传 python、cwd、operation（sync/discover/login）、game（默认 all），可选 storageRoot、runtimeRoot、uid。宿主以参数数组启动 Python 私有工作进程，不使用 shell；协议不出现在可见终端。
 
-默认在同一任务交叠两游戏；`parallelGames: false`（CLI 为 `--no-parallel-games`）用于串行兼容/对照。会话锁和浏览器占用仍唯一，各游戏来源内部串行；最多两条不同游戏请求在途。私有管道按递增请求 ID 接收、按对应 ID 返回，回复可乱序。控制/登录请求保持排他，页面身份读源可附带 recheck=true 和当前 generation，要求在同一会话刷新该游戏。只有该复核仍报告认证失效时才收拢两游戏读源，统一登录和核验，启动阶段回到原调度模式，采集中途则串行重做未提交游戏。共享两秒来源间隔同时由 Python 调度和并发宿主实际启动端约束。
+默认在同一任务交叠两游戏；`parallelGames: false`（CLI 为 `--no-parallel-games`）用于串行兼容/对照。会话锁和浏览器占用仍唯一，各游戏来源内部串行；最多两条不同游戏请求在途。私有管道按递增请求 ID 接收、按对应 ID 返回，回复可乱序。控制/登录请求保持排他，页面身份读源可附带 recheck=true 和当前 generation，要求在同一会话刷新该游戏。只有该复核仍报告认证失效时才收拢两游戏读源，统一登录和核验，恢复原调度模式，各自重做未提交的两轮。共享两秒来源间隔同时由 Python 调度和并发宿主实际启动端约束。
 
 ## 分层与历史代码迁移
 

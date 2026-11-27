@@ -75,7 +75,6 @@ class SessionService:
         self._recovery_failed = False
         self._checks = {}
         self._lock = None
-        self.readiness = None
         self.parallel = False
         self._collection_login = False
 
@@ -111,10 +110,13 @@ class SessionService:
                 return await check()
             except AuthenticationRequired:
                 return await self.ensure_authenticated(
-                    version, probe=probe or check, verify_current=check
+                    version,
+                    probe=probe or check,
+                    verify_current=check,
+                    allow_login=not (self.parallel and version > 0),
                 )
         except (OperationError, WorkspaceError) as error:
-            if self.readiness is not None and self.version:
+            if self.parallel and self.version:
                 error.stop_account = True
             raise
 

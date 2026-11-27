@@ -99,10 +99,11 @@ def normalize(raw, *, stored=False):
     return normalize(result, stored=True)
 
 
-async def run(args, session):
+async def run(args, session, progress):
     return await run_page_game(
         args,
         session,
+        progress=progress,
         game="genshin",
         batch_size=4,
         normalize=normalize,

@@ -32,10 +32,11 @@ def normalize(raw, *, stored=False):
     return result
 
 
-async def run(args, session):
+async def run(args, session, progress):
     return await run_page_game(
         args,
         session,
+        progress=progress,
         game="zzz",
         batch_size=1,
         normalize=normalize,

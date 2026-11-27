@@ -10,9 +10,51 @@ import sys
 from .collection_environment import prepare, inventory
 from .collection_state import RunStore, TERMINAL, utc
 from .errors import WorkspaceError
+from .progress import GameProgress
 from .paths import default_private_root, verified_repository, project_repository
 from .storage.common import load_metadata
 from .user_workspace import private_directory
+
+
+def game_states(value):
+    """Latest observed states; only checkpoints prove data survived a stopped worker."""
+    attempt = value["attempts"][-1] if value["attempts"] else {}
+    states = {}
+    for game in ("genshin", "zzz"):
+        state = attempt.get("game_states", {}).get(game, "PENDING")
+        saved = value["completed"].get(game)
+        if (
+            state in GameProgress.unfinished
+            and saved
+            and saved["verified_attempt"] == attempt.get("number")
+        ):
+            state = "COMPLETED"
+        elif state in GameProgress.unfinished and (
+            attempt.get("closed_at") or value["state"] in TERMINAL
+        ):
+            state = "CANCELLED" if value["state"] == "CANCELLED" else "INTERRUPTED"
+        states[game] = state
+    return states
+
+
+def record_game_states(attempt, states):
+    if states is None:  # Older workers did not report per-game states.
+        return
+    allowed = GameProgress.unfinished | {
+        "COMPLETED",
+        "VERIFIED",
+        "NO_ROLES",
+        "FAILED",
+        "CANCELLED",
+        "INTERRUPTED",
+    }
+    if (
+        not isinstance(states, dict)
+        or set(states) != {"genshin", "zzz"}
+        or any(not isinstance(state, str) or state not in allowed for state in states.values())
+    ):
+        raise WorkspaceError("WORKFLOW_STATE_INVALID")
+    attempt["game_states"] = states
 
 
 def public(value):
@@ -37,6 +79,7 @@ def public(value):
         "question": value["question"],
         "attempts": len(value["attempts"]),
         "completedGames": sorted(value["completed"]),
+        "gameStates": game_states(value),
     }
 
 
@@ -152,6 +195,7 @@ def dispatch(request):
                 if current["state"] != target:
                     store.phase(current, target)
                 current["question"] = question
+                record_game_states(current["attempts"][-1], request.get("gameStates"))
         elif action == "finish":
             if value["state"] not in {"COLLECTING", "WAITING_LOGIN"}:
                 raise WorkspaceError("WORKFLOW_TRANSITION_INVALID")
@@ -176,6 +220,7 @@ def dispatch(request):
                     worker_pid=None,
                     outcome="PASS" if result["code"] == 0 else "FAIL",
                 )
+                record_game_states(current["attempts"][-1], result.get("gameStates"))
                 if result["code"] == 0 and result["errorCode"] is None:
                     store.phase(current, "VERIFYING")
                 else:
@@ -229,6 +274,7 @@ def dispatch(request):
                 store.owned(current, request["token"])
                 if current["state"] not in TERMINAL:
                     if current["attempts"] and current["attempts"][-1]["closed_at"] is None:
+                        record_game_states(current["attempts"][-1], request.get("gameStates"))
                         current["attempts"][-1].update(
                             closed_at=utc(), worker_pid=None, outcome="FAIL"
                         )

@@ -342,6 +342,8 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       }
       started = true;
       const events = [];
+      const games = operation === "login" || game === "hsr" ? [] : game === "all" ? ["genshin", "zzz"] : [game];
+      const gameStates = Object.fromEntries(games.map(g => [g, "PENDING"]));
       const requests = [];
       let exitCode = null;
       let errorCode = null;
@@ -383,6 +385,8 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         let message;
         try { message = JSON.parse(line); } catch { stop("CLIENT_PROTOCOL_ERROR"); return; }
         if (message?.event === "report" && Object.keys(message).sort().join(",") === "event,line" && typeof message.line === "string") {
+          const state = /^GAME_STATE=(genshin|zzz):(CHECKING_IDENTITY|COLLECTING|WAITING_LOGIN|COMPLETED|VERIFIED|NO_ROLES|FAILED|CANCELLED)$/.exec(message.line);
+          if (state && Object.hasOwn(gameStates, state[1])) gameStates[state[1]] = state[2];
           if (events.length < 2048) events.push(message.line);
         } else if (message?.event === "end" && Object.keys(message).sort().join(",") === "code,event" &&
                    Number.isInteger(message.code) && message.code >= 0 && message.code <= 255 && !requests.length && !active) {
@@ -429,11 +433,16 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         exitCode = errorCode ? 1 : code;
         wakeQueue();
         BROWSER_TASKS.delete(browser);
-        resolve({ code: exitCode, errorCode, events: [...events] });
+        for (const g of games) {
+          if (["PENDING", "CHECKING_IDENTITY", "COLLECTING", "WAITING_LOGIN"].includes(gameStates[g])) {
+            gameStates[g] = errorCode === "LOGIN_CANCELLED" ? "CANCELLED" : "INTERRUPTED";
+          }
+        }
+        resolve({ code: exitCode, errorCode, gameStates: { ...gameStates }, events: [...events] });
       }));
       const status = () => ({ done: exitCode !== null, code: exitCode, errorCode,
         question: host.pendingQuestion(), pendingRequests: requests.length,
-        parallelGames: concurrentGames, inFlight: inFlight.size, events: [...events] });
+        gameStates: { ...gameStates }, parallelGames: concurrentGames, inFlight: inFlight.size, events: [...events] });
       return {
         status,
         async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0 } = {}) {

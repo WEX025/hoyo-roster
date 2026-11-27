@@ -181,7 +181,7 @@ class PageSnapshotStore:
         return True
 
 
-async def run_page_game(args, session, *, game, source, normalize, batch_size):
+async def run_page_game(args, session, *, progress, game, source, normalize, batch_size):
     game_started = time.monotonic()
     print(f"PAGE_GAME_BEGIN={game}", flush=True)
 
@@ -202,8 +202,6 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
         checkpoint.pin(game, role)
     if args.uid is not None and args.uid != role.uid:
         raise WrongAccount()
-    if session.readiness is not None:
-        await session.readiness.wait(game)
     if args.operation == "discover":
         return GameResult(game, "PASS", (RoleResult(role, "VERIFIED"),))
 
@@ -263,6 +261,8 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                     ),
                 ),
             )
+
+        progress.update("COLLECTING")
 
         async def read_passes():
             print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)

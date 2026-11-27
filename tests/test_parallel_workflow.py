@@ -72,7 +72,20 @@ def test_parallel_recovery_quiesces_peers_and_rechecks_pinned_identities(tmp_pat
         assert not snapshots(tmp_path)
     else:
         assert len(snapshots(tmp_path)) == 2
-        assert "COLLECTION_MODE=SERIAL_RECOVERY" in capsys.readouterr().out.splitlines()
+        output = capsys.readouterr().out.splitlines()
+        assert "COLLECTION_MODE=SERIAL_RECOVERY" not in output
+        for game in ("genshin", "zzz"):
+            states = [
+                line.split(":")[1] for line in output if line.startswith(f"GAME_STATE={game}:")
+            ]
+            assert states == [
+                "CHECKING_IDENTITY",
+                "COLLECTING",
+                "WAITING_LOGIN",
+                "CHECKING_IDENTITY",
+                "COLLECTING",
+                "COMPLETED",
+            ]
         # Both interrupted, uncommitted game observations are read again.
         assert port.counts["genshin", "page:roster"] >= 2
         assert port.counts["zzz", "page:roster"] >= 3
@@ -144,34 +157,70 @@ def test_initial_login_precedes_both_double_passes_and_preserves_parallelism(tmp
         c["params"].get("source", "page:identity") == "page:identity" for c in port.calls[:confirm]
     )
     after = [c["params"] for c in port.calls[confirm:] if c["method"] == "source.read"]
-    first_roster = next(i for i, c in enumerate(after) if c["source"] == "page:roster")
-    assert {c["game"] for c in after[:first_roster]} == {"genshin", "zzz"}
+    for game in ("genshin", "zzz"):
+        sources = [c["source"] for c in after if c["game"] == game]
+        assert sources[0] == "page:identity"
+        assert sources.count("page:roster") == 2
     assert sum(c["source"] == "page:roster" for c in reads) == 4
 
 
-def test_repeated_startup_auth_failure_stops_before_business_reads(tmp_path):
+def test_repeated_startup_auth_failure_stops_unverified_game(tmp_path):
     port = ConcurrentPort()
     for n in (1, 3):
         port.expire_at.add(("zzz", "page:identity", n))
     assert cli.main(arguments(tmp_path), client=port.client()) == 1
     assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
-    assert not any(source == "page:roster" for _, source in port.counts)
+    assert port.counts["zzz", "page:roster"] == 0
 
 
-def test_startup_login_requires_successful_fresh_identity_before_either_game_collects(tmp_path):
+def test_startup_login_requires_fresh_identity_before_that_game_collects(tmp_path):
     port = ConcurrentPort()
     port.expire_at.add(("zzz", "page:identity", 1))
     port.fail_at["zzz", "page:identity", 3] = "SOURCE_DATA_INVALID"
     assert cli.main(arguments(tmp_path), client=port.client()) == 1
-    assert not any(source == "page:roster" for _, source in port.counts)
+    assert port.counts["zzz", "page:roster"] == 0
 
 
-def test_game_local_startup_failure_releases_healthy_peer(tmp_path):
+@pytest.mark.parametrize(("slow", "fast"), [("genshin", "zzz"), ("zzz", "genshin")])
+def test_fast_game_commits_before_peer_finishes_first_identity(tmp_path, slow, fast, capsys):
+    class DelayedIdentity(ConcurrentPort):
+        async def exchange(self, message):
+            params = message["params"]
+            if (
+                params.get("game") == slow
+                and params.get("source") == "page:identity"
+                and not self.counts[slow, "page:identity"]
+            ):
+                async with asyncio.timeout(2):
+                    while not snapshots(tmp_path):
+                        await asyncio.sleep(0.001)
+                assert json.loads(snapshots(tmp_path)[0].read_text())["game"] == fast
+                assert self.counts[fast, "page:roster"] == self.counts[fast, "page:detail"] == 2
+            return await super().exchange(message)
+
+    assert cli.main(arguments(tmp_path), client=DelayedIdentity().client()) == 0
+    events = capsys.readouterr().out.splitlines()
+    assert events.index(f"GAME_STATE={fast}:COMPLETED") < events.index(
+        f"GAME_STATE={slow}:COLLECTING"
+    )
+    for game in (fast, slow):
+        assert [e.split(":")[1] for e in events if e.startswith(f"GAME_STATE={game}:")] == [
+            "CHECKING_IDENTITY",
+            "COLLECTING",
+            "COMPLETED",
+        ]
+
+
+def test_game_local_startup_failure_leaves_healthy_peer_running(tmp_path, capsys):
     port = ConcurrentPort()
     port.fail_at["zzz", "page:identity", 1] = "SOURCE_DATA_INVALID"
     assert cli.main(arguments(tmp_path), client=port.client()) == 1
     assert port.counts["genshin", "page:roster"] == 2
     assert len(snapshots(tmp_path)) == 1
+    events = capsys.readouterr().out.splitlines()
+    assert "GAME_STATE=zzz:FAILED" in events
+    assert "GAME_STATE=zzz:COLLECTING" not in events
+    assert events.count("GAME_STATE=genshin:COMPLETED") == 1
 
 
 def test_completed_game_is_preserved_when_peer_needs_recovery(tmp_path):

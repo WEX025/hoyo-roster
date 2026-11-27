@@ -51,6 +51,7 @@ export function createWorkflowDriver({ directory, control, startSession, initial
   const view = () => ({ ...data.status,
     nextAction: data.status.state === "WAITING_BROWSER" && browser ? "CONTINUE" : data.status.nextAction,
     progress,
+    gameStates: session?.gameStates?.() ?? data.status.gameStates,
     ...(data.status.state === "SUCCEEDED" ? { report: { json: join(directory, "report/summary.json"), markdown: join(directory, "report/summary.md") } } : {}) });
   const call = async (action, extra = {}) => { data = await control(action, extra); return data; };
   async function advance(attachedBrowser, { launchMs = 180000 } = {}) {
@@ -76,17 +77,17 @@ export function createWorkflowDriver({ directory, control, startSession, initial
           if (!session) throw failure("WORKFLOW_RECONNECT_REQUIRED");
           const state = await session.advance({ launchMs });
           progress = state.progress ?? [];
-          if (cancelling) { await call("cancel"); return view(); }
+          if (cancelling) { await call("cancel", { gameStates: session?.gameStates?.() }); return view(); }
           if (state.done) await call("finish");
-          else await call("observe", { attempt: state.question?.attempt ?? null });
+          else await call("observe", { attempt: state.question?.attempt ?? null, gameStates: session.gameStates?.() });
         }
-        if (cancelling) { await call("cancel"); return view(); }
+        if (cancelling) { await call("cancel", { gameStates: session?.gameStates?.() }); return view(); }
         if (data.status.state === "VERIFYING") await call("verify");
         if (data.status.state === "REPORTING") await call("report");
         return view();
       } catch (error) {
         if (session) { try { await session.cancel(); } catch { /* Preserve original failure. */ } }
-        try { await call(cancelling ? "cancel" : "fail", { error: safeCode(error) }); }
+        try { await call(cancelling ? "cancel" : "fail", { error: safeCode(error), gameStates: session?.gameStates?.() }); }
         catch { throw failure("WORKFLOW_CHECKPOINT_WRITE_FAILED"); }
         return view();
       }
@@ -119,7 +120,7 @@ export function createWorkflowDriver({ directory, control, startSession, initial
       try {
         if (session) await session.cancel();
         if (inFlight) await inFlight;
-        await call("cancel");
+        await call("cancel", { gameStates: session?.gameStates?.() });
         return view();
       } finally { cancelling = false; }
     },

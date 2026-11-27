@@ -8,16 +8,19 @@ from .client import ClientSession
 from .errors import OperationError, ClientBrowserRequired
 from .user_workspace import WorkspaceError, direct_configuration
 from .game_runtime import GameResult, stops_account
+from .progress import GameProgress
 
 SUPPORTED_GAMES = ("genshin", "zzz")
 
 
-async def execute_game(args, session, game):
+async def execute_game(args, session, progress):
+    game = progress.game
+    progress.update("CHECKING_IDENTITY")
     module = importlib.import_module("hoyo_roster.games." + game + ".entry")
     try:
-        return await module.run(args, session)
+        result = await module.run(args, session, progress)
     except OperationError as error:
-        return GameResult(
+        result = GameResult(
             game,
             "FAIL",
             error_code=error.code,
@@ -25,38 +28,23 @@ async def execute_game(args, session, game):
             missing_sources=getattr(error, "missing_sources", ()),
         )
     except WorkspaceError as error:
-        return GameResult(
+        result = GameResult(
             game, "FAIL", error_code=str(error), stop_account=stops_account(error, str(error))
         )
+    if result.status == "PASS":
+        state = "VERIFIED" if args.operation == "discover" else "COMPLETED"
+    else:
+        state = "FAILED" if result.failed else "NO_ROLES"
+    progress.update(state)
+    return result
 
 
-class GameReadiness:
-    """Release page collection once each participating game has checked its identity."""
-
-    def __init__(self, games):
-        self.remaining = set(games)
-        self.ready = set()
-        self.open = asyncio.Event()
-
-    def arrive(self, game):
-        self.remaining.discard(game)
-        if not self.remaining and not self.open.is_set():
-            if self.ready:
-                mode = "PARALLEL" if len(self.ready) > 1 else "SERIAL"
-                print(f"COLLECTION_MODE={mode}", flush=True)
-            self.open.set()
-
-    async def wait(self, game):
-        self.ready.add(game)
-        self.arrive(game)
-        await self.open.wait()
-
-
-async def parallel_attempt(args, session, games, completed):
-    readiness = GameReadiness(games)
+async def parallel_attempt(args, session, remaining, completed):
     session.parallel = True
-    session.readiness = readiness
-    tasks = {asyncio.create_task(execute_game(args, session, game)): game for game in games}
+    tasks = {
+        asyncio.create_task(execute_game(args, session, progress)): progress
+        for progress in remaining
+    }
     pending = set(tasks)
     recovery = None
     try:
@@ -64,14 +52,11 @@ async def parallel_attempt(args, session, games, completed):
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 try:
-                    completed[tasks[task]] = task.result()
+                    completed[tasks[task].game] = task.result()
                 except ParallelRecoveryRequired as error:
                     recovery = error
             if any(r.stop_account for r in completed.values()) or recovery is not None:
                 break
-            for task in done:
-                # A game-local capability or identity-read failure releases its peer.
-                readiness.arrive(tasks[task])
     finally:
         for task in pending:
             task.cancel()
@@ -82,35 +67,30 @@ async def parallel_attempt(args, session, games, completed):
                 await drain()
         finally:
             session.parallel = False
-            session.readiness = None
     if recovery is not None and not any(r.stop_account for r in completed.values()):
-        return recovery.version, not readiness.open.is_set()
+        startup = all(progress.state != "COLLECTING" for progress in remaining)
+        for progress in remaining:
+            if progress.game not in completed:
+                progress.update("WAITING_LOGIN")
+        return recovery.version, startup
     return None
 
 
 async def parallel_games(args, session, games):
+    print("COLLECTION_MODE=PARALLEL", flush=True)
     completed = {}
     try:
         while True:
-            remaining = [game for game in games if game not in completed]
+            remaining = [progress for game, progress in games.items() if game not in completed]
             recovery = await parallel_attempt(args, session, remaining, completed)
             if recovery is None:
                 break
             print("PARALLEL_RECOVERY=QUIESCED", flush=True)
             version, startup = recovery
             await session.resume_after_drain(version, startup=startup)
-            if startup:
-                continue
-            print("PARALLEL_MODE=SERIAL_RECOVERY\nCOLLECTION_MODE=SERIAL_RECOVERY", flush=True)
-            for game in games:
-                if game in completed:
-                    continue
-                print(f"PAGE_RESTART={game}", flush=True)
-                result = await execute_game(args, session, game)
-                completed[game] = result
-                if result.stop_account:
-                    break
-            break
+            for progress in remaining:
+                if progress.game not in completed:
+                    print(f"PAGE_RESTART={progress.game}", flush=True)
     except BaseException:
         for result in completed.values():
             result.report(finalized=False)
@@ -151,6 +131,7 @@ async def run_task(args, client=None):
         ):
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
         args._collection_checkpoint = checkpoint
+    progress = {game: GameProgress(game) for game in games}
     results = []
     try:
         async with SessionService(client, args.runtime_root) as session:
@@ -165,11 +146,11 @@ async def run_task(args, client=None):
                 and session.client.page_reader
                 and len(games) > 1
             ):
-                results.extend(await parallel_games(args, session, games))
+                results.extend(await parallel_games(args, session, progress))
             else:
                 print("COLLECTION_MODE=SERIAL", flush=True)
                 for game in games:
-                    result = await execute_game(args, session, game)
+                    result = await execute_game(args, session, progress[game])
                     results.append(result)
                     if result.stop_account:
                         break
@@ -177,6 +158,11 @@ async def run_task(args, client=None):
         for result in results:
             result.report(finalized=False)
         raise
+    finally:
+        if args.operation != "login":
+            for state in progress.values():
+                if state.state in GameProgress.unfinished:
+                    state.update("CANCELLED")
     for result in results:
         result.report()
     success = (

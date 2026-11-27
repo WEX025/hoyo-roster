@@ -11,6 +11,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const execute = promisify(execFile);
 const fixedProgress = events => events.filter(event =>
   /^(?:PAGE_GAME_BEGIN|PAGE_COLLECTION)=(?:genshin|zzz)$/.test(event) ||
+  /^GAME_STATE=(?:genshin|zzz):(?:CHECKING_IDENTITY|COLLECTING|WAITING_LOGIN|COMPLETED|VERIFIED|NO_ROLES|FAILED|CANCELLED)$/.test(event) ||
   /^COLLECTION_MODE=(?:PARALLEL|SERIAL|SERIAL_RECOVERY)$/.test(event) ||
   /^PAGE_SOURCE=(?:genshin|zzz):(?:identity|roster|detail)$/.test(event) ||
   /^PAGE_(?:PASS|DETAILS_DONE)=\d{1,5}$/.test(event) ||
@@ -48,6 +49,7 @@ export async function recordCollection(host, task, directory, version, parallelG
   }
   return {
     host,
+    gameStates: () => task.status().gameStates,
     async advance(options = {}) {
       if (busy) throw new Error("CLIENT_PROTOCOL_ERROR");
       busy = true;
@@ -70,7 +72,7 @@ export async function recordCollection(host, task, directory, version, parallelG
           } });
         if (status.done) await finish();
         return { done: status.done, code: status.code, errorCode: status.errorCode,
-          question: status.question, window, progress: fixedProgress(status.events.slice(previous)).slice(-6) };
+          question: status.question, gameStates: status.gameStates, window, progress: fixedProgress(status.events.slice(previous)).slice(-6) };
       } catch (error) {
         task.cancel();
         try { await finish(); } catch { /* Original failure remains authoritative. */ }

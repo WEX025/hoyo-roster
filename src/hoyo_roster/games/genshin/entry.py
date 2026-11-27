@@ -33,7 +33,7 @@ def owned_roles(data):
     return tuple(sorted(roles, key=lambda role: (role.uid, role.region)))
 
 
-async def run(args, session):
+async def run(args, session, progress):
     if session.client.page_reader:
         from hoyo_roster.page_source import PAGE_SOURCES
         from .page import run as run_page
@@ -45,7 +45,7 @@ async def run(args, session):
                 raise
             pass
         else:
-            return await run_page(args, session)
+            return await run_page(args, session, progress)
     required = (
         (BINDING.name,) if args.operation == "discover" else (BINDING.name, CULTIVATION_LIST.name)
     )
@@ -61,6 +61,7 @@ async def run(args, session):
         args,
         session,
         roles,
+        progress=progress,
         game="genshin",
         candidate_policy=candidate_policy,
         sync=run_sync,
