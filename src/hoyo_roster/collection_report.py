@@ -45,6 +45,7 @@ def make_report(store):
     value = store.read()
     snapshots = validate_completed(store)
     source_ms = overlap_ms = business_overlap_ms = save_ms = source_count = 0
+    interval = value["config"]["cross_game_interval_ms"]
     modes = []
     metrics_complete = True
     for attempt in value["attempts"]:
@@ -69,8 +70,7 @@ def make_report(store):
         if (folder / "result.json").is_file():
             result = load_metadata(folder / "result.json", private=True)
             progress = result["events"]
-            interval = value["config"].get("cross_game_interval_ms", 2000)
-            if result.get("crossGameIntervalMs", 2000) != interval:
+            if result["crossGameIntervalMs"] != interval:
                 raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
             if interval < 2000 and attempt["outcome"] == "PASS":
                 clients = [
@@ -128,7 +128,7 @@ def make_report(store):
         "format": "hoyo-roster-workflow-report-v1",
         "run_id": value["id"],
         "source_sha": value["version"]["source_sha"],
-        "cross_game_interval_ms": value["config"].get("cross_game_interval_ms", 2000),
+        "cross_game_interval_ms": interval,
         "package_digest": value["version"]["package_digest"],
         "started_at": value["created_at"],
         "ended_at": ended_at,

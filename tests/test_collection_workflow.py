@@ -39,9 +39,8 @@ def prepared(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(RequestGate, "reserve", reserve)
-    config = config_options({"runtimeRoot": str(tmp_path / "runtime")})
-    # This fixture replays a checkpoint from before the interval was persisted.
-    del config["cross_game_interval_ms"]
+    # The synthetic Python port has no host timing events.
+    config = config_options({"runtimeRoot": str(tmp_path / "runtime"), "crossGameIntervalMs": 2000})
     store = RunStore.create(
         tmp_path / "run", config, {"pid": io.launch_parent_pid(), "token": "synthetic"}
     )
@@ -118,7 +117,12 @@ def test_automatic_validation_and_report_require_actual_commits(prepared, capsys
         io.set_private(log, 0o600)
     atomic_write_metadata(
         prepared.root / "attempts/0001/result.json",
-        {"code": 0, "errorCode": None, "events": events},
+        {
+            "code": 0,
+            "errorCode": None,
+            "crossGameIntervalMs": value["config"]["cross_game_interval_ms"],
+            "events": events,
+        },
     )
     for action, expected in [
         ("finish", "VERIFYING"),
@@ -133,6 +137,7 @@ def test_automatic_validation_and_report_require_actual_commits(prepared, capsys
     summary = json.loads((prepared.root / "report/summary.json").read_text())
     assert len(summary["games"]) == 2
     assert summary["collection_modes"] == ["PARALLEL"]
+    assert summary["cross_game_interval_ms"] == 2000
     assert summary["login_wait_seconds"] == 0
     assert summary["save_seconds_recorded"] > 0
     assert summary["metrics_complete"] == record_metrics

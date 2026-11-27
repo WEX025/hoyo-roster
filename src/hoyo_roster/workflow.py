@@ -130,7 +130,7 @@ async def run_task(args, client=None):
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
         checkpoint = CollectionCheckpoint(args.collection_run)
         config = checkpoint.store.read()["config"]
-        saved_interval = config.get("cross_game_interval_ms", 2000)
+        saved_interval = config["cross_game_interval_ms"]
         if (
             args.storage_root != checkpoint.store.root / "results"
             or str(args.runtime_root) != config["runtime_root"]

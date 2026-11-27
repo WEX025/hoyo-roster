@@ -188,7 +188,7 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
     const host = createRosterHost(browser);
     const task = host.startTask({ python: data.config.python, cwd: data.config.repository ?? moduleDirectory,
       game: "all", operation: "sync", parallelGames: data.config.parallel_games,
-      crossGameIntervalMs: data.config.cross_game_interval_ms ?? 2000,
+      crossGameIntervalMs: data.config.cross_game_interval_ms,
       storageRoot: join(directory, "results"), runtimeRoot: data.config.runtime_root, collectionRun: directory, onCharacters });
     return recordCollection(host, task, join(directory, "attempts", String(data.attempt).padStart(4, "0")),
       data.version, data.config.parallel_games);

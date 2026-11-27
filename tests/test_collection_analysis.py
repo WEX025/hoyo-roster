@@ -44,6 +44,7 @@ def run_dir(tmp_path, monkeypatch, capsys):
         "events": events,
         "source_sha": "synthetic",
         "parallelGames": True,
+        "crossGameIntervalMs": 2000,
         "started_at": "2026-01-01T00:00:00Z",
         "closed_at": "2026-01-01T00:00:10Z",
     }

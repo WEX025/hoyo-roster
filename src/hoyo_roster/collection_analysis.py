@@ -100,7 +100,7 @@ def read_run(directory: Path):
     intervals = [b - a for a, b in zip(starts, starts[1:])]
     # This host-side gate exists in parallel mode. Serial mode uses Python's gate.
     if run["parallelGames"]:
-        validate_start_intervals(clients, run.get("crossGameIntervalMs", 2000))
+        validate_start_intervals(clients, run["crossGameIntervalMs"])
     windows, gaps, previous = {}, [], None
     for row in records:
         if row["kind"] == "window_begin":

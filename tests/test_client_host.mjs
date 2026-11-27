@@ -426,7 +426,9 @@ test("a window shorter than the shared gate waits without polling or starting an
     assert.ok(steps <= 2, `unexpected empty pump count: ${steps}`);
     assert.equal(starts.length, 1);
     await pumpUntil(task, () => task.status().done);
-    assert.equal((await task.completion).code, 0);
+    const result = await task.completion;
+    assert.equal(result.code, 0);
+    assert.equal(result.crossGameIntervalMs, 2000);
     assert.equal(starts.length, 2);
     assert.ok(starts[1] - starts[0] >= 1995);
   } finally {

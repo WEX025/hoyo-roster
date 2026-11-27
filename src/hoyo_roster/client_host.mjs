@@ -475,7 +475,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             gameStates[g] = errorCode === "LOGIN_CANCELLED" ? "CANCELLED" : "INTERRUPTED";
           }
         }
-        resolve({ code: exitCode, errorCode, ...(crossGameIntervalMs < 2000 ? { crossGameIntervalMs } : {}), gameStates: { ...gameStates }, events: [...events] });
+        resolve({ code: exitCode, errorCode, crossGameIntervalMs, gameStates: { ...gameStates }, events: [...events] });
       }));
       const status = () => ({ done: exitCode !== null, code: exitCode, errorCode,
         question: host.pendingQuestion(), pendingRequests: requests.length,
