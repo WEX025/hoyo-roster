@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from functools import partial
 
 from hoyo_roster.blocking import run_blocking
-from hoyo_roster.errors import AuthenticationRequired, WrongAccount
+from hoyo_roster.errors import WrongAccount
 from hoyo_roster.progress import emit
 from hoyo_roster.sync import OperationResult, publish_snapshot
 from .source import OfficialCollector
@@ -65,12 +65,6 @@ async def _run_sync_once(args, *, snapshot_store, session):
 
 
 async def run_sync(args, *, snapshot_store, session):
-    for attempt in range(2):
-        try:
-            return await _run_sync_once(args, snapshot_store=snapshot_store, session=session)
-        except AuthenticationRequired:
-            if attempt:
-                raise
-            print("AUTH_RECOVERY=RESTART_CURRENT_GAME", flush=True)
-            await session.recover()
-    raise AssertionError("unreachable")
+    return await session.collect(
+        "genshin", partial(_run_sync_once, args, snapshot_store=snapshot_store, session=session)
+    )

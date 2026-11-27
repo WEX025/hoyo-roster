@@ -88,12 +88,15 @@ test("startup authentication drains the stale page action before login and resum
   const page = { id: "login", markHandoff: async () => assert.ok(peerDrained) };
   const tabs = { list: async () => [{ id: page.id, url: "https://act.mihoyo.com/ys/event/calculator/index.html" }],
     get: async () => page, new: async () => { throw Error("unexpected new login tab"); } };
-  let firstGame;
+  let firstGame, probes = 0;
   const business = [];
   const host = createClientHost({ tabs }, { pageReader: true, readSource: query => sourceStep(query, async q => {
     if (!q.generation) {
       assert.equal(q.source, "page:identity");
-      if (firstGame) throw sourceFailure("AUTHENTICATION_REQUIRED");
+      if (firstGame) {
+        if (q.recheck) probes++;
+        throw sourceFailure("AUTHENTICATION_REQUIRED");
+      }
       firstGame = q.game;
       try {
         await new Promise(resolve => q.signal.addEventListener("abort", resolve, { once: true }));
@@ -124,6 +127,7 @@ test("startup authentication drains the stale page action before login and resum
     const result = await task.completion;
     assert.equal(result.code, 0, result.events.join("\n"));
     assert.equal(confirmations, 1);
+    assert.equal(probes, 1);
     assert.ok(result.events.includes("COLLECTION_MODE=PARALLEL"));
     assert.ok(!result.events.includes("COLLECTION_MODE=SERIAL_RECOVERY"));
     for (const game of ["genshin", "zzz"]) {
@@ -132,6 +136,38 @@ test("startup authentication drains the stale page action before login and resum
       }
     }
     assert.ok(business.some((a, i) => business.slice(i + 1).some(b => a.game !== b.game && b.start < a.end)));
+  } finally {
+    if (!task.status().done) { task.cancel(); await task.completion; }
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("a transient identity failure refreshes only its own game while its peer completes", {timeout:20000}, async () => {
+  const temp = await realpath(await mkdtemp(join(tmpdir(), "hoyo-local-login-")));
+  let peer, peerFinished = false, probes = 0;
+  const host = createClientHost(browser(), { pageReader: true, readSource: async q => {
+    assert.equal(q.generation, 0);
+    assert.equal(q.source, "page:identity");
+    if (!peer) {
+      peer = q.game;
+      await sleep(5500);
+      q.signal.throwIfAborted();
+      peerFinished = true;
+    } else {
+      assert.notEqual(q.game, peer);
+      if (!q.recheck) throw sourceFailure("AUTHENTICATION_REQUIRED");
+      probes++;
+    }
+    return record(q.game, q.source);
+  }});
+  const task = host.startTask({ python, cwd: root, operation: "discover", runtimeRoot: join(temp, "runtime") });
+  try {
+    while (!task.status().done) assert.equal((await pumpWindow(task)).question, null);
+    const result = await task.completion;
+    assert.equal(result.code, 0, result.events.join("\n"));
+    assert.ok(peerFinished);
+    assert.equal(probes, 1);
+    assert.ok(!result.events.some(event => event === "PARALLEL_RECOVERY=QUIESCED"));
   } finally {
     if (!task.status().done) { task.cancel(); await task.completion; }
     await rm(temp, { recursive: true, force: true });

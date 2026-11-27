@@ -1,6 +1,6 @@
 """genshin owns session checks, official identities, collection and saving."""
 
-from hoyo_roster.errors import AuthenticationRequired, WrongAccount, ClientSourceUnavailable
+from hoyo_roster.errors import WrongAccount, ClientSourceUnavailable
 from hoyo_roster.models import OwnedRole
 from hoyo_roster.game_runtime import execute_roles
 from .candidate import candidate_policy
@@ -55,10 +55,7 @@ async def run(args, session):
     async def check():
         return owned_roles(await collector.binding())
 
-    try:
-        roles = await check()
-    except AuthenticationRequired:
-        roles = await session.recover(verify_current=check)
+    roles = await session.identity(check)
     session.pin("genshin", roles, check)
     return await execute_roles(
         args,

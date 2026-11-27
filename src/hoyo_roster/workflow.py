@@ -5,8 +5,7 @@ import importlib
 
 from .auth import SessionService, ParallelRecoveryRequired
 from .client import ClientSession
-from .errors import AuthenticationRecoveryFailed, OperationError, ClientBrowserRequired
-from .login import login
+from .errors import OperationError, ClientBrowserRequired
 from .user_workspace import WorkspaceError, direct_configuration
 from .game_runtime import GameResult, stops_account
 
@@ -59,16 +58,16 @@ async def parallel_attempt(args, session, games, completed):
     session.readiness = readiness
     tasks = {asyncio.create_task(execute_game(args, session, game)): game for game in games}
     pending = set(tasks)
-    recovery = False
+    recovery = None
     try:
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 try:
                     completed[tasks[task]] = task.result()
-                except ParallelRecoveryRequired:
-                    recovery = True
-            if any(r.stop_account for r in completed.values()) or recovery:
+                except ParallelRecoveryRequired as error:
+                    recovery = error
+            if any(r.stop_account for r in completed.values()) or recovery is not None:
                 break
             for task in done:
                 # A game-local capability or identity-read failure releases its peer.
@@ -84,14 +83,13 @@ async def parallel_attempt(args, session, games, completed):
         finally:
             session.parallel = False
             session.readiness = None
-    if recovery and not any(r.stop_account for r in completed.values()):
-        return "COLLECTING" if readiness.open.is_set() else "STARTUP"
+    if recovery is not None and not any(r.stop_account for r in completed.values()):
+        return recovery.version, not readiness.open.is_set()
     return None
 
 
 async def parallel_games(args, session, games):
     completed = {}
-    logged_in_at_start = False
     try:
         while True:
             remaining = [game for game in games if game not in completed]
@@ -99,14 +97,11 @@ async def parallel_games(args, session, games):
             if recovery is None:
                 break
             print("PARALLEL_RECOVERY=QUIESCED", flush=True)
-            if recovery == "STARTUP" and logged_in_at_start:
-                raise AuthenticationRecoveryFailed()
-            await session.recover()
-            if recovery == "STARTUP":
-                logged_in_at_start = True
+            version, startup = recovery
+            await session.resume_after_drain(version, startup=startup)
+            if startup:
                 continue
             print("PARALLEL_MODE=SERIAL_RECOVERY\nCOLLECTION_MODE=SERIAL_RECOVERY", flush=True)
-            session.parallel_recovered = True
             for game in games:
                 if game in completed:
                     continue
@@ -162,7 +157,7 @@ async def run_task(args, client=None):
             if getattr(args, "_collection_checkpoint", None) is not None and not client.page_reader:
                 raise WorkspaceError("WORKFLOW_PAGE_READER_REQUIRED")
             if args.operation == "login":
-                await login(client)
+                await session.recover()
                 print("LOGIN_STATUS=USER_CONFIRMED", flush=True)
                 return 0
             if (

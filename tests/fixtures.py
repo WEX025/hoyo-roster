@@ -55,10 +55,19 @@ class FakePort:
         self.counts = Counter()
         self.answers = ["completed"]
         self.fail_at = {}
+        self.expire_at = set()
+        self.generation = 0
         self.drift = False
         self.empty_games = set()
         self.uid = UID_A
         self.login_changes_account = False
+
+    def source_error(self, game, source):
+        self.counts[game, source] += 1
+        key = game, source, self.counts[game, source]
+        if key in self.expire_at:
+            self.authenticated = False
+        return self.fail_at.get(key) if self.authenticated else "AUTHENTICATION_REQUIRED"
 
     def client(self):
         return ClientSession(self)
@@ -78,10 +87,7 @@ class FakePort:
             result = {"available": [name for name in params["sources"] if name in available]}
         elif method == "service.prepare":
             game, source = params["game"], "cultivate:badge-login"
-            self.counts[(game, source)] += 1
-            error = self.fail_at.get((game, source, self.counts[(game, source)]))
-            if not self.authenticated:
-                error = "AUTHENTICATION_REQUIRED"
+            error = self.source_error(game, source)
             if error is None:
                 result = {"ready": True, "origin": self.origin(game, source)}
         elif method == "login.open":
@@ -90,15 +96,12 @@ class FakePort:
             result = self.answers.pop(0) if self.answers else "completed"
             if result == "completed":
                 self.authenticated = True
+                self.generation += 1
                 if self.login_changes_account:
                     self.uid = UID_B
         elif method == "source.read":
             game, source = params["game"], params["source"]
-            self.counts[(game, source)] += 1
-            number = self.counts[(game, source)]
-            error = self.fail_at.get((game, source, number))
-            if not self.authenticated:
-                error = "AUTHENTICATION_REQUIRED"
+            error = self.source_error(game, source)
             if error is None:
                 payload, evidence = self.source(game, source, params["params"], params["body"])
                 result = {

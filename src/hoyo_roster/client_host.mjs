@@ -143,6 +143,12 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         ...(pageReader ? { page_reader: true } : {}) };
     }
     if (!attached) throw failure("CLIENT_PROTOCOL_ERROR");
+    if (["service.prepare", "source.read"].includes(method) && Object.hasOwn(params, "generation")) {
+      if (!Number.isSafeInteger(params.generation) || params.generation < 0 || params.generation > generation) {
+        throw failure("CLIENT_PROTOCOL_ERROR");
+      }
+      if (params.generation < generation) throw failure("AUTHENTICATION_REQUIRED");
+    }
     if (method === "source.check") {
       if (Object.keys(params).sort().join(",") !== "game,sources" || !Object.hasOwn(SOURCES, params.game) ||
           !Array.isArray(params.sources) || !params.sources.length ||
@@ -164,7 +170,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
     if (method === "service.prepare") {
       const source = services.get(params.game+"\0"+params.service);
       if (!source ||
-          Object.keys(params).sort().join(",") !== "game,params,service") throw failure("CLIENT_PROTOCOL_ERROR");
+          Object.keys(params).filter(key => key !== "generation").sort().join(",") !== "game,params,service") throw failure("CLIENT_PROTOCOL_ERROR");
       if (prepareService === null) throw failure("SOURCE_ADAPTER_MISSING");
       if (!supported[params.game].has(source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
       const result = await invoke(() => prepareService({ browser, signal: lifetime.signal,
@@ -215,16 +221,20 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       if (serviceOnly.has(params.game+"\0"+params.source)) throw failure("CLIENT_PROTOCOL_ERROR");
       if (readSource === null) throw failure("SOURCE_ADAPTER_MISSING");
       if (!supported[params.game].has(params.source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
-      const sharedPage = concurrentGames && pageReader && params.source.startsWith("page:");
+      const pageSource = pageReader && params.source.startsWith("page:");
+      const recheck = Object.hasOwn(params, "recheck");
+      if (recheck && (!pageSource || params.source !== "page:identity" || params.recheck !== true ||
+          params.generation !== generation)) throw failure("CLIENT_PROTOCOL_ERROR");
+      const sharedPage = concurrentGames && pageSource;
       const signal = sharedPage ? AbortSignal.any([lifetime.signal, pageReads.signal]) : lifetime.signal;
       signal.throwIfAborted();
       let result;
       try {
         result = await invoke(() => readSource({ browser, signal, lifetimeSignal: lifetime.signal,
-          game: params.game, source: params.source, params: params.params, body: params.body, generation }));
+          game: params.game, source: params.source, params: params.params, body: params.body, generation, recheck }));
         signal.throwIfAborted();
       } catch (error) {
-        if (sharedPage && error.code === "AUTHENTICATION_REQUIRED") pageReads.abort(error);
+        if (sharedPage && recheck && error.code === "AUTHENTICATION_REQUIRED") pageReads.abort(error);
         throw error;
       }
       if (!result || typeof result.json !== "string" ||

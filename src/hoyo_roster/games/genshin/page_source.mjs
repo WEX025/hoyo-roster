@@ -44,7 +44,7 @@ export function createGenshinPageSource(ui) {
       }))), rows => rows.length > 0 && rows.every(r => r.name && /^Lv\.[1-9][0-9]*$/.test(r.level ?? "")), { stable: true }));
     return { rows, role, tab };
   }
-  async function read({ source, params, body, signal, generation }) {
+  async function read({ source, params, body, signal, generation, recheck = false }) {
     if (body !== null || !params || typeof params !== "object" || Array.isArray(params)) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     let tab = await ui.page(PAGE, signal);
     if (source === "page:identity") {
@@ -52,7 +52,7 @@ export function createGenshinPageSource(ui) {
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Another game tab may have completed shared login while this SPA still
       // renders its anonymous catalog. Re-read the official page in this session.
-      if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+      if (recheck || identityContext?.tab !== tab || identityContext.generation !== generation) {
         tab = await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("genshin.identity", signal, () => identity(tab, signal));
@@ -209,7 +209,7 @@ export function createGenshinPageSource(ui) {
       })), values => values.length === expected.length && values.every(v => v.synced && expected.includes(v.name)), { stable: true }));
     return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: [...details, ...unavailable] }, generation);
   }
-  return Object.freeze({ read: async query => {
+  return Object.freeze({ url: PAGE, read: async query => {
     try { return await read(query); }
     catch (error) { prepared = null; identityContext = null; throw error; }
   }, available: async ({ signal }) => await ui.available(PAGE, signal) ? [...sourceNames] : [] });

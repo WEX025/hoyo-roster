@@ -84,6 +84,32 @@ test("Login confirmation retains the same page and performs no data reads", asyn
   assert.ok(fixture.events.every(([event]) => event === "retain"));
 });
 
+test("old generations never start another source and only a current identity read can confirm expiry", async () => {
+  const fixture = browserFixture(), reads = [];
+  const host = createClientHost(fixture.browser, { pageReader: true, readSource: async q => {
+    reads.push(q);
+    return { json: "{}", origin: {}, evidence: {} };
+  } });
+  let id = 1;
+  const attached = await host.exchange(request(id, "session.attach", null));
+  const call = (method, params) => host.exchange(request(++id, method, attached.session, params));
+  const opened = await call("login.open", { url: "https://act.mihoyo.com/ys/event/calculator/index.html#/character" });
+  const login = call("login.confirm", { page: opened.result.page, question: "Finished?" });
+  while (!host.pendingQuestion()) await new Promise(resolve => setTimeout(resolve, 1));
+  await host.answerLogin("completed", host.pendingQuestion().attempt);
+  await login;
+  const fields = { game: "zzz", params: {}, body: null };
+  for (const source of ["page:identity", "binding"]) {
+    assert.equal((await call("source.read", { ...fields, source, generation: 0 })).error, "AUTHENTICATION_REQUIRED");
+    assert.equal((await call("source.read", { ...fields, source, generation: 2 })).error, "CLIENT_PROTOCOL_ERROR");
+  }
+  assert.equal((await call("source.read", { ...fields, source: "page:detail", generation: 1, recheck: true })).error, "CLIENT_PROTOCOL_ERROR");
+  assert.equal(reads.length, 0);
+  assert.equal((await call("source.read", { ...fields, source: "page:identity", generation: 1, recheck: true })).error, null);
+  assert.equal(reads[0].recheck, true);
+  assert.equal(reads[0].generation, 1);
+});
+
 test("Closing the login page produces a terminal page error without replacing it", async () => {
   const fixture = browserFixture();
   const host = createClientHost(fixture.browser);
@@ -463,7 +489,7 @@ test("A real worker stops both games when the browser fails during login recover
     await pumpUntil(task,()=>task.status().done);
     const result = await deadline(task.completion);
     assert.equal(result.code,1);
-    assert.deepEqual(reads,[["genshin","binding"]]);
+    assert.deepEqual(reads,[["genshin","binding"],["genshin","binding"]]);
     assert.ok(result.events.includes("ERROR_CODE=CLIENT_REQUEST_FAILED"));
     assert.ok(!result.events.includes("GAME=zzz"));
   } finally {

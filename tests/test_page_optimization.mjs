@@ -189,6 +189,8 @@ test("Genshin rereads live identity without reloading an established page, refre
   f.replacePage();
   await f.reader.read(identityQuery(1));
   assert.equal(f.counts.reload, 3);
+  await f.reader.read({ ...identityQuery(1), recheck: true });
+  assert.equal(f.counts.reload, 4);
 });
 
 test("Genshin waits for a closing overlay without dismissing it or accepting a persistent blocker", async () => {
@@ -288,6 +290,8 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   assert.equal(reloads, 1); // Only the roster refreshed; identity reopened its live panel.
   await source.read({ ...query("identity"), params: {}, generation: 1 });
   assert.equal(reloads, 2);
+  await source.read({ ...query("identity"), params: {}, generation: 1, recheck: true });
+  assert.equal(reloads, 3);
 });
 
 

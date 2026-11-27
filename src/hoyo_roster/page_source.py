@@ -21,7 +21,8 @@ class PageSource:
         self.fragments = tuple(fragments) if fragments is not None else (urlsplit(url).fragment,)
         self.sequence = 0
 
-    async def read(self, operation, params=None):
+    async def read(self, operation, params=None, *, recheck=False):
+        generation = self.session.browser_generation
         self.sequence += 1
         sequence = self.sequence
         await self.session.gate.reserve(requested_min_interval=2.0)
@@ -41,14 +42,16 @@ class PageSource:
         print(f"PAGE_SOURCE={self.game}:{operation}", flush=True)
         started = time.monotonic()
         try:
-            result = await self.session.client.call(
+            result = await self.session.call_source(
                 "source.read",
                 {
                     "game": self.game,
                     "source": "page:" + operation,
+                    **({"recheck": True} if recheck else {}),
                     "params": params or {},
                     "body": None,
                 },
+                generation=generation,
             )
         finally:
             print(
@@ -84,7 +87,7 @@ class PageSource:
             or set(evidence) != {"surface", "generation"}
             or evidence["surface"] != self.surfaces[operation]
             or type(evidence["generation"]) is not int
-            or evidence["generation"] < 0
+            or evidence["generation"] != generation
             or not isinstance(result["json"], str)
         ):
             raise SourceDataInvalid()

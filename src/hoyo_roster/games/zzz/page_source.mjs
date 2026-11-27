@@ -69,7 +69,7 @@ export function createZzzPageSource(ui) {
         name: e.querySelector(".gt-card__info-outside")?.textContent?.trim(), text: e.innerText?.trim(),
       }))), rows => rows.length > 0 && rows.every(r => r.name && /^(?:Lv\.[1-9][0-9]*|-)\s/.test(r.text ?? "")), { stable: true }));
   }
-  async function read({ source, params, body, signal, generation }) {
+  async function read({ source, params, body, signal, generation, recheck = false }) {
     if (body !== null || !params || typeof params !== "object" || Array.isArray(params)) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     let tab = await ui.page(PAGE, signal);
     if (source === "page:identity") {
@@ -77,7 +77,7 @@ export function createZzzPageSource(ui) {
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Reset transient selector/dialog overlays left by a previous interrupted
       // collection. Reloading this tab retains the SAME browser login session.
-      if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+      if (recheck || identityContext?.tab !== tab || identityContext.generation !== generation) {
         tab = await measure("zzz.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("zzz.identity", signal, () => identity(tab, signal));
@@ -157,5 +157,5 @@ export function createZzzPageSource(ui) {
       return read(query); // One explicit official retry; never recurse or relogin.
     }
   }
-  return Object.freeze({ read: readWithRecovery, available: async ({ signal }) => await ui.available(PAGE, signal) ? [...sourceNames] : [] });
+  return Object.freeze({ url: PAGE, read: readWithRecovery, available: async ({ signal }) => await ui.available(PAGE, signal) ? [...sourceNames] : [] });
 }

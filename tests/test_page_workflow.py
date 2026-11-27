@@ -56,11 +56,8 @@ class PagePort(FakePort):
             result = {"available": [s for s in params["sources"] if s.startswith("page:")]}
         else:
             game, source = params["game"], params["source"]
-            self.counts[(game, source)] += 1
-            count = self.counts[(game, source)]
-            error = self.fail_at.get((game, source, count))
-            if not self.authenticated:
-                error = "AUTHENTICATION_REQUIRED"
+            error = self.source_error(game, source)
+            count = self.counts[game, source]
             if error:
                 result = None
             else:
@@ -113,7 +110,7 @@ class PagePort(FakePort):
                         "game": game,
                         "url": GENSHIN_PAGE if game == "genshin" else ZZZ_PAGE,
                     },
-                    "evidence": {"surface": surface, "generation": 0},
+                    "evidence": {"surface": surface, "generation": self.generation},
                 }
         return {
             "version": 1,
@@ -161,7 +158,7 @@ def test_page_default_shares_session_login_and_saves_two_partial_snapshots(tmp_p
 
 def test_second_game_auth_recovery_preserves_completed_first_game(tmp_path):
     port = PagePort()
-    port.fail_at[("zzz", "page:identity", 1)] = "AUTHENTICATION_REQUIRED"
+    port.expire_at.add(("zzz", "page:identity", 1))
     assert cli.main(arguments(tmp_path), client=port.client()) == 0
     assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
     assert port.counts[("genshin", "page:roster")] == 2
@@ -171,7 +168,7 @@ def test_second_game_auth_recovery_preserves_completed_first_game(tmp_path):
 
 def test_page_recovery_rejects_account_change_after_first_game(tmp_path):
     port = PagePort()
-    port.fail_at[("zzz", "page:identity", 1)] = "AUTHENTICATION_REQUIRED"
+    port.expire_at.add(("zzz", "page:identity", 1))
     port.login_changes_account = True
     assert cli.main(arguments(tmp_path, "--no-parallel-games"), client=port.client()) == 1
     assert len(snapshots(tmp_path)) == 1
@@ -353,14 +350,44 @@ def test_official_unsupported_preserves_owned_row_without_inventing_detail(tmp_p
         normalize_genshin(unavailable)
 
 
-def test_midgame_recovery_discards_both_uncommitted_passes(tmp_path):
+def test_page_local_recovery_restarts_only_its_uncommitted_passes(tmp_path):
     port = PagePort()
     port.fail_at[("genshin", "page:detail", 1)] = "AUTHENTICATION_REQUIRED"
     assert cli.main(arguments(tmp_path), client=port.client()) == 0
     assert port.counts[("genshin", "page:roster")] == 3
     assert port.counts[("zzz", "page:roster")] == 2
-    assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
+    assert sum(c["method"] == "login.confirm" for c in port.calls) == 0
     assert len(snapshots(tmp_path)) == 2
+
+
+def test_local_probe_rejects_changed_identity_before_restarting(tmp_path, capsys):
+    class SwitchedRole(PagePort):
+        async def exchange(self, message):
+            if message["params"].get("recheck"):
+                self.uid = "234567891"
+            return await super().exchange(message)
+
+    port = SwitchedRole()
+    port.fail_at["genshin", "page:detail", 1] = "AUTHENTICATION_REQUIRED"
+    assert cli.main(arguments(tmp_path, "--game", "genshin"), client=port.client()) == 1
+    assert "ERROR_CODE=WRONG_ACCOUNT" in capsys.readouterr().out
+    assert not snapshots(tmp_path)
+    assert not any(c["method"].startswith("login.") for c in port.calls)
+
+
+def test_page_read_refuses_stale_generation_after_login(tmp_path, capsys):
+    class StaleReceipt(PagePort):
+        async def exchange(self, message):
+            reply = await super().exchange(message)
+            if message["method"] == "source.read" and reply["result"] is not None:
+                reply["result"]["evidence"]["generation"] = 0
+            return reply
+
+    port = StaleReceipt(authenticated=False)
+    assert cli.main(arguments(tmp_path, "--game", "zzz"), client=port.client()) == 1
+    assert "ERROR_CODE=SOURCE_DATA_INVALID" in capsys.readouterr().out
+    assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
+    assert not snapshots(tmp_path)
 
 
 def test_page_login_cancel_never_saves(tmp_path):

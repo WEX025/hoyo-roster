@@ -93,6 +93,27 @@ function fixture({ zero = false, retained = true, freshZero = false } = {}) {
   return { browser, page, calls, ui: createPageBrowser(browser) };
 }
 
+test("a broken page control requires login only with a visible prompt on the same official document", async () => {
+  for (const mode of ["prompt", "foreign", "hidden", "wrong-account", "rate-limit"]) {
+    const f = fixture(), signal = new AbortController().signal;
+    await f.ui.page(URL, signal);
+    const code = mode === "wrong-account" ? "WRONG_ACCOUNT" : mode === "rate-limit" ? "RATE_LIMITED" : "SOURCE_REQUEST_NOT_OBSERVED";
+    const read = async () => { throw Object.assign(new Error(), { code }); };
+    let inspected = false;
+    f.page.playwright.evaluate = async (fn, arg) => {
+      inspected = true;
+      const location = { origin: mode === "foreign" ? "https://example.org" : "https://act.mihoyo.com", pathname: "/ys/event/calculator/index.html" };
+      const label = { getClientRects: () => mode === "hidden" ? [] : [{}], innerText: "去登录", children: [] };
+      return runInNewContext("(" + fn.toString() + ")(arg)", { arg, location, getComputedStyle: () => ({ visibility: "visible" }),
+        document: { querySelectorAll: selector => selector === "input" ? [] : [label] } });
+    };
+    await assert.rejects(f.ui.readSource({ url: URL, read }, { signal }), {
+      code: mode === "prompt" ? "AUTHENTICATION_REQUIRED" : code,
+    });
+    assert.equal(inspected, !["wrong-account", "rate-limit"].includes(mode));
+  }
+});
+
 test("UI reader borrows the same browser/tab and never requires CDP or credentials", async () => {
   const f = fixture();
   assert.equal(await f.ui.page(URL, new AbortController().signal), f.page);

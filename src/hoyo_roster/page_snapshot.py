@@ -12,8 +12,6 @@ import portalocker
 
 from . import paths, platform_io as io
 from .errors import (
-    AuthenticationRequired,
-    OperationError,
     SourceDataInvalid,
     WrongAccount,
     WorkspaceError,
@@ -187,23 +185,18 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
     game_started = time.monotonic()
     print(f"PAGE_GAME_BEGIN={game}", flush=True)
 
-    async def check():
-        value = await source.read("identity")
+    async def check(*, recheck=False):
+        value = await source.read("identity", recheck=recheck)
         return identity(value, game), value
 
-    async def pinned_check():
-        return (await check())[0]
+    async def probe():
+        return await check(recheck=True)
 
-    try:
-        role, profile = await check()
-    except AuthenticationRequired:
-        recovered = await session.recover(verify_current=check)
-        role, profile = recovered
-    except (OperationError, WorkspaceError) as error:
-        if session.readiness is not None and session.version:
-            error.stop_account = True
-        raise
-    session.pin(game, (role,), lambda: _role_tuple(pinned_check))
+    async def pinned_check():
+        return ((await probe())[0],)
+
+    role, _ = await session.identity(check, probe=probe)
+    session.pin(game, (role,), pinned_check)
     checkpoint = getattr(args, "_collection_checkpoint", None)
     if checkpoint is not None:
         checkpoint.pin(game, role)
@@ -270,74 +263,71 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                     ),
                 ),
             )
-        for attempt in range(2):
-            try:
-                print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)
-                first = await collect()
-                print("PAGE_PASS=2", flush=True)
-                second = await collect()
-                validation_started = time.monotonic()
-                if first != second:
-                    raise SourceDataInvalid()
-                validate_snapshot(second, game, normalize)
-                print(
-                    "PAGE_TIMING="
-                    + json.dumps(
-                        {
-                            "game": game,
-                            "phase": "validate",
-                            "duration_ms": (time.monotonic() - validation_started) * 1000,
-                        }
+
+        async def read_passes():
+            print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)
+            first = await collect()
+            print("PAGE_PASS=2", flush=True)
+            return first, await collect()
+
+        try:
+            first, second = await session.collect(game, read_passes)
+            validation_started = time.monotonic()
+            if first != second:
+                raise SourceDataInvalid()
+            validate_snapshot(second, game, normalize)
+            print(
+                "PAGE_TIMING="
+                + json.dumps(
+                    {
+                        "game": game,
+                        "phase": "validate",
+                        "duration_ms": (time.monotonic() - validation_started) * 1000,
+                    }
+                ),
+                flush=True,
+            )
+            second["synced_at"] = (
+                datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            save_started = time.monotonic()
+            changed = store.save(second)
+            if checkpoint is not None:
+                checkpoint.commit(game, store.current_file)
+            print(
+                "PAGE_TIMING="
+                + json.dumps(
+                    {
+                        "game": game,
+                        "phase": "save",
+                        "duration_ms": (time.monotonic() - save_started) * 1000,
+                    }
+                ),
+                flush=True,
+            )
+        except AtomicWriteError:
+            return GameResult(
+                game,
+                "FAIL",
+                (
+                    RoleResult(
+                        role,
+                        "FAIL",
+                        "ATOMIC_DURABILITY_UNKNOWN",
+                        result_scope=store.root,
+                        current_result=store.current_file,
+                        commit_state="DURABILITY_UNKNOWN",
                     ),
-                    flush=True,
-                )
-                second["synced_at"] = (
-                    datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-                )
-                save_started = time.monotonic()
-                changed = store.save(second)
-                if checkpoint is not None:
-                    checkpoint.commit(game, store.current_file)
-                print(
-                    "PAGE_TIMING="
-                    + json.dumps(
-                        {
-                            "game": game,
-                            "phase": "save",
-                            "duration_ms": (time.monotonic() - save_started) * 1000,
-                        }
-                    ),
-                    flush=True,
-                )
-                break
-            except AuthenticationRequired:
-                if attempt:
-                    raise
-                print("AUTH_RECOVERY=RESTART_CURRENT_GAME", flush=True)
-                await session.recover()
-            except AtomicWriteError:
-                return GameResult(
-                    game,
-                    "FAIL",
-                    (
-                        RoleResult(
-                            role,
-                            "FAIL",
-                            "ATOMIC_DURABILITY_UNKNOWN",
-                            result_scope=store.root,
-                            current_result=store.current_file,
-                            commit_state="DURABILITY_UNKNOWN",
-                        ),
-                    ),
-                    error_code="ATOMIC_DURABILITY_UNKNOWN",
-                )
-            except (MetadataError, io.UnsafePath, OSError):
-                return GameResult(
-                    game,
-                    "FAIL",
-                    (RoleResult(role, "FAIL", "PAGE_SAVE_FAILED", result_scope=store.root),),
-                    error_code="PAGE_SAVE_FAILED",
-                )
+                ),
+                error_code="ATOMIC_DURABILITY_UNKNOWN",
+            )
+        except (MetadataError, io.UnsafePath, OSError):
+            return GameResult(
+                game,
+                "FAIL",
+                (RoleResult(role, "FAIL", "PAGE_SAVE_FAILED", result_scope=store.root),),
+                error_code="PAGE_SAVE_FAILED",
+            )
     print(
         "PAGE_TIMING="
         + json.dumps(
@@ -371,7 +361,3 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
             ),
         ),
     )
-
-
-async def _role_tuple(check):
-    return (await check(),)

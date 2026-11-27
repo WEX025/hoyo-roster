@@ -151,16 +151,35 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     await metrics.measure("page.click", () => call(signal, () => locator.click({ timeoutMs: 2500 })));
     if (snapshot) return metrics.measure("page.snapshot", () => call(signal, () => tab.playwright.domSnapshot()));
   }
-  async function authentication(tab, signal) {
+  async function authentication(tab, signal, expectedPage) {
     // Only read rendered text and field presence, never any login input value.
-    return call(signal, () => readDom(tab.playwright, () => {
+    return call(signal, () => readDom(tab.playwright, expected => {
+      if (expected && location.origin + location.pathname !== expected) return false;
       const fields = Array.from(document.querySelectorAll("input"));
       const visible = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
       return fields.some(e => visible(e) && /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
         Array.from(document.querySelectorAll("button,a,div,span,p")).some(e => visible(e) && !e.children.length &&
           ["登录", "去登录", "立即登录", "你还没有登录哦", "登录后可查看已有角色数据",
             "需要先登录才能使用养成指南工具"].includes(e.innerText?.trim()));
-    }));
+    }, expectedPage));
+  }
+  async function readSource(plugin, query) {
+    try { return await plugin.read(query); }
+    catch (error) {
+      checkSignal(query.signal);
+      // A login overlay can replace a control in the middle of a DOM operation.
+      const inspect = ["SOURCE_REQUEST_NOT_OBSERVED", "SOURCE_DATA_INVALID"].includes(error.code) ||
+        error.name === "TimeoutError" || /^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "");
+      const tab = retained.get(plugin.url);
+      if (inspect && tab) {
+        const url = new URL(plugin.url);
+        let loginVisible = false;
+        try { loginVisible = await authentication(tab, query.signal, url.origin + url.pathname); }
+        catch { checkSignal(query.signal); }
+        if (loginVisible) throw sourceFailure("AUTHENTICATION_REQUIRED");
+      }
+      throw error;
+    }
   }
   async function authenticatedControl(tab, selector, signal) {
     return wait(signal, async () => {
@@ -213,5 +232,5 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
   return Object.freeze({ page: (url, signal) => measure("page.preflight", signal, () => page(url, signal)),
-    available, navigate, call, wait, click, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
+    available, navigate, call, wait, click, readSource, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
 }

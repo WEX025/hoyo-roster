@@ -46,7 +46,7 @@ console.log(await workflow.advance(browser));
 
 每次只调用 `await workflow.advance(browser)`，控制器选择阶段；不再另外启动分析命令。准备阶段单独返回；采集阶段在一个主动调用里连续推进，最多 180 秒启动预算，内部每窗十秒并收拢最长45秒来源，完成后自动验证和报告。测试桌面采用 270 秒工具超时。主动调用返回后不继续浏览器工作。不得仅后台等待 worker completion；不得用两个任务绕过浏览器占用、共享锁或两秒节流。
 
-准备阶段会验证 runtimeRoot 的私有权限并实际写入、清理一个临时文件。若返回 RUNTIME_NOT_WRITABLE，恢复同一路径的写权限后可用同一工作流的 retry 重新预检。双游戏并发同步先核验各游戏身份。启动时缺登录会统一登录并重新核验，再并发读取名单与详情；采集开始后失去登录则收拢读源、复查固定身份，以串行恢复未提交游戏。
+准备阶段会验证 runtimeRoot 的私有权限并实际写入、清理一个临时文件。若返回 RUNTIME_NOT_WRITABLE，恢复同一路径的写权限后可用同一工作流的 retry 重新预检。双游戏并发同步先核验各游戏身份。启动时缺登录会统一登录并重新核验，再并发读取名单与详情；采集中遇到认证错误，先复核当前游戏；确认共享登录失效才收拢读源、复查固定身份，以串行恢复未提交游戏。
 
 登录立即返回 question，用户在官方页面处理全部凭据和验证。只有本人针对当前 `question.attempt` 明确确认后才能调用 `workflow.answerLogin("completed", question.attempt)`。waiting 保留相同问题并等待，不重复询问；cancel 调用 `await workflow.cancel()`。详见 [Skill](../.agents/skills/local-roster/SKILL.md)。控制器拒绝错尝试、换浏览器及并行 advance。收尾保留共享浏览器，不自动关闭页面。
 
