@@ -448,7 +448,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0, onProgress } = {}) {
           if (pumping || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > 1000 ||
               !Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 64 ||
-              (onProgress !== undefined && typeof onProgress !== "function") ||
+              (onProgress !== undefined && (typeof onProgress !== "function" || launchBudgetMs <= 0)) ||
               !Number.isFinite(launchBudgetMs) || launchBudgetMs < 0 || launchBudgetMs > (onProgress ? 180000 : 10000)) {
             throw failure("CLIENT_PROTOCOL_ERROR");
           }
@@ -463,7 +463,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             while (true) {
               if (pending || exitCode !== null || lifetime.signal.aborted) break;
               if (launchBudgetMs && performance.now() >= deadline) break;
-              if (handled >= maxRequests || performance.now() >= nextProgress) {
+              if (handled >= maxRequests || (onProgress && performance.now() >= nextProgress)) {
                 if (!onProgress) break;
                 // Both readers still belong to this awaited foreground call.
                 await onProgress(status());

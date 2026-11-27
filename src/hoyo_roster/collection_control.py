@@ -25,6 +25,7 @@ def game_states(value):
         saved = value["completed"].get(game)
         if (
             state in GameProgress.unfinished
+            and attempt.get("closed_at")
             and saved
             and saved["verified_attempt"] == attempt.get("number")
         ):

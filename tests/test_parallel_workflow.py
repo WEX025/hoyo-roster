@@ -211,6 +211,42 @@ def test_fast_game_commits_before_peer_finishes_first_identity(tmp_path, slow, f
         ]
 
 
+def test_relogin_restores_independent_scheduling_for_unfinished_games(tmp_path, capsys):
+    class DelayedRestart(ConcurrentPort):
+        async def exchange(self, message):
+            params = message["params"]
+            if (
+                params.get("game") == "genshin"
+                and params.get("source") == "page:roster"
+                and not self.generation
+            ):
+                # This first attempt must be cancelled before the shared login.
+                await asyncio.wait_for(asyncio.Event().wait(), 2)
+            if (
+                self.generation
+                and params.get("game") == "zzz"
+                and params.get("source") == "page:identity"
+                and not params.get("recheck")
+                and not snapshots(tmp_path)
+            ):
+                async with asyncio.timeout(2):
+                    while not snapshots(tmp_path):
+                        await asyncio.sleep(0.001)
+                assert json.loads(snapshots(tmp_path)[0].read_text())["game"] == "genshin"
+            return await super().exchange(message)
+
+    port = DelayedRestart()
+    port.expire_at.add(("zzz", "page:detail", 1))
+    assert cli.main(arguments(tmp_path), client=port.client()) == 0
+    events = capsys.readouterr().out.splitlines()
+    resumed = events[events.index("PARALLEL_RECOVERY=QUIESCED") :]
+    assert resumed.index("GAME_STATE=genshin:COMPLETED") < resumed.index(
+        "GAME_STATE=zzz:COLLECTING"
+    )
+    assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
+    assert len(snapshots(tmp_path)) == 2
+
+
 def test_game_local_startup_failure_leaves_healthy_peer_running(tmp_path, capsys):
     port = ConcurrentPort()
     port.fail_at["zzz", "page:identity", 1] = "SOURCE_DATA_INVALID"
