@@ -18,11 +18,19 @@ from tests.test_page_workflow import PagePort
 
 
 @pytest.mark.parametrize(
-    "options, expected",
-    [({}, True), ({"parallelGames": True}, True), ({"parallelGames": False}, False)],
+    "options, parallel, interval",
+    [
+        ({}, True, 1000),
+        ({"parallelGames": True}, True, 1000),
+        ({"parallelGames": False}, False, 2000),
+        ({"crossGameIntervalMs": 1500}, True, 1500),
+        ({"crossGameIntervalMs": 2000}, True, 2000),
+    ],
 )
-def test_new_workflow_defaults_to_parallel_and_preserves_explicit_serial(options, expected):
-    assert config_options(options)["parallel_games"] is expected
+def test_new_workflow_scheduling_defaults_and_overrides(options, parallel, interval):
+    config = config_options(options)
+    assert config["parallel_games"] is parallel
+    assert config["cross_game_interval_ms"] == interval
 
 
 @pytest.fixture
@@ -32,6 +40,8 @@ def prepared(tmp_path, monkeypatch):
 
     monkeypatch.setattr(RequestGate, "reserve", reserve)
     config = config_options({"runtimeRoot": str(tmp_path / "runtime")})
+    # This fixture replays a checkpoint from before the interval was persisted.
+    del config["cross_game_interval_ms"]
     store = RunStore.create(
         tmp_path / "run", config, {"pid": io.launch_parent_pid(), "token": "synthetic"}
     )

@@ -323,10 +323,12 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         if (options.collectionRun !== undefined && (game !== "all" || operation !== "sync" || options.uid !== undefined)) throw failure("CLIENT_PROTOCOL_ERROR");
         if (options.parallelGames !== undefined && typeof options.parallelGames !== "boolean") throw failure("CLIENT_PROTOCOL_ERROR");
         concurrentGames = options.parallelGames !== false && game === "all" && operation !== "login";
-        crossGameIntervalMs = options.crossGameIntervalMs === undefined ? 2000 : options.crossGameIntervalMs;
+        const staggerPages = concurrentGames && pageReader && operation === "sync";
+        crossGameIntervalMs = options.crossGameIntervalMs;
+        if (crossGameIntervalMs === undefined) crossGameIntervalMs = staggerPages ? 1000 : 2000;
         if (![1000, 1500, 2000].includes(crossGameIntervalMs) ||
-            (crossGameIntervalMs < 2000 && (!concurrentGames || !pageReader || operation !== "sync"))) throw failure("CLIENT_PROTOCOL_ERROR");
-        if (crossGameIntervalMs < 2000) args.push("--cross-game-interval-ms", String(crossGameIntervalMs));
+            (crossGameIntervalMs < 2000 && !staggerPages)) throw failure("CLIENT_PROTOCOL_ERROR");
+        if (staggerPages) args.push("--cross-game-interval-ms", String(crossGameIntervalMs));
         args.push(concurrentGames ? "--parallel-games" : "--no-parallel-games");
         for (const [option, value] of [
           ["--storage-root", options.storageRoot], ["--runtime-root", options.runtimeRoot], ["--uid", options.uid],

@@ -419,7 +419,7 @@ test("a window shorter than the shared gate waits without polling or starting an
       starts.push(performance.now());
       return { json: "{}", origin: {}, evidence: {} };
     } });
-    task = host.startTask({ python, cwd: temporary });
+    task = host.startTask({ python, cwd: temporary, crossGameIntervalMs: 2000 });
     while (!starts.length) await task.pump({ maxRequests: 1, waitMs: 100 });
     let steps = 0;
     await pumpWindow(task, { budgetMs: 120, onStep: () => { steps++; } });

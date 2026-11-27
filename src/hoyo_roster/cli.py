@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--parallel-games",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="默认交叠两游戏；--no-parallel-games 改为串行；共享会话锁和两秒节流",
+        help="默认交叠两游戏；--no-parallel-games 改为串行；跨游戏普通页面同步默认间隔一秒，同游戏两秒",
     )
     parser.add_argument(
         "--storage-root",
@@ -92,7 +92,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--cross-game-interval-ms",
         choices=(1000, 1500, 2000),
         type=int,
-        default=2000,
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--stream-characters", action="store_true", help=argparse.SUPPRESS)

@@ -99,11 +99,12 @@ def config_options(options):
     for key in ("parallelGames", "update", "repairInstallation"):
         if key in options and type(options[key]) is not bool:
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
-    interval = options.get("crossGameIntervalMs", 2000)
+    parallel = options.get("parallelGames", True)
+    interval = options.get("crossGameIntervalMs", 1000 if parallel else 2000)
     if (
         type(interval) is not int
         or interval not in (1000, 1500, 2000)
-        or (interval != 2000 and not options.get("parallelGames", True))
+        or (interval != 2000 and not parallel)
     ):
         raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
     package = Path(__file__).resolve().parent
@@ -122,7 +123,7 @@ def config_options(options):
         "package_directory": str(package),
         "repository": str(repository) if repository else None,
         "python": sys.executable,
-        "parallel_games": options.get("parallelGames", True),
+        "parallel_games": parallel,
         "cross_game_interval_ms": interval,
         "runtime_root": absolute("runtimeRoot") or str(default_private_root()),
         "update": options.get("update", False),

@@ -56,7 +56,10 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
     assert.equal(peak,parallel ? 2 : 1);
     assert.equal(observedIndependentCommit, parallel);
     assert.equal(completions[0],parallel ? "zzz" : "genshin","replies must stay correlated in either mode");
-    if(parallel)for(let n=1;n<starts.length;n++)assert.ok(starts[n]-starts[n-1]>=1995);
+    if (parallel) for (let n=1; n<starts.length; n++) {
+      const minimum=reads[n][0]===reads[n-1][0] ? 1995 : 995;
+      assert.ok(starts[n]-starts[n-1]>=minimum);
+    }
     for(const game of ["genshin","zzz"]){
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:roster").length,2);
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:detail").length,2);
@@ -201,7 +204,7 @@ test("a transient identity failure refreshes only its own game while its peer co
 test("staggering shortens cross-game launches and preserves same-game spacing", {timeout:50000}, async () => {
   const temp = await realpath(await mkdtemp(join(tmpdir(), "hoyo-stagger-")));
   const host = createClientHost(browser(), {pageReader:true, readSource:async q=>record(q.game,q.source)});
-  const task = host.startTask({python,cwd:root,crossGameIntervalMs:1000,
+  const task = host.startTask({python,cwd:root,
     runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
   try {
     while (!task.status().done) await pumpWindow(task);

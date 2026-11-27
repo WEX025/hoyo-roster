@@ -2,6 +2,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClientHost } from "../src/hoyo_roster/client_host.mjs";
+import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 import { recordCollection } from "../src/hoyo_roster/client_collection.mjs";
 import { createWorkflowControl, createWorkflowDriver, resolveWorkflowOwner } from "../src/hoyo_roster/client_workflow.mjs";
 import { record } from "./fixtures_collection_source.mjs";
@@ -27,17 +28,18 @@ for (let n = 0; n < 40; n++) {
 if (!initial) throw Error("synthetic old worker did not close");
 const spans = [];
 const driver = createWorkflowDriver({ directory, initial, control, startSession: async data => {
+  const metrics = createMetrics();
   const host = createClientHost({ tabs: { list: async()=>[], get:async()=>{}, new:async()=>{} } },
-    { pageReader: true, readSource: async q => {
+    { pageReader: true, readSource: q => metrics.measure("source.read", async () => {
       reads.push([q.game, q.source]);
       const span = { game: q.game, start: performance.now(), end: null }; spans.push(span);
       if (mode === "parallel") await new Promise(resolve => setTimeout(resolve, 2150));
       span.end = performance.now(); return record(q.game, q.source);
-    } });
+    }, {game:q.game, source:q.source}) });
   const task = host.startTask({ python, cwd: root, storageRoot: join(directory, "results"),
     runtimeRoot: data.config.runtime_root, collectionRun: directory, parallelGames: data.config.parallel_games });
   return recordCollection({ pendingQuestion: host.pendingQuestion, answerLogin: host.answerLogin,
-    drainMetrics:()=>[], releasePageSettings:async()=>{} }, task,
+    drainMetrics:metrics.drain, releasePageSettings:async()=>{} }, task,
     join(directory,"attempts",String(data.attempt).padStart(4,"0")), data.version, data.config.parallel_games,
     { onStep: row => {
       if (mode === "interrupt" && row.events.includes("PAGE_GAME_SAVED=genshin")) process.exit(0);

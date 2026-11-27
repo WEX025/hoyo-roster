@@ -23,6 +23,30 @@ def no_delays(monkeypatch):
     monkeypatch.setattr(RequestGate, "reserve", reserve)
 
 
+@pytest.mark.parametrize(
+    "options, expected",
+    [
+        ([], 1000),
+        (["--cross-game-interval-ms", "2000"], 2000),
+        (["--game", "genshin"], 2000),
+        (["--no-parallel-games"], 2000),
+        (["--operation", "discover"], 2000),
+    ],
+)
+def test_worker_selects_interval_for_actual_operation(tmp_path, monkeypatch, options, expected):
+    from hoyo_roster.request_gate import RequestGate
+
+    observed = set()
+
+    async def observe(gate, **kwargs):
+        observed.add(gate.cross_game_interval_ms)
+        return 0
+
+    monkeypatch.setattr(RequestGate, "reserve", observe)
+    assert cli.main(arguments(tmp_path, *options), client=PagePort().client()) == 0
+    assert observed == {expected}
+
+
 class ConcurrentPort(PagePort):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
