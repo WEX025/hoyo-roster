@@ -33,6 +33,37 @@ def union_ms(spans):
     return total
 
 
+def validate_start_intervals(clients, interval_ms):
+    if type(interval_ms) is not int or interval_ms not in (1000, 1500, 2000):
+        raise ValueError("INVALID_SOURCE_INTERVAL")
+    calls = sorted(
+        (row for row in clients if row["method"] in ("source.read", "service.prepare")),
+        key=lambda row: row["started"],
+    )
+    previous = None
+    previous_game = None
+    game_starts = {}
+    for row in calls:
+        start = row["started"]
+        if not math.isfinite(start):
+            raise ValueError("INVALID_TIME")
+        game = (
+            row.get("game")
+            if row.get("pageRead") is True and row["method"] == "source.read"
+            else None
+        )
+        if game is not None and game not in NORMALIZERS:
+            raise ValueError("SOURCE_TIMING_INCOMPLETE")
+        gap = interval_ms if game and previous_game and game != previous_game else 2000
+        if previous is not None and start - previous < gap - 1:
+            raise ValueError("SOURCE_START_GATE_VIOLATION")
+        if game in game_starts and start - game_starts[game] < 1999:
+            raise ValueError("SOURCE_START_GATE_VIOLATION")
+        if game:
+            game_starts[game] = start
+        previous, previous_game = start, game
+
+
 def read_run(directory: Path):
     directory = io.filesystem_path(directory)
 
@@ -68,8 +99,8 @@ def read_run(directory: Path):
         raise ValueError("SOURCE_TIMING_INCOMPLETE")
     intervals = [b - a for a, b in zip(starts, starts[1:])]
     # This host-side gate exists in parallel mode. Serial mode uses Python's gate.
-    if run["parallelGames"] and intervals and min(intervals) < 1999:
-        raise ValueError("SOURCE_START_GATE_VIOLATION")
+    if run["parallelGames"]:
+        validate_start_intervals(clients, run.get("crossGameIntervalMs", 2000))
     windows, gaps, previous = {}, [], None
     for row in records:
         if row["kind"] == "window_begin":

@@ -164,3 +164,22 @@ def test_offline_replay_requires_identity_between_rounds(run_dir):
     file.write_text(json.dumps(result))
     with pytest.raises(ValueError, match="IDENTITY_EVIDENCE_MISSING"):
         read_run(run_dir)
+
+
+def test_staggered_source_starts_require_page_lanes_and_protect_other_calls():
+    from hoyo_roster.collection_analysis import validate_start_intervals
+
+    def page(game, started):
+        return {"game": game, "method": "source.read", "pageRead": True, "started": started}
+
+    calls = [page("genshin", 0), page("zzz", 1000), page("genshin", 2000)]
+    validate_start_intervals(calls, 1000)
+    for invalid in (
+        calls + [page("genshin", 3500)],
+        calls + [{"method": "service.prepare", "started": 3100}],
+        calls + [{"game": "zzz", "method": "source.read", "started": 3100}],
+    ):
+        with pytest.raises(ValueError, match="SOURCE_START_GATE_VIOLATION"):
+            validate_start_intervals(invalid, 1000)
+    with pytest.raises(ValueError, match="SOURCE_START_GATE_VIOLATION"):
+        validate_start_intervals(calls, 1500)

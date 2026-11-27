@@ -160,8 +160,10 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
   const started = performance.now(), start_at = new Date().toISOString();
   if (typeof directory !== "string" || !directory || directory.includes("\0")) throw failure("WORKFLOW_OPTIONS_INVALID");
   if (onCharacters !== undefined && typeof onCharacters !== "function") throw failure("WORKFLOW_OPTIONS_INVALID");
-  const allowed = new Set(["parallelGames", "runtimeRoot", "update", "repairInstallation", "installationArtifact", "baseline"]);
+  const allowed = new Set(["parallelGames", "crossGameIntervalMs", "runtimeRoot", "update", "repairInstallation", "installationArtifact", "baseline"]);
   if (Object.keys(options).some(key => !allowed.has(key)) ||
+      (options.crossGameIntervalMs !== undefined && (![1000, 1500, 2000].includes(options.crossGameIntervalMs) ||
+        (options.parallelGames === false && options.crossGameIntervalMs < 2000))) ||
       ["parallelGames", "update", "repairInstallation"].some(key => options[key] !== undefined && typeof options[key] !== "boolean") ||
       ["runtimeRoot", "installationArtifact", "baseline"].some(key => options[key] !== undefined && (typeof options[key] !== "string" || !options[key] || options[key].includes("\0"))) ||
       (selectedPython !== undefined && (typeof selectedPython !== "string" || !selectedPython || selectedPython.includes("\0")))) throw failure("WORKFLOW_OPTIONS_INVALID");
@@ -186,6 +188,7 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
     const host = createRosterHost(browser);
     const task = host.startTask({ python: data.config.python, cwd: data.config.repository ?? moduleDirectory,
       game: "all", operation: "sync", parallelGames: data.config.parallel_games,
+      crossGameIntervalMs: data.config.cross_game_interval_ms ?? 2000,
       storageRoot: join(directory, "results"), runtimeRoot: data.config.runtime_root, collectionRun: directory, onCharacters });
     return recordCollection(host, task, join(directory, "attempts", String(data.attempt).padStart(4, "0")),
       data.version, data.config.parallel_games);

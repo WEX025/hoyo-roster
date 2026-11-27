@@ -118,6 +118,11 @@ async def run_task(args, client=None):
         raise ClientBrowserRequired()
     if not isinstance(client, ClientSession):
         raise ClientBrowserRequired()
+    cross_interval = getattr(args, "cross_game_interval_ms", 2000)
+    if cross_interval != 2000 and (
+        args.operation != "sync" or len(games) != 2 or not getattr(args, "parallel_games", True)
+    ):
+        raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
     if getattr(args, "collection_run", None) is not None:
         from .collection_state import CollectionCheckpoint
 
@@ -128,6 +133,7 @@ async def run_task(args, client=None):
         if (
             args.storage_root != checkpoint.store.root / "results"
             or str(args.runtime_root) != config["runtime_root"]
+            or cross_interval != config.get("cross_game_interval_ms", 2000)
         ):
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
         args._collection_checkpoint = checkpoint
@@ -146,6 +152,7 @@ async def run_task(args, client=None):
                 and session.client.page_reader
                 and len(games) > 1
             ):
+                session.gate.cross_game_interval_ms = cross_interval
                 results.extend(await parallel_games(args, session, progress))
             else:
                 print("COLLECTION_MODE=SERIAL", flush=True)

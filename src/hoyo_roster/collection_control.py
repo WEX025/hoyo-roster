@@ -87,6 +87,7 @@ def public(value):
 def config_options(options):
     allowed = {
         "parallelGames",
+        "crossGameIntervalMs",
         "runtimeRoot",
         "update",
         "repairInstallation",
@@ -98,6 +99,13 @@ def config_options(options):
     for key in ("parallelGames", "update", "repairInstallation"):
         if key in options and type(options[key]) is not bool:
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
+    interval = options.get("crossGameIntervalMs", 2000)
+    if (
+        type(interval) is not int
+        or interval not in (1000, 1500, 2000)
+        or (interval != 2000 and not options.get("parallelGames", True))
+    ):
+        raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
     package = Path(__file__).resolve().parent
     source = package.parent.name == "src"
     repository = verified_repository(package.parents[1]) if source else project_repository()
@@ -115,6 +123,7 @@ def config_options(options):
         "repository": str(repository) if repository else None,
         "python": sys.executable,
         "parallel_games": options.get("parallelGames", True),
+        "cross_game_interval_ms": interval,
         "runtime_root": absolute("runtimeRoot") or str(default_private_root()),
         "update": options.get("update", False),
         "repair_installation": options.get("repairInstallation", True),

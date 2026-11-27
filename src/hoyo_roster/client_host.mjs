@@ -305,10 +305,10 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
 
     startTask(options = {}) {
       if (started || attached || active || lifetime.signal.aborted) throw failure("CLIENT_PROTOCOL_ERROR");
-      let python, cwd, game, operation, args;
+      let python, cwd, game, operation, args, crossGameIntervalMs;
       try {
         if (!options || typeof options !== "object" || Array.isArray(options) ||
-            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun", "onCharacters"].includes(k))) {
+            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun", "onCharacters", "crossGameIntervalMs"].includes(k))) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         ({ python, cwd, game = "all", operation = "sync" } = options);
@@ -323,6 +323,10 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         if (options.collectionRun !== undefined && (game !== "all" || operation !== "sync" || options.uid !== undefined)) throw failure("CLIENT_PROTOCOL_ERROR");
         if (options.parallelGames !== undefined && typeof options.parallelGames !== "boolean") throw failure("CLIENT_PROTOCOL_ERROR");
         concurrentGames = options.parallelGames !== false && game === "all" && operation !== "login";
+        crossGameIntervalMs = options.crossGameIntervalMs === undefined ? 2000 : options.crossGameIntervalMs;
+        if (![1000, 1500, 2000].includes(crossGameIntervalMs) ||
+            (crossGameIntervalMs < 2000 && (!concurrentGames || !pageReader || operation !== "sync"))) throw failure("CLIENT_PROTOCOL_ERROR");
+        if (crossGameIntervalMs < 2000) args.push("--cross-game-interval-ms", String(crossGameIntervalMs));
         args.push(concurrentGames ? "--parallel-games" : "--no-parallel-games");
         for (const [option, value] of [
           ["--storage-root", options.storageRoot], ["--runtime-root", options.runtimeRoot], ["--uid", options.uid],
@@ -369,7 +373,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let streamEnded = false;
       let incoming = Buffer.alloc(0);
       const inFlight = new Set();
-      let nextSourceStart = 0;
+      let lastSourceStart = -Infinity, lastPageGame = null;
       let pumping = false;
       let killTimer = null;
       let queueWake = null;
@@ -469,7 +473,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             gameStates[g] = errorCode === "LOGIN_CANCELLED" ? "CANCELLED" : "INTERRUPTED";
           }
         }
-        resolve({ code: exitCode, errorCode, gameStates: { ...gameStates }, events: [...events] });
+        resolve({ code: exitCode, errorCode, ...(crossGameIntervalMs < 2000 ? { crossGameIntervalMs } : {}), gameStates: { ...gameStates }, events: [...events] });
       }));
       const status = () => ({ done: exitCode !== null, code: exitCode, errorCode,
         question: host.pendingQuestion(), pendingRequests: requests.length,
@@ -521,6 +525,13 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
                   (launchBudgetMs && performance.now() >= deadline)) break;
               const next = requests[0]?.message;
               const throttled = concurrentGames && ["source.read", "service.prepare"].includes(next?.method);
+              const pageGame = next?.method === "source.read" && pageReader && !next.params?.recheck &&
+                ["page:identity", "page:roster", "page:detail"].includes(next.params?.source) &&
+                ["genshin", "zzz"].includes(next.params?.game) ? next.params.game : null;
+              // Two cross-game gaps are always at least 2 s. Consecutive reads
+              // of one game and both sides of any API/service read use the full 2 s.
+              const interval = lastPageGame && pageGame && lastPageGame !== pageGame ? crossGameIntervalMs : 2000;
+              const nextSourceStart = lastSourceStart + interval;
               if (throttled && nextSourceStart > performance.now()) {
                 // Consume the remaining foreground budget when this read belongs
                 // to the next window. Returning early would make the runner spin.
@@ -533,7 +544,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
               const { message, queued } = requests.shift();
               handled++;
               const began = performance.now(), queueWait = began - queued;
-              if (throttled) nextSourceStart = began + 2000;
+              if (throttled) { lastSourceStart = began; lastPageGame = pageGame; }
               const current = (async () => {
                 const reply = await host.exchange(message);
                 if (lifetime.signal.aborted) return;
@@ -545,6 +556,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
                 }
                 events.push("CLIENT_TIMING=" + JSON.stringify({ request: message.id, method: message.method,
                   ...(message.params.game ? { game: message.params.game } : {}), phase: "exchange",
+                  ...(pageGame && crossGameIntervalMs < 2000 ? { pageRead: true } : {}),
                   started: began, queue_wait_ms: queueWait, duration_ms: performance.now() - began }));
               })().catch(() => stop("CLIENT_PROTOCOL_ERROR")).finally(() => { inFlight.delete(current); wakeQueue(); });
               inFlight.add(current);

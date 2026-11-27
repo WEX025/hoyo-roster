@@ -25,7 +25,9 @@ class PageSource:
         generation = self.session.browser_generation
         self.sequence += 1
         sequence = self.sequence
-        await self.session.gate.reserve(requested_min_interval=2.0)
+        await self.session.gate.reserve(
+            requested_min_interval=2.0, page_game=None if recheck else self.game
+        )
         print(
             "PAGE_TIMING="
             + json.dumps(

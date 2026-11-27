@@ -197,3 +197,29 @@ test("a transient identity failure refreshes only its own game while its peer co
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("staggering shortens cross-game launches and preserves same-game spacing", {timeout:50000}, async () => {
+  const temp = await realpath(await mkdtemp(join(tmpdir(), "hoyo-stagger-")));
+  const host = createClientHost(browser(), {pageReader:true, readSource:async q=>record(q.game,q.source)});
+  const task = host.startTask({python,cwd:root,crossGameIntervalMs:1000,
+    runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
+  try {
+    while (!task.status().done) await pumpWindow(task);
+    const result = await task.completion;
+    assert.equal(result.code,0);
+    assert.equal(result.crossGameIntervalMs,1000);
+    const calls=result.events.filter(e=>e.startsWith("CLIENT_TIMING=")).map(e=>JSON.parse(e.slice(14)))
+      .filter(e=>e.method==="source.read").sort((a,b)=>a.started-b.started);
+    assert.ok(calls.length >= 12 && calls.every(e=>e.pageRead));
+    assert.ok(calls.some((b,i)=> i && b.game!==calls[i-1].game && b.started-calls[i-1].started<1900));
+    const byGame=new Map();
+    for(const [i,c] of calls.entries()){
+      if(i) assert.ok(c.started-calls[i-1].started>=999);
+      if(byGame.has(c.game)) assert.ok(c.started-byGame.get(c.game)>=1999);
+      byGame.set(c.game,c.started);
+    }
+  } finally {
+    if(!task.status().done){task.cancel();await task.completion;}
+    await rm(temp,{recursive:true,force:true});
+  }
+});

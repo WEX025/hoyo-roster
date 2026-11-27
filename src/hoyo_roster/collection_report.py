@@ -3,7 +3,7 @@
 from hashlib import sha256
 import json
 
-from .collection_analysis import read_run, union_ms, stamp
+from .collection_analysis import read_run, union_ms, stamp, validate_start_intervals
 from .collection_state import fingerprint, utc
 from .errors import WorkspaceError
 from .games.genshin.page import normalize as genshin_normalize
@@ -67,7 +67,25 @@ def make_report(store):
                     progress.extend(event["events"])
         # The final worker log also includes reports delivered after the last pump.
         if (folder / "result.json").is_file():
-            progress = load_metadata(folder / "result.json", private=True)["events"]
+            result = load_metadata(folder / "result.json", private=True)
+            progress = result["events"]
+            interval = value["config"].get("cross_game_interval_ms", 2000)
+            if result.get("crossGameIntervalMs", 2000) != interval:
+                raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
+            if interval < 2000 and attempt["outcome"] == "PASS":
+                clients = [
+                    json.loads(e.split("=", 1)[1])
+                    for e in progress
+                    if e.startswith("CLIENT_TIMING=")
+                ]
+                if not sources or sum(c["method"] == "source.read" for c in clients) != len(
+                    sources
+                ):
+                    raise WorkspaceError("SOURCE_TIMING_INCOMPLETE")
+                try:
+                    validate_start_intervals(clients, interval)
+                except ValueError as exc:
+                    raise WorkspaceError("SOURCE_START_GATE_VIOLATION") from exc
         for line in progress:
             if line.startswith("COLLECTION_MODE="):
                 mode = line.split("=", 1)[1]
@@ -110,6 +128,7 @@ def make_report(store):
         "format": "hoyo-roster-workflow-report-v1",
         "run_id": value["id"],
         "source_sha": value["version"]["source_sha"],
+        "cross_game_interval_ms": value["config"].get("cross_game_interval_ms", 2000),
         "package_digest": value["version"]["package_digest"],
         "started_at": value["created_at"],
         "ended_at": ended_at,
