@@ -207,6 +207,7 @@ def dispatch(request):
                 store.phase(current, "SUCCEEDED")
         elif action == "retry":
             allowed = {
+                "RUNTIME_NOT_WRITABLE",
                 "WORKFLOW_PREPARATION_FAILED",
                 "WORKFLOW_SOURCE_DIRTY",
                 "WORKFLOW_INSTALLATION_MISMATCH",

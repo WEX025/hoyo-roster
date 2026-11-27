@@ -230,12 +230,18 @@ def test_prepare_detects_unwritable_runtime_before_installation(prepared, monkey
     def denied(*args):
         raise PermissionError()
 
-    monkeypatch.setattr(io, "temporary_file", denied)
-    monkeypatch.setattr(
-        collection_environment, "inventory", lambda _: pytest.fail("late preflight")
-    )
-    with pytest.raises(WorkspaceError, match="RUNTIME_NOT_WRITABLE"):
-        collection_environment.prepare(prepared)
+    with monkeypatch.context() as failing:
+        failing.setattr(io, "temporary_file", denied)
+        failing.setattr(
+            collection_environment, "inventory", lambda _: pytest.fail("late preflight")
+        )
+        with pytest.raises(WorkspaceError, match="RUNTIME_NOT_WRITABLE"):
+            collection_environment.prepare(prepared)
+
+    request = {"directory": str(prepared.root), "token": "synthetic"}
+    dispatch({**request, "action": "fail", "error": "RUNTIME_NOT_WRITABLE"})
+    dispatch({**request, "action": "retry"})
+    assert dispatch({**request, "action": "prepare"})["status"]["state"] == "WAITING_BROWSER"
 
 
 def test_worker_rejects_a_changed_package_before_browser_access(prepared):
