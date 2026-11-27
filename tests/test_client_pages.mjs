@@ -277,3 +277,17 @@ test("identity closes an observed still-open panel with one bounded repair", asy
   const role = await ui.identity(tab, new AbortController().signal, async () => assert.fail('already open'));
   assert.equal(role.uid, '123456789'); assert.equal(clicks, 2); assert.equal(opened, false);
 });
+
+test("rendered rate or risk notices stop page access before business actions", async () => {
+  for (const [message,visible,expected] of [["操作过于频繁，请稍后再试",true,"RATE_LIMITED"],
+      ["请先完成安全验证",true,"RISK_CONTROL"],["请求太频繁",false,null],["方案更新提示",true,null]]) {
+    const f=fixture();
+    f.page.playwright.evaluate=async fn=>runInNewContext("("+fn.toString()+")()",{
+      document:{documentElement:{clientWidth:800,clientHeight:600},querySelectorAll:()=>[{
+        innerText:message,getClientRects:()=>visible?[{}]:[]}]},getComputedStyle:()=>({visibility:"visible"})
+    });
+    const read=f.ui.page(URL,new AbortController().signal);
+    if(expected) await assert.rejects(read,{code:expected});
+    else assert.equal(await read,f.page);
+  }
+});

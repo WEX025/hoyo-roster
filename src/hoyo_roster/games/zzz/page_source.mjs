@@ -201,7 +201,7 @@ export function createZzzPageSource(ui) {
       if (error.code && error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
       const tab = await ui.page(PAGE, query.signal);
       if (!(await ui.call(query.signal, () => tab.playwright.getByText("出错了，请重试", { exact: true }).isVisible()))) throw error;
-      await ui.click(tab, tab.playwright.getByText("重试", { exact: true }), query.signal);
+      await measure("zzz.official-retry", query.signal, () => ui.click(tab, tab.playwright.getByText("重试", { exact: true }), query.signal));
       await ui.wait(query.signal, () => tab.playwright.locator(".account-center-icon").count(), n => n === 1);
       if (query.source !== "page:identity") ui.assertIdentity(await identity(tab, query.signal), query.params);
       return read(query); // One explicit official retry; never recurse or relogin.

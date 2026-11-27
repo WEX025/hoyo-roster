@@ -98,18 +98,30 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       throw sourceFailure("CLIENT_SOURCE_UNAVAILABLE");
     }
     if (!found) tab = await navigate(tab, url, signal);
-    let size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
-      width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
-    })));
+    async function readViewport() {
+      const state = await step("page.viewport-read", () => readDom(tab.playwright, () => {
+        const notices = document.querySelectorAll('[role="alert"],[role="dialog"],[aria-live],.van-toast,.el-message,.gt-toast');
+        let restriction = null;
+        for (const notice of notices) {
+          if (!notice.getClientRects().length || getComputedStyle(notice).visibility !== "visible") continue;
+          const text = notice.innerText ?? "";
+          if (/(?:请求|访问|操作)(?:过于|太过|太)?频繁|too many requests/i.test(text)) restriction = "RATE_LIMITED";
+          if (/请(?:先)?完成安全验证|触发风控/.test(text)) restriction = "RISK_CONTROL";
+          if (restriction) break;
+        }
+        return {width: document.documentElement.clientWidth, height: document.documentElement.clientHeight, restriction};
+      }));
+      if (state.restriction) throw sourceFailure(state.restriction);
+      return state;
+    }
+    let size = await readViewport();
     if (found && (!size.width || !size.height)) {
       // Retained panel webviews can become unmounted. A new tab in this SAME
       // browser shares its live session; do not copy credentials or close user tabs.
       tab = await call(signal, () => browser.tabs.new());
       tab = await navigate(tab, url, signal);
       await call(signal, () => tab.playwright.domSnapshot());
-      size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
-        width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
-      })));
+      size = await readViewport();
     }
     if (!size.width || !size.height) {
       const capabilities = await call(signal, () => browser.capabilities?.list?.() ?? []);
@@ -119,9 +131,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       // repair, never a device-emulation or screenshot-size preference.
       await call(signal, () => viewport.set({ width: 1280, height: 900 }));
       viewportLease = true;
-      const repaired = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
-        width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
-      })));
+      const repaired = await readViewport();
       if (!repaired.width || !repaired.height) throw sourceFailure("CLIENT_PAGE_UNAVAILABLE");
     }
     if (!matches(await step("page.url-read", () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
