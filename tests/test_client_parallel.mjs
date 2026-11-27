@@ -19,20 +19,18 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
   const parallel = parallelGames !== false;
   const temp = await realpath(await mkdtemp(join(tmpdir(),"hoyo-parallel-")));
   const active = new Set(), starts = [], reads = [], completions = [];
-  let peak = 0, insidePump = false, releaseIdentity;
-  const peerRosterStarted = new Promise(resolve => { releaseIdentity = resolve; });
+  let peak = 0, insidePump = false, observedIndependentCommit = false;
   const host = createClientHost(browser(), { pageReader:true, readSource:async q=>{
     assert.ok(insidePump);
     assert.equal(active.has(q.game),false);
     active.add(q.game);peak=Math.max(peak,active.size); starts.push(performance.now());reads.push([q.game,q.source]);
     try {
       if (parallel && reads.length === 1 && q.game === "genshin") {
-        // Hold one initial identity until the other game reaches an actual business read.
-        await Promise.race([peerRosterStarted, sleep(8000)]);
-      }
-      if (parallel && q.game === "zzz" && q.source === "page:roster" && reads.filter(([g,s]) => g === "zzz" && s === "page:roster").length === 1) {
-        assert.deepEqual(recorder.gameStates(), { genshin: "CHECKING_IDENTITY", zzz: "COLLECTING" });
-        releaseIdentity();
+        // Keep the identity open across timing windows until the peer has saved.
+        const deadline = performance.now() + 35000;
+        while (recorder.gameStates().zzz !== "COMPLETED" && performance.now() < deadline) await sleep(20);
+        assert.deepEqual(recorder.gameStates(), { genshin: "CHECKING_IDENTITY", zzz: "COMPLETED" });
+        observedIndependentCommit = true;
       }
       await sleep(q.game === "genshin" ? 2250 : 20);
       q.signal.throwIfAborted();
@@ -50,12 +48,13 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
   try {
     while(!task.status().done){
       insidePump=true;
-      try{await recorder.advance({launchMs:10000});}finally{insidePump=false;}
+      try{await recorder.advance({launchMs:parallel ? 40000 : 10000});}finally{insidePump=false;}
       assert.equal(active.size,0,"active browser work must be drained before returning");
     }
     const result=await task.completion;
     assert.equal(result.code,0,result.events.join("\n"));
     assert.equal(peak,parallel ? 2 : 1);
+    assert.equal(observedIndependentCommit, parallel);
     assert.equal(completions[0],parallel ? "zzz" : "genshin","replies must stay correlated in either mode");
     if(parallel)for(let n=1;n<starts.length;n++)assert.ok(starts[n]-starts[n-1]>=1995);
     for(const game of ["genshin","zzz"]){

@@ -445,10 +445,11 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         gameStates: { ...gameStates }, parallelGames: concurrentGames, inFlight: inFlight.size, events: [...events] });
       return {
         status,
-        async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0 } = {}) {
+        async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0, onProgress } = {}) {
           if (pumping || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > 1000 ||
               !Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 64 ||
-              !Number.isFinite(launchBudgetMs) || launchBudgetMs < 0 || launchBudgetMs > 10000) {
+              (onProgress !== undefined && typeof onProgress !== "function") ||
+              !Number.isFinite(launchBudgetMs) || launchBudgetMs < 0 || launchBudgetMs > (onProgress ? 180000 : 10000)) {
             throw failure("CLIENT_PROTOCOL_ERROR");
           }
           pumping = true;
@@ -456,11 +457,20 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             // SDK liveness checks only run inside this explicit active tool call.
             await checkPendingPage();
             const deadline = performance.now() + launchBudgetMs;
+            let nextProgress = performance.now() + 10000;
             let handled = 0;
             const ready = new Promise(resolve => { questionReady = resolve; });
-            while (handled < maxRequests) {
+            while (true) {
               if (pending || exitCode !== null || lifetime.signal.aborted) break;
               if (launchBudgetMs && performance.now() >= deadline) break;
+              if (handled >= maxRequests || performance.now() >= nextProgress) {
+                if (!onProgress) break;
+                // Both readers still belong to this awaited foreground call.
+                await onProgress(status());
+                nextProgress = performance.now() + 10000;
+                handled = 0;
+                continue;
+              }
               if (inFlight.size >= (concurrentGames ? 2 : 1)) {
                 await Promise.race([...inFlight, ready]);
                 continue;
@@ -511,11 +521,17 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             // No browser promise survives a normal active tool call. Human login is
             // the sole exception, suspended before further browser work until answered.
             if (inFlight.size && !pending) await Promise.race([Promise.all([...inFlight]), ready]);
-            questionReady = null;
             // Yield to process-close I/O after cancellation; callers may keep pumping.
             if (lifetime.signal.aborted && exitCode === null) await completion;
             return status();
-          } finally { pumping = false; }
+          } catch (error) {
+            // An observation callback can fail while browser work is still active.
+            if (inFlight.size && !pending) {
+              stop("CLIENT_REQUEST_FAILED");
+              await Promise.all([...inFlight]);
+            }
+            throw error;
+          } finally { questionReady = null; pumping = false; }
         },
         completion,
         cancel: () => stop("LOGIN_CANCELLED"),

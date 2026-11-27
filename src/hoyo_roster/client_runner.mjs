@@ -27,8 +27,22 @@ export async function pumpSlice(task, { launchMs = 180000, onStep = () => {}, on
   while (!status.done && !status.question && performance.now() - began < launchMs) {
     await onWindow({ kind: "window_begin", start_at: new Date().toISOString() });
     try {
-      status = await pumpWindow(task, { budgetMs: Math.max(0, Math.min(10000,
-        launchMs - (performance.now() - began))), onStep });
+      const remaining = launchMs - (performance.now() - began);
+      if (remaining <= 0) break;
+      if (status.parallelGames) {
+        let started = performance.now();
+        const step = state => onStep({ started, duration_ms: performance.now() - started, status: state });
+        status = await task.pump({ maxRequests: 64, waitMs: 1000, launchBudgetMs: remaining,
+          onProgress: async state => {
+            await step(state);
+            await onWindow({ kind: "window_end", end_at: new Date().toISOString() });
+            await onWindow({ kind: "window_begin", start_at: new Date().toISOString() });
+            started = performance.now();
+          } });
+        await step(status);
+      } else {
+        status = await pumpWindow(task, { budgetMs: Math.min(10000, remaining), onStep });
+      }
     } finally {
       await onWindow({ kind: "window_end", end_at: new Date().toISOString() });
     }
