@@ -186,6 +186,22 @@ def test_any_recovery_failure_stops_subsequent_sources(tmp_path, capsys, game, p
     assert "TASK_STATUS=PASS" not in output
 
 
+def test_explicit_recovery_cannot_open_login_in_an_active_parallel_session(tmp_path):
+    from hoyo_roster.auth import ParallelRecoveryRequired
+
+    port = FakePort()
+
+    async def run():
+        async with SessionService(port.client(), tmp_path / "runtime") as session:
+            session.parallel = True
+            with pytest.raises(ParallelRecoveryRequired) as interrupted:
+                await session.recover()
+            assert interrupted.value.version == session.version
+
+    asyncio.run(run())
+    assert not any(c["method"].startswith("login.") for c in port.calls)
+
+
 def test_same_version_waiters_share_login_and_late_failure_uses_verified_version(tmp_path):
     from hoyo_roster.errors import AuthenticationRequired
 

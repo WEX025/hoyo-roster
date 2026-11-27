@@ -173,6 +173,8 @@ class SessionService:
         """Serialize the handoff and publish its version only after identities match."""
         version = self.version if observed_version is None else observed_version
         async with self._auth_lock:
+            if self.parallel and version == self.version:
+                raise ParallelRecoveryRequired(version)
             return await self._login_or_reuse(version, verify_current)
 
     async def _login_or_reuse(self, version, verify_current):
