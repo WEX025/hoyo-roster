@@ -153,7 +153,9 @@ class SessionService:
             if self._recovery_failed:
                 raise AuthenticationRecoveryFailed()
             if self._pending_login:
-                raise ParallelRecoveryRequired(observed_version)
+                raise ParallelRecoveryRequired(self.version)
+            if observed_version != self.version:
+                return await verify_current() if verify_current is not None else None
             try:
                 result = await probe()
             except AuthenticationRequired:

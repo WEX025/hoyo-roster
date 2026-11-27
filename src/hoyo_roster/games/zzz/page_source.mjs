@@ -142,7 +142,8 @@ export function createZzzPageSource(ui) {
     if (!closed && await ui.call(signal, selectorOpen)) {
       try { await select(); }
       catch (error) {
-        if (signal.aborted || await ui.call(signal, selectorOpen)) throw error;
+        if (signal.aborted || (error.code && error.code !== "SOURCE_REQUEST_NOT_OBSERVED") ||
+            await ui.call(signal, selectorOpen)) throw error;
       }
       await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 3000 });
     }

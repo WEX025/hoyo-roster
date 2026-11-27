@@ -59,7 +59,7 @@ def test_replay_measures_overlap_without_adding_nested_metrics(run_dir):
     assert summary["seconds"] == 10
     assert summary["committed_games"] == 2
     assert set(snapshots) == {"genshin", "zzz"}
-    assert all(c["identity_reads"] >= 4 and c["roster_reads"] == 2 for c in summary["checks"])
+    assert all(c["identity_reads"] == 3 and c["roster_reads"] == 2 for c in summary["checks"])
     assert "123456789" not in json.dumps(summary)
 
 
@@ -152,3 +152,15 @@ def test_installation_checks_inventory_and_bytes(tmp_path, monkeypatch, capsys):
     result = verify(root, installed)
     assert result["mismatched_files"] == result["unexpected_installed_files"] == 1
     assert not result["installation_matches_source"]
+
+
+def test_offline_replay_requires_identity_between_rounds(run_dir):
+    file = run_dir / "result.json"
+    result = json.loads(file.read_text())
+    events = result["events"]
+    identity = "PAGE_SOURCE=genshin:identity"
+    middle = [i for i, event in enumerate(events) if event == identity][1]
+    events.insert(0, events.pop(middle))
+    file.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match="IDENTITY_EVIDENCE_MISSING"):
+        read_run(run_dir)

@@ -117,7 +117,17 @@ def read_run(directory: Path):
                 "identity_reads": events.count(f"PAGE_SOURCE={game}:identity"),
             }
         )
-        if checks[-1]["identity_reads"] < 4:
+        prefix = f"PAGE_SOURCE={game}:"
+        reads = [event.removeprefix(prefix) for event in events if event.startswith(prefix)]
+        first, second = [i for i, source in enumerate(reads) if source == "roster"]
+        if (
+            first == 0
+            or reads[first - 1] != "identity"
+            or reads[second - 1] != "identity"
+            or reads[-1] != "identity"
+            or "detail" not in reads[first + 1 : second]
+            or "detail" not in reads[second + 1 :]
+        ):
             raise ValueError("IDENTITY_EVIDENCE_MISSING")
     elapsed = stamp(run["closed_at"]) - stamp(run["started_at"])
     if elapsed <= 0:
