@@ -195,7 +195,7 @@ export function createGenshinPageSource(ui) {
       throw sourceFailure("SOURCE_DATA_INVALID");
     }
     if (!expected.length) return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: unavailable }, generation);
-    await measure("genshin.confirm", signal, () => ui.click(tab, tab.playwright.getByRole("button", { name: "确认", exact: true }), signal));
+    await measure("genshin.confirm", signal, () => ui.click(tab, tab.playwright.getByRole("button", { name: "确认", exact: true }), signal, { snapshot: false }));
     prepared.editing = true;
     const details = await measure("genshin.details", signal, () => ui.wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".characters-list > .container")).map(e => {

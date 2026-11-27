@@ -135,7 +135,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   async function wait(signal, read, accept, { timeoutMs = 18000, stable = false } = {}) {
     const deadline = Date.now() + timeoutMs;
-    let prior;
+    let prior, pollMs = 25;
     while (Date.now() < deadline) {
       const value = await call(signal, read);
       if (accept(value)) {
@@ -143,7 +143,11 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
         if (!stable || encoded === prior) return value;
         prior = encoded;
       } else prior = undefined;
-      await call(signal, () => new Promise(resolve => setTimeout(resolve, 150)));
+      // Preserve the evidence window for two identical content samples. UI
+      // acknowledgements get a fast first recheck and back off on slow pages.
+      const delay = stable && prior !== undefined ? 150 : pollMs;
+      await call(signal, () => new Promise(resolve => setTimeout(resolve, delay)));
+      pollMs = Math.min(150, pollMs * 2);
     }
     throw sourceFailure("SOURCE_REQUEST_NOT_OBSERVED");
   }

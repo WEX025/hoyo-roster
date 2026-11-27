@@ -25,13 +25,17 @@ export async function recordCollection(host, task, directory, version, parallelG
   let seen = 0, sequence = 0, window = 0, busy = false, finishing;
   const log = join(directory, "events.jsonl"), md = join(directory, "steps.md");
   const append = row => appendFile(log, JSON.stringify(row) + "\n");
+  const appendMetrics = async () => {
+    const metrics = host.drainMetrics();
+    if (metrics.length) await appendFile(log, metrics.map(metric =>
+      JSON.stringify({ kind: "browser_metric", ...metric }) + "\n").join(""));
+  };
   const finish = () => finishing ??= (async () => {
     let result;
     try { result = await task.completion; }
     finally { await host.releasePageSettings(); }
     // Include any reports received during process closure, not only the last pump.
-    const records = host.drainMetrics().map(metric => ({ kind: "browser_metric", ...metric }));
-    for (const record of records) await append(record);
+    await appendMetrics();
     const closed_at = new Date().toISOString();
     await writeFile(join(directory, "result.json"), JSON.stringify({ ...result, started_at,
       closed_at, source_sha: version.source_sha, parallelGames }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
@@ -62,7 +66,7 @@ export async function recordCollection(host, task, directory, version, parallelG
           },
           onStep: async ({ started, duration_ms, status }) => {
             const events = status.events.slice(seen); seen = status.events.length;
-            for (const metric of host.drainMetrics()) await append({ kind: "browser_metric", ...metric });
+            await appendMetrics();
             const row = { kind: "pump", id: ++sequence, window,
               start_at: new Date(performance.timeOrigin + started).toISOString(),
               end_at: new Date().toISOString(), duration_ms, events };

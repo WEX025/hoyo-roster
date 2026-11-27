@@ -308,7 +308,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let python, cwd, game, operation, args;
       try {
         if (!options || typeof options !== "object" || Array.isArray(options) ||
-            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun"].includes(k))) {
+            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun", "onCharacters"].includes(k))) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         ({ python, cwd, game = "all", operation = "sync" } = options);
@@ -317,7 +317,9 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             !["all", "genshin", "zzz", "hsr"].includes(game) || !["sync", "discover", "login"].includes(operation)) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
+        if (options.onCharacters !== undefined && (typeof options.onCharacters !== "function" || operation !== "sync")) throw failure("CLIENT_PROTOCOL_ERROR");
         args = ["-m", "hoyo_roster", "--client-stdio", "--game", game, "--operation", operation];
+        if (options.onCharacters) args.push("--stream-characters");
         if (options.collectionRun !== undefined && (game !== "all" || operation !== "sync" || options.uid !== undefined)) throw failure("CLIENT_PROTOCOL_ERROR");
         if (options.parallelGames !== undefined && typeof options.parallelGames !== "boolean") throw failure("CLIENT_PROTOCOL_ERROR");
         concurrentGames = options.parallelGames !== false && game === "all" && operation !== "login";
@@ -344,6 +346,22 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       const events = [];
       const games = operation === "login" || game === "hsr" ? [] : game === "all" ? ["genshin", "zzz"] : [game];
       const gameStates = Object.fromEntries(games.map(g => [g, "PENDING"]));
+      let observer = options.onCharacters;
+      const provisional = new Set();
+      function notifyCharacters(game, state, records = []) {
+        if (!observer) return;
+        if (state === "RESET" || state === "COMMITTED") {
+          if (!provisional.delete(game)) return;
+        } else provisional.add(game);
+        const disable = () => {
+          if (observer) events.push("CHARACTER_OBSERVER=FAILED");
+          observer = undefined;
+        };
+        try {
+          const result = observer({ game, state, records });
+          if (result?.then) result.catch(disable);
+        } catch { disable(); }
+      }
       const requests = [];
       let exitCode = null;
       let errorCode = null;
@@ -384,9 +402,21 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         if (streamEnded) { stop("CLIENT_PROTOCOL_ERROR"); return; }
         let message;
         try { message = JSON.parse(line); } catch { stop("CLIENT_PROTOCOL_ERROR"); return; }
-        if (message?.event === "report" && Object.keys(message).sort().join(",") === "event,line" && typeof message.line === "string") {
+        if (message?.event === "characters") {
+          if (!options.onCharacters || Object.keys(message).sort().join(",") !== "event,game,records,state" ||
+              !Object.hasOwn(gameStates, message.game) ||
+              gameStates[message.game] !== "COLLECTING" || !["PREVIEW", "MATCHED", "RESET"].includes(message.state) ||
+              !Array.isArray(message.records) || (message.state === "RESET" ? message.records.length !== 0 :
+                message.records.length < 1 || message.records.length > (message.game === "zzz" ? 1 : 4))) {
+            stop("CLIENT_PROTOCOL_ERROR"); return;
+          }
+          notifyCharacters(message.game, message.state, message.records);
+        } else if (message?.event === "report" && Object.keys(message).sort().join(",") === "event,line" && typeof message.line === "string") {
           const state = /^GAME_STATE=(genshin|zzz):(CHECKING_IDENTITY|COLLECTING|WAITING_LOGIN|COMPLETED|VERIFIED|NO_ROLES|FAILED|CANCELLED)$/.exec(message.line);
-          if (state && Object.hasOwn(gameStates, state[1])) gameStates[state[1]] = state[2];
+          if (state && Object.hasOwn(gameStates, state[1])) {
+            gameStates[state[1]] = state[2];
+            if (state[2] !== "COLLECTING") notifyCharacters(state[1], state[2] === "COMPLETED" ? "COMMITTED" : "RESET");
+          }
           if (events.length < 2048) events.push(message.line);
         } else if (message?.event === "end" && Object.keys(message).sort().join(",") === "code,event" &&
                    Number.isInteger(message.code) && message.code >= 0 && message.code <= 255 && !requests.length && !active) {
@@ -434,6 +464,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         wakeQueue();
         BROWSER_TASKS.delete(browser);
         for (const g of games) {
+          notifyCharacters(g, "RESET");
           if (["PENDING", "CHECKING_IDENTITY", "COLLECTING", "WAITING_LOGIN"].includes(gameStates[g])) {
             gameStates[g] = errorCode === "LOGIN_CANCELLED" ? "CANCELLED" : "INTERRUPTED";
           }

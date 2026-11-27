@@ -18,7 +18,7 @@ import { record } from "./fixtures_collection_source.mjs";
 for (const parallelGames of [undefined, false]) test(`one real worker ${parallelGames === false ? "explicitly serializes" : "defaults to overlapping"} games and commits both double passes`, {timeout:90000}, async () => {
   const parallel = parallelGames !== false;
   const temp = await realpath(await mkdtemp(join(tmpdir(),"hoyo-parallel-")));
-  const active = new Set(), starts = [], reads = [], completions = [];
+  const active = new Set(), starts = [], reads = [], completions = [], characters = [];
   let peak = 0, insidePump = false, observedIndependentCommit = false;
   const host = createClientHost(browser(), { pageReader:true, readSource:async q=>{
     assert.ok(insidePump);
@@ -38,7 +38,7 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
     }
     finally {active.delete(q.game);completions.push(q.game);}
   } });
-  const task=host.startTask({python,cwd:root,...(parallelGames === undefined ? {} : {parallelGames}),runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
+  const task=host.startTask({python,cwd:root,onCharacters: event => characters.push(event),...(parallelGames === undefined ? {} : {parallelGames}),runtimeRoot:join(temp,"runtime"),storageRoot:join(temp,"results")});
   assert.equal(task.status().parallelGames, parallel);
   const logs = join(temp, "timing");
   await mkdir(logs, {mode:0o700});
@@ -65,6 +65,16 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
     assert.ok(result.events.includes("TASK_STATUS=PASS"));
     assert.ok(result.events.some(x=>x.startsWith("CLIENT_TIMING=")));
     assert.deepEqual(result.gameStates, { genshin: "COMPLETED", zzz: "COMPLETED" });
+    for (const game of ["genshin", "zzz"]) {
+      const batches = characters.filter(event => event.game === game);
+      assert.deepEqual(batches.map(event => event.state), ["PREVIEW", "MATCHED", "COMMITTED"]);
+      assert.deepEqual(batches[0].records, batches[1].records);
+      assert.equal(batches[0].records[0].name, "Alpha");
+      assert.equal(reads.filter(([g,s])=>g===game&&s==="page:identity").length,3);
+    }
+    for (const file of ["events.jsonl", "result.json", "steps.md"]) {
+      assert.ok(!(await readFile(join(logs,file),"utf8")).includes('"detail":{'));
+    }
     assert.equal(released,true);
     assert.equal(JSON.parse(await readFile(join(logs,"result.json"),"utf8")).code,0);
     await assert.rejects(readFile(join(temp,"results","snapshot.json")),{code:"ENOENT"});

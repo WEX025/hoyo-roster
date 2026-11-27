@@ -195,7 +195,7 @@ async def run_page_game(args, session, *, progress, game, source, normalize, bat
     async def pinned_check():
         return ((await probe())[0],)
 
-    role, _ = await session.identity(check, probe=probe)
+    role, initial_profile = await session.identity(check, probe=probe)
     session.pin(game, (role,), pinned_check)
     checkpoint = getattr(args, "_collection_checkpoint", None)
     if checkpoint is not None:
@@ -205,15 +205,17 @@ async def run_page_game(args, session, *, progress, game, source, normalize, bat
     if args.operation == "discover":
         return GameResult(game, "PASS", (RoleResult(role, "VERIFIED"),))
 
-    async def collect():
-        observed_role, current_profile = await check()
-        if observed_role != role:
-            raise WrongAccount()
+    publish = getattr(args, "_character_event", None)
+
+    async def read_pass(profile, previous=None):
         params = {"uid": role.uid, "region": role.region}
         rows = roster(await source.read("roster", params))
+        if previous is not None and rows != previous["roster"]:
+            raise SourceDataInvalid()
         details = []
         for start in range(0, len(rows), batch_size):
-            names = [r["name"] for r in rows[start : start + batch_size]]
+            batch = rows[start : start + batch_size]
+            names = [row["name"] for row in batch]
             chunk = await source.read("detail", {**params, "names": names})
             if (
                 not isinstance(chunk, dict)
@@ -221,20 +223,30 @@ async def run_page_game(args, session, *, progress, game, source, normalize, bat
                 or not isinstance(chunk["details"], list)
             ):
                 raise SourceDataInvalid()
-            mapped = [normalize(raw) for raw in chunk["details"]]
-            if len(mapped) != len(names) or {d["name"] for d in mapped} != set(names):
+            mapped = sorted((normalize(raw) for raw in chunk["details"]), key=lambda d: d["name"])
+            if [item["name"] for item in mapped] != names:
+                raise SourceDataInvalid()
+            if any(
+                "level" in item and item["level"] != row["level"]
+                for item, row in zip(mapped, batch, strict=True)
+            ):
+                raise SourceDataInvalid()
+            if previous is not None and mapped != previous["details"][start : start + len(batch)]:
                 raise SourceDataInvalid()
             details.extend(mapped)
+            if publish:
+                publish(
+                    game,
+                    "PREVIEW" if previous is None else "MATCHED",
+                    [{**row, "detail": detail} for row, detail in zip(batch, mapped, strict=True)],
+                )
             print(f"PAGE_DETAILS_DONE={len(details)}", flush=True)
-        if (await check())[0] != role:
-            raise WrongAccount()
-        details.sort(key=lambda d: d["name"])
         return {
             "format": "hoyo-roster-page-v1",
             "game": game,
             "state": "partial",
             "scope": "rendered-owned-characters",
-            "profile": current_profile,
+            "profile": profile,
             "roster": rows,
             "details": details,
             "synced_at": "2000-01-01T00:00:00Z",
@@ -264,17 +276,36 @@ async def run_page_game(args, session, *, progress, game, source, normalize, bat
 
         progress.update("COLLECTING")
 
+        async def checked_profile():
+            observed_role, profile = await check()
+            if observed_role != role:
+                raise WrongAccount()
+            return profile
+
         async def read_passes():
-            print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)
-            first = await collect()
-            print("PAGE_PASS=2", flush=True)
-            return first, await collect()
+            nonlocal initial_profile
+            # Consume the boundary exactly once; any restart needs fresh evidence.
+            profile = initial_profile if initial_profile is not None else await checked_profile()
+            initial_profile = None
+            try:
+                print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)
+                first = await read_pass(profile)
+                middle = await checked_profile()
+                if middle != profile:
+                    raise SourceDataInvalid()
+                print("PAGE_PASS=2", flush=True)
+                second = await read_pass(middle, first)
+                if await checked_profile() != middle:
+                    raise SourceDataInvalid()
+                return second
+            except BaseException:
+                if publish:
+                    publish(game, "RESET", [])
+                raise
 
         try:
-            first, second = await session.collect(game, read_passes)
+            second = await session.collect(game, read_passes)
             validation_started = time.monotonic()
-            if first != second:
-                raise SourceDataInvalid()
             validate_snapshot(second, game, normalize)
             print(
                 "PAGE_TIMING="

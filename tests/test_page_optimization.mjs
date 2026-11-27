@@ -240,7 +240,9 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
   let opened = false, currentName = "Initial", scans = 0, reloads = 0;
   const rect = () => ({ width: 100, height: 100 });
-  const cardFor = name => ({ querySelector: () => ({ textContent: name }), innerText: "Lv.50 " + name });
+  const cardFor = name => ({ getBoundingClientRect: rect,
+    querySelector: selector => selector === ".gt-card__content.active" ? (name === currentName ? {} : null) : { textContent: name },
+    innerText: "Lv.50 " + name });
   const marker = text => ({ textContent: text, children: [], getBoundingClientRect: rect,
     parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName } },
     closest: () => ({ innerText: text + " synthetic " + currentName }) });
@@ -248,17 +250,17 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
     if (selector === ".agent-list__row .gt-card") { scans++; return [cardFor("Alpha"), cardFor("Beta")]; }
     if (selector === "div.relative.z-2") return [{ textContent: currentName, parentElement: { classList: { contains: () => true } } }];
     if (selector === "p,div") return ["当前音擎", "当前技能等级", "当前装备驱动盘"].map(marker);
-    if (selector === ".agent-list__row") return opened ? [{ getBoundingClientRect: rect }] : [];
+    if (selector === ".agent-list__row") return opened ? [{ getBoundingClientRect: rect, querySelectorAll: () => [cardFor("Alpha"),cardFor("Beta")] }] : [];
     return [];
   } };
   const target = name => ({ isVisible: async () => name === "选择代理人" ? opened : true,
-    click: async () => { currentName = name; opened = false; } });
+    click: async () => { opened = name === "Beta" && currentName !== name; currentName = name; } });
   const tab = { id: "synthetic", reload: async () => { reloads++; }, url: async () => "https://act.mihoyo.com/zzz/gt/character-builder-h/index.html#/",
-    playwright: { evaluate: async fn => runInNewContext("(" + fn.toString() + ")()", { document }),
+    playwright: { evaluate: async (fn, arg) => runInNewContext("(" + fn.toString() + ")(arg)", { document, arg }),
       getByRole: () => ({ isVisible: async () => false }), getByText: target,
       locator: () => ({ click: async () => { opened = true; }, filter: ({ has }) => ({
         isVisible: async () => opened, innerText: async () => "Lv.50 " + has.text,
-        evaluate: async () => has.text === currentName,
+        evaluate: async fn => runInNewContext("(" + fn.toString() + ")(card)", { card: cardFor(has.text), getComputedStyle: () => ({ visibility: "visible" }) }),
         getByText: target,
       }) }),
     } };

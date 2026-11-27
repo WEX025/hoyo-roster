@@ -61,12 +61,13 @@ export function createWorkflowDriver({ directory, control, startSession, initial
       if (browser && browser !== attachedBrowser) throw failure("WORKFLOW_BROWSER_CHANGED");
       browser = attachedBrowser;
     }
+    const deadline = performance.now() + launchMs;
     const active = (async () => {
       try {
         if (data.status.done) return view();
         if (data.status.state === "PREPARING") {
           await call("prepare");
-          return view(); // Leave a full foreground budget for collection next time.
+          if (cancelling || !browser || performance.now() >= deadline) return view();
         }
         if (data.status.state === "WAITING_BROWSER") {
           if (!browser) return view();
@@ -75,7 +76,9 @@ export function createWorkflowDriver({ directory, control, startSession, initial
         }
         if (["COLLECTING", "WAITING_LOGIN"].includes(data.status.state)) {
           if (!session) throw failure("WORKFLOW_RECONNECT_REQUIRED");
-          const state = await session.advance({ launchMs });
+          const remaining = deadline - performance.now();
+          if (remaining <= 0) return view();
+          const state = await session.advance({ launchMs: remaining });
           progress = state.progress ?? [];
           if (cancelling) { await call("cancel", { gameStates: session?.gameStates?.() }); return view(); }
           if (state.done) await call("finish");
@@ -153,9 +156,10 @@ export async function resolveWorkflowOwner(python) {
   return owner;
 }
 
-export async function openCollectionWorkflow({ directory, python: selectedPython, ...options }) {
+export async function openCollectionWorkflow({ directory, python: selectedPython, onCharacters, ...options }) {
   const started = performance.now(), start_at = new Date().toISOString();
   if (typeof directory !== "string" || !directory || directory.includes("\0")) throw failure("WORKFLOW_OPTIONS_INVALID");
+  if (onCharacters !== undefined && typeof onCharacters !== "function") throw failure("WORKFLOW_OPTIONS_INVALID");
   const allowed = new Set(["parallelGames", "runtimeRoot", "update", "repairInstallation", "installationArtifact", "baseline"]);
   if (Object.keys(options).some(key => !allowed.has(key)) ||
       ["parallelGames", "update", "repairInstallation"].some(key => options[key] !== undefined && typeof options[key] !== "boolean") ||
@@ -163,7 +167,7 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
       (selectedPython !== undefined && (typeof selectedPython !== "string" || !selectedPython || selectedPython.includes("\0")))) throw failure("WORKFLOW_OPTIONS_INVALID");
   directory = resolve(directory);
   if (live.has(directory)) {
-    if (Object.keys(options).length) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
+    if (Object.keys(options).length || onCharacters !== undefined) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
     return live.get(directory);
   }
   let exists = false;
@@ -182,7 +186,7 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
     const host = createRosterHost(browser);
     const task = host.startTask({ python: data.config.python, cwd: data.config.repository ?? moduleDirectory,
       game: "all", operation: "sync", parallelGames: data.config.parallel_games,
-      storageRoot: join(directory, "results"), runtimeRoot: data.config.runtime_root, collectionRun: directory });
+      storageRoot: join(directory, "results"), runtimeRoot: data.config.runtime_root, collectionRun: directory, onCharacters });
     return recordCollection(host, task, join(directory, "attempts", String(data.attempt).padStart(4, "0")),
       data.version, data.config.parallel_games);
   };

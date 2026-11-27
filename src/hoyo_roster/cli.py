@@ -88,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--client-stdio", action="store_true", help="客户端宿主专用双向管道；不要在普通终端运行"
     )
+    parser.add_argument("--stream-characters", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--collection-run", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--run-id", help="owned candidate UUID for explicit cleanup")
     parser.add_argument(

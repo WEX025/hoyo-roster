@@ -148,20 +148,32 @@ class SessionService:
         self, observed_version, *, probe, verify_current=None, allow_login=True
     ):
         """One same-session probe. Only confirmed expiry can interrupt another game."""
+        if self.parallel:
+            # The coordinator drains every reader before it can publish a new version.
+            if self._recovery_failed:
+                raise AuthenticationRecoveryFailed()
+            if self._pending_login:
+                raise ParallelRecoveryRequired(observed_version)
+            try:
+                result = await probe()
+            except AuthenticationRequired:
+                if not self._pending_login and (not allow_login or self._collection_login):
+                    raise AuthenticationRecoveryFailed() from None
+                self._pending_login = True
+            else:
+                if not self._pending_login:
+                    return result
+            raise ParallelRecoveryRequired(observed_version)
+
         async with self._auth_lock:
             if self._recovery_failed:
                 raise AuthenticationRecoveryFailed()
             if observed_version == self.version:
-                if self._pending_login:
-                    raise ParallelRecoveryRequired(observed_version)
                 try:
                     return await probe()
                 except AuthenticationRequired:
                     if not allow_login or self._collection_login:
                         raise AuthenticationRecoveryFailed() from None
-                if self.parallel:
-                    self._pending_login = True
-                    raise ParallelRecoveryRequired(observed_version)
             return await self._login_or_reuse(observed_version, verify_current)
 
     async def resume_after_drain(self, observed_version, *, startup):

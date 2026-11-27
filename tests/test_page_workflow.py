@@ -180,6 +180,7 @@ def test_page_drift_never_writes_a_snapshot(tmp_path):
     port = PagePort()
     port.page_drift = True
     assert cli.main(arguments(tmp_path, "--game", "genshin"), client=port.client()) == 1
+    assert port.counts["genshin", "page:detail"] == 1
     assert not snapshots(tmp_path)
 
 

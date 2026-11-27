@@ -105,28 +105,59 @@ export function createZzzPageSource(ui) {
     const previousHeader = await ui.call(signal, () => headerName(tab));
     await measure("zzz.open-selector", signal, () => selector(tab, signal, false));
     const card = tab.playwright.locator(".agent-list__row .gt-card").filter({ has: tab.playwright.getByText(name, { exact: true }) });
-    await ui.wait(signal, () => card.isVisible(), Boolean);
-    const ownedLabel = await ui.call(signal, () => card.innerText({ timeoutMs: 1500 }));
-    if (!/^Lv\.[1-9][0-9]*\s/.test(ownedLabel)) throw sourceFailure("SOURCE_DATA_INVALID");
-    // The official visible active marker associates an unchanged header with
-    // this owned card. Re-selecting it closes the panel without a title change.
-    const targetWasActive = await ui.call(signal, () => readDom(card, e => Boolean(e.querySelector(".gt-card__content.active"))));
+    const before = await ui.wait(signal, () => readDom(card, e => {
+      const rect = e.getBoundingClientRect();
+      return { visible: rect.width > 0 && rect.height > 0 && getComputedStyle(e).visibility === "visible",
+        label: e.innerText?.trim(), active: Boolean(e.querySelector(".gt-card__content.active")) };
+    }), value => value.visible);
+    if (!/^Lv\.[1-9][0-9]*\s/.test(before.label)) throw sourceFailure("SOURCE_DATA_INVALID");
+    const targetWasActive = before.active;
     const selectorOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
-    await click(tab, card.getByText(name, { exact: true }), signal);
+    const select = () => click(tab, card.getByText(name, { exact: true }), signal);
+    await select();
     await dismissSchemeNotice(ui, tab, signal);
-    const transition = await ui.call(signal, () => readDom(tab.playwright, () =>
-      !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
-        e.textContent?.trim() === "当前技能等级" && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)));
-    try { await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 750 }); }
-    catch (error) {
+    // An inactive card can become active while the selector stays open. The
+    // selector closing and this acknowledged selection are both useful signals.
+    let transition = false;
+    const selection = () => readDom(tab.playwright, target => {
+      const visible = e => e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+      const rows = Array.from(document.querySelectorAll(".agent-list__row")).filter(visible);
+      const active = rows.flatMap(row => Array.from(row.querySelectorAll(".gt-card")))
+        .some(e => e.querySelector(".gt-card__info-outside")?.textContent?.trim() === target &&
+          Boolean(e.querySelector(".gt-card__content.active")));
+      const loading = !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
+        e.textContent?.trim() === "当前技能等级" && visible(e));
+      return { open: rows.length > 0, active, loading };
+    }, name);
+    let closed = false;
+    try {
+      const state = await ui.wait(signal, selection, value => {
+        transition ||= value.loading;
+        return !value.open || (!targetWasActive && value.active);
+      }, { timeoutMs: 750 });
+      closed = !state.open;
+    } catch (error) {
       if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
-      if (await ui.call(signal, selectorOpen)) await click(tab, card.getByText(name, { exact: true }), signal);
+    }
+    if (!closed && await ui.call(signal, selectorOpen)) {
+      try { await select(); }
+      catch (error) {
+        if (signal.aborted || await ui.call(signal, selectorOpen)) throw error;
+      }
       await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 3000 });
     }
     const detail = await measure("zzz.details", signal, () => ui.wait(signal, () => readDom(tab.playwright, () => {
-      const find = text => Array.from(document.querySelectorAll("p,div")).find(e => e.textContent?.trim() === text && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0);
+      const headings = new Map();
+      for (const e of document.querySelectorAll("p,div")) {
+        if (e.children.length) continue;
+        const text = e.textContent?.trim();
+        if (!["当前音擎", "当前技能等级", "当前装备驱动盘"].includes(text) || headings.has(text)) continue;
+        const rect = e.getBoundingClientRect();
+        if (rect.width && rect.height) headings.set(text, e);
+        if (headings.size === 3) break;
+      }
       const name = Array.from(document.querySelectorAll("div.relative.z-2")).find(e => e.parentElement.classList.contains("mr-4"))?.textContent?.trim();
-      const weapon = find("当前音擎"), skills = find("当前技能等级"), discs = find("当前装备驱动盘");
+      const weapon = headings.get("当前音擎"), skills = headings.get("当前技能等级"), discs = headings.get("当前装备驱动盘");
       const emptyWeapon = Array.from(document.querySelectorAll(".point-bg-hoc")).some(e =>
         e.previousElementSibling?.textContent?.trim() === "音擎" &&
         e.querySelector('.point-bg-container > .pb-12 > [data-invalid="true"]')?.textContent?.trim() === "EMPTY");

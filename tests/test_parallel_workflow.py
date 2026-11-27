@@ -326,3 +326,32 @@ def test_private_pipe_routes_out_of_order_replies_and_rejects_unknown_ids(bad_id
     finally:
         for stream in [outgoing, writer, incoming, reader]:
             stream.close()
+
+
+def test_two_healthy_auth_probes_do_not_block_each_other():
+    from hoyo_roster.auth import SessionService
+
+    async def run():
+        session = SessionService(ConcurrentPort().client())
+        session.parallel = True
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def slow():
+            entered.set()
+            await release.wait()
+            return "slow"
+
+        async def fast():
+            return "fast"
+
+        pending = asyncio.create_task(session.ensure_authenticated(0, probe=slow))
+        await entered.wait()
+        try:
+            assert await asyncio.wait_for(session.ensure_authenticated(0, probe=fast), 1) == "fast"
+            assert not pending.done()
+        finally:
+            release.set()
+            assert await pending == "slow"
+        assert session.version == 0
+
+    asyncio.run(run())
