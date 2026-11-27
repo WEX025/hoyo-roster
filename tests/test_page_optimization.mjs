@@ -238,15 +238,16 @@ test("active runner pumps only single requests and hands back login questions im
 test("ZZZ reuses a roster and verifies both changed and already-active owned cards", async () => {
   const { createZzzPageSource } = await import("../src/hoyo_roster/games/zzz/page_source.mjs");
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
+  let contentClicks = 0;
   let opened = false, currentName = "Initial", scans = 0, reloads = 0;
   const rect = () => ({ width: 100, height: 100 });
   const cardFor = name => ({ getBoundingClientRect: rect,
-    querySelector: selector => selector === ".gt-card__content.active" ? (name === currentName ? {} : null) : { textContent: name },
+    contains: () => true, querySelector: selector => selector === ".gt-card__content.active" ? (name === currentName ? {} : null) : { textContent: name, getBoundingClientRect: rect },
     innerText: "Lv.50 " + name });
   const marker = text => ({ textContent: text, children: [], getBoundingClientRect: rect,
     parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName } },
     closest: () => ({ innerText: text + " synthetic " + currentName }) });
-  const document = { body: { innerText: "Synthetic" }, querySelectorAll(selector) {
+  const document = { elementFromPoint: () => ({}), body: { innerText: "Synthetic" }, querySelectorAll(selector) {
     if (selector === ".agent-list__row .gt-card") { scans++; return [cardFor("Alpha"), cardFor("Beta")]; }
     if (selector === "div.relative.z-2") return [{ textContent: currentName, parentElement: { classList: { contains: () => true } } }];
     if (selector === "p,div") return ["当前音擎", "当前技能等级", "当前装备驱动盘"].map(marker);
@@ -261,6 +262,11 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
       locator: () => ({ click: async () => { opened = true; }, filter: ({ has }) => ({
         isVisible: async () => opened, innerText: async () => "Lv.50 " + has.text,
         evaluate: async fn => runInNewContext("(" + fn.toString() + ")(card)", { card: cardFor(has.text), getComputedStyle: () => ({ visibility: "visible" }) }),
+        locator: selector => ({click: async () => {
+          assert.equal(selector, ".gt-card__content");
+          contentClicks++;
+          await target(has.text).click();
+        }}),
         getByText: target,
       }) }),
     } };
@@ -287,6 +293,7 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   assert.equal(repeated.details[0].display_name, "Beta");
   assert.ok(repeated.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
+  assert.equal(contentClicks, 3);
   role.uid = "987654321";
   assert.equal((await source.read({ ...query("identity"), params: {} })).uid, "987654321");
   assert.equal(reloads, 1); // Only the roster refreshed; identity reopened its live panel.

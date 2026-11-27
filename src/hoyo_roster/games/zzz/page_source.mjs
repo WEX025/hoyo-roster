@@ -108,13 +108,15 @@ export function createZzzPageSource(ui) {
     const before = await ui.wait(signal, () => readDom(card, e => {
       const rect = e.getBoundingClientRect();
       return { visible: rect.width > 0 && rect.height > 0 && getComputedStyle(e).visibility === "visible",
-        label: e.innerText?.trim(), active: Boolean(e.querySelector(".gt-card__content.active")) };
+        label: e.innerText?.trim(), content: Boolean(e.querySelector(".gt-card__content")), active: Boolean(e.querySelector(".gt-card__content.active")) };
     }), value => value.visible);
     if (!/^Lv\.[1-9][0-9]*\s/.test(before.label)) throw sourceFailure("SOURCE_DATA_INVALID");
     const targetWasActive = before.active;
     const selectorOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
-    const select = () => click(tab, card.getByText(name, { exact: true }), signal);
-    await select();
+    // The roster name is an outside caption. Select its owned card's content
+    // directly, keeping the known caption as the bounded fallback.
+    const caption = card.getByText(name, { exact: true });
+    await click(tab, before.content ? card.locator(".gt-card__content") : caption, signal);
     await dismissSchemeNotice(ui, tab, signal);
     // An inactive card can become active while the selector stays open. The
     // selector closing and this acknowledged selection are both useful signals.
@@ -122,25 +124,41 @@ export function createZzzPageSource(ui) {
     const selection = () => readDom(tab.playwright, target => {
       const visible = e => e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
       const rows = Array.from(document.querySelectorAll(".agent-list__row")).filter(visible);
-      const active = rows.flatMap(row => Array.from(row.querySelectorAll(".gt-card")))
-        .some(e => e.querySelector(".gt-card__info-outside")?.textContent?.trim() === target &&
-          Boolean(e.querySelector(".gt-card__content.active")));
+      const card = rows.flatMap(row => Array.from(row.querySelectorAll(".gt-card")))
+        .find(e => e.querySelector(".gt-card__info-outside")?.textContent?.trim() === target);
+      const active = Boolean(card?.querySelector(".gt-card__content.active"));
+      const label = card?.querySelector(".gt-card__info-outside");
+      const box = label?.getBoundingClientRect();
+      const x = box && box.x + box.width / 2, y = box && box.y + box.height / 2;
+      const ready = box?.width > 0 && box.height > 0 && card.contains(document.elementFromPoint(x, y));
       const loading = !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
         e.textContent?.trim() === "当前技能等级" && visible(e));
-      return { open: rows.length > 0, active, loading };
+      return { open: rows.length > 0, active, loading, point: ready ? [x, y] : null };
     }, name);
-    let closed = false;
+    let closed = false, repair = "zzz.selection-timeout";
+    let lastPoint, stationarySince;
     try {
       const state = await ui.wait(signal, selection, value => {
         transition ||= value.loading;
-        return !value.open || (!targetWasActive && value.active);
+        if (!value.open) return true;
+        if (!targetWasActive && value.active) { repair = "zzz.confirm-active"; return true; }
+        // Only retry an unchanged, hittable owned caption after a full stable
+        // interval. A moving, covered, or loading selector keeps its deadline.
+        const point = !targetWasActive && !value.loading && value.point?.join(",");
+        if (!point || point !== lastPoint) stationarySince = performance.now();
+        lastPoint = point;
+        if (point && performance.now() - stationarySince >= 150) {
+          repair = "zzz.retry-stationary";
+          return true;
+        }
+        return false;
       }, { timeoutMs: 750 });
       closed = !state.open;
     } catch (error) {
       if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
     }
     if (!closed && await ui.call(signal, selectorOpen)) {
-      try { await select(); }
+      try { await measure(repair, signal, () => click(tab, caption, signal)); }
       catch (error) {
         if (signal.aborted || (error.code && error.code !== "SOURCE_REQUEST_NOT_OBSERVED") ||
             await ui.call(signal, selectorOpen)) throw error;

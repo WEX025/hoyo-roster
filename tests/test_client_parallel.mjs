@@ -73,7 +73,7 @@ for (const parallelGames of [undefined, false]) test(`one real worker ${parallel
       assert.equal(reads.filter(([g,s])=>g===game&&s==="page:identity").length,3);
     }
     for (const file of ["events.jsonl", "result.json", "steps.md"]) {
-      assert.ok(!(await readFile(join(logs,file),"utf8")).includes('"detail":{'));
+      assert.ok(!(await readFile(join(logs,file),"utf8")).includes('Alpha'));
     }
     assert.equal(released,true);
     assert.equal(JSON.parse(await readFile(join(logs,"result.json"),"utf8")).code,0);

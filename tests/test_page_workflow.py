@@ -473,3 +473,29 @@ def test_page_durability_failure_reports_unknown_without_claiming_saved(
     output = capsys.readouterr().out
     assert "COMMIT_STATE=DURABILITY_UNKNOWN" in output
     assert "ROLE_STATUS=SAVED" not in output
+
+
+def test_preview_is_withdrawn_on_second_pass_detail_drift(tmp_path):
+    import asyncio
+
+    class DetailDrift(PagePort):
+        async def exchange(self, message):
+            answer = await super().exchange(message)
+            params = message["params"]
+            if (
+                params.get("game") == "zzz"
+                and params.get("source") == "page:detail"
+                and self.counts["zzz", "page:detail"] == 2
+            ):
+                data = json.loads(answer["result"]["json"])
+                data["details"][0]["display_name"] += " changed"
+                answer["result"]["json"] = json.dumps(data)
+            return answer
+
+    args = cli.build_parser().parse_args(arguments(tmp_path))
+    events = []
+    args._character_event = lambda game, state, rows: events.append((game, state, rows))
+    assert asyncio.run(cli.run(args, client=DetailDrift().client())) == 1
+    assert [state for game, state, _ in events if game == "zzz"] == ["PREVIEW", "RESET"]
+    assert [state for game, state, _ in events if game == "genshin"] == ["PREVIEW", "MATCHED"]
+    assert len(snapshots(tmp_path)) == 1
