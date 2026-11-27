@@ -4,6 +4,7 @@ import { readFile, mkdtemp, rm, realpath, mkdir, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createClientHost } from "../src/hoyo_roster/client_host.mjs";
+import { pumpWindow } from "../src/hoyo_roster/client_runner.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const python = join(root, ".venv", process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python");
@@ -370,6 +371,43 @@ async function syntheticWorker(temporary, code) {
   await writeFile(join(temporary,"hoyo_roster","__init__.py"),"");
   await writeFile(join(temporary,"hoyo_roster","__main__.py"),code);
 }
+
+test("a window shorter than the shared gate waits without polling or starting another read", {timeout:10000}, async () => {
+  const temporary = await realpath(await mkdtemp(join(tmpdir(), "hoyo-gate-window-")));
+  const starts = [];
+  let task;
+  try {
+    await syntheticWorker(temporary, [
+      "import json",
+      "def send(value): print(json.dumps(value), flush=True)",
+      "def request(i, session, method, params):",
+      "    send(dict(version=1, id=i, session=session, method=method, params=params))",
+      "request(1, None, 'session.attach', {})",
+      "session = json.loads(input())['session']",
+      "for i, game in enumerate(('genshin', 'zzz'), 2):",
+      "    request(i, session, 'source.read', dict(game=game, source='page:identity', params={}, body=None))",
+      "for i in range(2): assert json.loads(input())['error'] is None",
+      "send(dict(event='end', code=0))",
+    ].join("\n"));
+    const host = createClientHost(browserFixture().browser, { pageReader: true, readSource: async () => {
+      starts.push(performance.now());
+      return { json: "{}", origin: {}, evidence: {} };
+    } });
+    task = host.startTask({ python, cwd: temporary });
+    while (!starts.length) await task.pump({ maxRequests: 1, waitMs: 100 });
+    let steps = 0;
+    await pumpWindow(task, { budgetMs: 120, onStep: () => { steps++; } });
+    assert.ok(steps <= 2, `unexpected empty pump count: ${steps}`);
+    assert.equal(starts.length, 1);
+    await pumpUntil(task, () => task.status().done);
+    assert.equal((await task.completion).code, 0);
+    assert.equal(starts.length, 2);
+    assert.ok(starts[1] - starts[0] >= 1995);
+  } finally {
+    if (task && !task.status().done) { task.cancel(); await task.completion; }
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
 
 test("Oversized unfinished frames and EOF terminate without waiting for a source", {timeout:15000}, async () => {
   for (const code of ["import os\nos.write(1,b'{')\n",

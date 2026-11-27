@@ -462,11 +462,13 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
               const next = requests[0]?.message;
               const throttled = concurrentGames && ["source.read", "service.prepare"].includes(next?.method);
               if (throttled && nextSourceStart > performance.now()) {
-                if (launchBudgetMs && nextSourceStart >= deadline) break;
-                while (!lifetime.signal.aborted && nextSourceStart > performance.now()) {
-                  await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(100, nextSourceStart - performance.now()))));
+                // Consume the remaining foreground budget when this read belongs
+                // to the next window. Returning early would make the runner spin.
+                const wakeAt = launchBudgetMs ? Math.min(nextSourceStart, deadline) : nextSourceStart;
+                while (!lifetime.signal.aborted && wakeAt > performance.now()) {
+                  await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(100, wakeAt - performance.now()))));
                 }
-                if (lifetime.signal.aborted) break;
+                if (lifetime.signal.aborted || (launchBudgetMs && performance.now() >= deadline)) break;
               }
               const { message, queued } = requests.shift();
               handled++;
