@@ -44,7 +44,7 @@ export function createGenshinPageSource(ui) {
       }))), rows => rows.length > 0 && rows.every(r => r.name && /^Lv\.[1-9][0-9]*$/.test(r.level ?? "")), { stable: true }));
     return { rows, role, tab };
   }
-  async function read({ source, params, body, signal, generation }) {
+  async function read({ source, params, body, signal, generation, recheck = false }) {
     if (body !== null || !params || typeof params !== "object" || Array.isArray(params)) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     let tab = await ui.page(PAGE, signal);
     if (source === "page:identity") {
@@ -52,7 +52,7 @@ export function createGenshinPageSource(ui) {
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Another game tab may have completed shared login while this SPA still
       // renders its anonymous catalog. Re-read the official page in this session.
-      if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+      if (recheck || identityContext?.tab !== tab || identityContext.generation !== generation) {
         tab = await measure("genshin.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("genshin.identity", signal, () => identity(tab, signal));
@@ -151,8 +151,9 @@ export function createGenshinPageSource(ui) {
             !/^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "")) throw error;
       }
       try {
-        await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,
-          names => names.includes(name) === (operation === "genshin.select"), { timeoutMs: 1500, stable: true }));
+        await measure("genshin.wait-selection", signal, () => ui.wait(signal,
+          () => readDom(card, element => Boolean(element.querySelector(".gt-avatar-selected"))),
+          selected => selected === (operation === "genshin.select"), { timeoutMs: 1500 }));
       } catch (error) {
         // A genuinely missed action gets only the observed-set repair below.
         if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
@@ -194,7 +195,7 @@ export function createGenshinPageSource(ui) {
       throw sourceFailure("SOURCE_DATA_INVALID");
     }
     if (!expected.length) return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: unavailable }, generation);
-    await measure("genshin.confirm", signal, () => ui.click(tab, tab.playwright.getByRole("button", { name: "确认", exact: true }), signal));
+    await measure("genshin.confirm", signal, () => ui.click(tab, tab.playwright.getByRole("button", { name: "确认", exact: true }), signal, { snapshot: false }));
     prepared.editing = true;
     const details = await measure("genshin.details", signal, () => ui.wait(signal, () => readDom(tab.playwright, () =>
       Array.from(document.querySelectorAll(".characters-list > .container")).map(e => {
@@ -208,7 +209,7 @@ export function createGenshinPageSource(ui) {
       })), values => values.length === expected.length && values.every(v => v.synced && expected.includes(v.name)), { stable: true }));
     return ui.record("genshin", await ui.call(signal, () => tab.url()), "character-selection-and-editor", { details: [...details, ...unavailable] }, generation);
   }
-  return Object.freeze({ read: async query => {
+  return Object.freeze({ url: PAGE, read: async query => {
     try { return await read(query); }
     catch (error) { prepared = null; identityContext = null; throw error; }
   }, available: async ({ signal }) => await ui.available(PAGE, signal) ? [...sourceNames] : [] });

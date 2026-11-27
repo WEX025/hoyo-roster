@@ -26,7 +26,7 @@ def test_zzz_service_expiry_refreshes_service_without_user_login(tmp_path):
     assert not any(call["method"] == "login.open" for call in port.calls)
 
 
-def test_repeated_service_expiry_is_bounded(tmp_path, capsys):
+def test_repeated_service_denial_with_verified_binding_is_bounded(tmp_path, capsys):
     port = FakePort()
     for number in range(1, 5):
         port.fail_at[("zzz", "cultivate:user/avatar_basic_list", number)] = (
@@ -34,8 +34,19 @@ def test_repeated_service_expiry_is_bounded(tmp_path, capsys):
         )
     assert cli.main(arguments(tmp_path, "--game", "zzz"), client=port.client()) == 1
     assert port.counts[("zzz", "cultivate:user/avatar_basic_list")] == 4
+    assert not any(call["method"].startswith("login.") for call in port.calls)
+    output = capsys.readouterr().out
+    assert "ERROR_CODE=CLIENT_SOURCE_UNAVAILABLE" in output
+    assert "TASK_STATUS=FAIL" in output
+
+
+def test_account_expiry_during_service_preparation_uses_shared_login(tmp_path):
+    port = FakePort()
+    port.expire_at.add(("zzz", "cultivate:badge-login", 1))
+    assert cli.main(arguments(tmp_path, "--game", "zzz"), client=port.client()) == 0
     assert sum(call["method"] == "login.confirm" for call in port.calls) == 1
-    assert "TASK_STATUS=PASS" not in capsys.readouterr().out
+    assert port.counts["zzz", "cultivate:badge-login"] == 2
+    assert port.counts["zzz", "cultivate:user/avatar_basic_list"] == 2
 
 
 @pytest.mark.parametrize("code", ["RISK_CONTROL", "RATE_LIMITED"])

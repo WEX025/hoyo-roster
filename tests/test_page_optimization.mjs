@@ -6,8 +6,13 @@ import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
 function fixture({ delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
-  const counts = { reload: 0, back: 0, clicks: 0 };
+  const counts = { reload: 0, back: 0, clicks: 0, markerReads: 0 };
   const pending = [];
+  function advanceMarkers() {
+    for (const action of [...pending]) if (--action.reads === 0) {
+      action.toggle(); pending.splice(pending.indexOf(action), 1);
+    }
+  }
   let edit = false, nickname = "Synthetic", current, blocker = "none";
   let backReads = 0;
   let hiddenReads = 0;
@@ -48,9 +53,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
     url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
     playwright: {
       evaluate: async fn => {
-        for (const action of [...pending]) if (--action.reads === 0) {
-          action.toggle(); pending.splice(pending.indexOf(action), 1);
-        }
+        advanceMarkers();
         return runInNewContext("(" + fn.toString() + ")()", { document });
       },
       domSnapshot: async () => "Synthetic state",
@@ -59,7 +62,12 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
       locator: selector => ({
         count: async () => 1,
         innerText: async () => nickname,
-        filter: ({ has }) => ({ click: target(has.text).click, getByText: target }),
+        filter: ({ has }) => ({ click: target(has.text).click, getByText: target,
+          evaluate: async fn => {
+            counts.markerReads++;
+            advanceMarkers();
+            return fn(cards[names.indexOf(has.text)]);
+          } }),
       }),
     } };
   current = tab;
@@ -94,6 +102,7 @@ test("Genshin reuses only the current round, reconciles selected cards and retur
   assert.deepEqual(Array.from(second.details, d => d.name), ["Gamma", "Delta"]);
   assert.equal(f.counts.reload, 1);
   assert.equal(f.counts.back, 1);
+  assert.equal(f.counts.markerReads, 6); // One targeted read per settled toggle.
   await f.reader.read(f.query("page:roster"));
   assert.equal(f.counts.reload, 2); // A second pass must prepare fresh observations.
 });
@@ -180,6 +189,8 @@ test("Genshin rereads live identity without reloading an established page, refre
   f.replacePage();
   await f.reader.read(identityQuery(1));
   assert.equal(f.counts.reload, 3);
+  await f.reader.read({ ...identityQuery(1), recheck: true });
+  assert.equal(f.counts.reload, 4);
 });
 
 test("Genshin waits for a closing overlay without dismissing it or accepting a persistent blocker", async () => {
@@ -227,27 +238,35 @@ test("active runner pumps only single requests and hands back login questions im
 test("ZZZ reuses a roster and verifies both changed and already-active owned cards", async () => {
   const { createZzzPageSource } = await import("../src/hoyo_roster/games/zzz/page_source.mjs");
   const role = { uid: "123456789", region: "Synthetic", nickname: "Synthetic" };
+  let contentClicks = 0;
   let opened = false, currentName = "Initial", scans = 0, reloads = 0;
   const rect = () => ({ width: 100, height: 100 });
-  const cardFor = name => ({ querySelector: () => ({ textContent: name }), innerText: "Lv.50 " + name });
+  const cardFor = name => ({ getBoundingClientRect: rect,
+    contains: () => true, querySelector: selector => selector === ".gt-card__content.active" ? (name === currentName ? {} : null) : { textContent: name, getBoundingClientRect: rect },
+    innerText: "Lv.50 " + name });
   const marker = text => ({ textContent: text, children: [], getBoundingClientRect: rect,
     parentElement: { innerText: text + " synthetic " + currentName, parentElement: { innerText: text + " synthetic " + currentName } },
     closest: () => ({ innerText: text + " synthetic " + currentName }) });
-  const document = { body: { innerText: "Synthetic" }, querySelectorAll(selector) {
+  const document = { elementFromPoint: () => ({}), body: { innerText: "Synthetic" }, querySelectorAll(selector) {
     if (selector === ".agent-list__row .gt-card") { scans++; return [cardFor("Alpha"), cardFor("Beta")]; }
     if (selector === "div.relative.z-2") return [{ textContent: currentName, parentElement: { classList: { contains: () => true } } }];
     if (selector === "p,div") return ["当前音擎", "当前技能等级", "当前装备驱动盘"].map(marker);
-    if (selector === ".agent-list__row") return opened ? [{ getBoundingClientRect: rect }] : [];
+    if (selector === ".agent-list__row") return opened ? [{ getBoundingClientRect: rect, querySelectorAll: () => [cardFor("Alpha"),cardFor("Beta")] }] : [];
     return [];
   } };
   const target = name => ({ isVisible: async () => name === "选择代理人" ? opened : true,
-    click: async () => { currentName = name; opened = false; } });
+    click: async () => { opened = name === "Beta" && currentName !== name; currentName = name; } });
   const tab = { id: "synthetic", reload: async () => { reloads++; }, url: async () => "https://act.mihoyo.com/zzz/gt/character-builder-h/index.html#/",
-    playwright: { evaluate: async fn => runInNewContext("(" + fn.toString() + ")()", { document }),
+    playwright: { evaluate: async (fn, arg) => runInNewContext("(" + fn.toString() + ")(arg)", { document, arg }),
       getByRole: () => ({ isVisible: async () => false }), getByText: target,
       locator: () => ({ click: async () => { opened = true; }, filter: ({ has }) => ({
         isVisible: async () => opened, innerText: async () => "Lv.50 " + has.text,
-        evaluate: async () => has.text === currentName,
+        evaluate: async fn => runInNewContext("(" + fn.toString() + ")(card)", { card: cardFor(has.text), getComputedStyle: () => ({ visibility: "visible" }) }),
+        locator: selector => ({click: async () => {
+          assert.equal(selector, ".gt-card__content");
+          contentClicks++;
+          await target(has.text).click();
+        }}),
         getByText: target,
       }) }),
     } };
@@ -274,11 +293,14 @@ test("ZZZ reuses a roster and verifies both changed and already-active owned car
   assert.equal(repeated.details[0].display_name, "Beta");
   assert.ok(repeated.details[0].current_skills.includes("Beta"));
   assert.equal(scans, 1);
+  assert.equal(contentClicks, 3);
   role.uid = "987654321";
   assert.equal((await source.read({ ...query("identity"), params: {} })).uid, "987654321");
   assert.equal(reloads, 1); // Only the roster refreshed; identity reopened its live panel.
   await source.read({ ...query("identity"), params: {}, generation: 1 });
   assert.equal(reloads, 2);
+  await source.read({ ...query("identity"), params: {}, generation: 1, recheck: true });
+  assert.equal(reloads, 3);
 });
 
 

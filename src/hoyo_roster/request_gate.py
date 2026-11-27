@@ -13,17 +13,20 @@ class RequestGate:
         self.settings = settings
         self.path = settings.root / "request-state.json"
         self._reservation_lock = asyncio.Lock()
+        self.cross_game_interval_ms = 2000
+        self._last_page_game = None
+        self._own_deadline = None
 
-    async def reserve(self, *, requested_min_interval: float) -> float:
+    async def reserve(self, *, requested_min_interval: float, page_game=None) -> float:
         queued = time.monotonic()
         async with self._reservation_lock:
             queue_wait = (time.monotonic() - queued) * 1000
-            scheduled = await self._reserve(requested_min_interval=requested_min_interval)
+            scheduled = await self._reserve(requested_min_interval, page_game)
             self.last_reservation["queue_wait_ms"] = queue_wait
             self.last_reservation["total_ms"] += queue_wait
             return scheduled
 
-    async def _reserve(self, *, requested_min_interval: float) -> float:
+    async def _reserve(self, requested_min_interval, page_game) -> float:
         started = time.monotonic()
         if not math.isfinite(requested_min_interval) or requested_min_interval < 2:
             raise ConfigurationError("Request interval must be at least two seconds")
@@ -40,6 +43,17 @@ class RequestGate:
             or not math.isfinite(next_at)
         ):
             raise ConfigurationError("Request state invalid")
+        # The persisted deadline always protects older clients, a new process,
+        # and API reads. Only this live owner can use its previous page reservation.
+        if (
+            self.cross_game_interval_ms in (1000, 1500)
+            and requested_min_interval == 2
+            and page_game in ("genshin", "zzz")
+            and self._last_page_game in ("genshin", "zzz")
+            and page_game != self._last_page_game
+            and self._own_deadline == next_at
+        ):
+            next_at -= 2 - self.cross_game_interval_ms / 1000
         scheduled = max(now, next_at)
         wait = scheduled - now
         if not math.isfinite(now) or wait > 30:
@@ -48,6 +62,8 @@ class RequestGate:
             raise RequestScheduleInvalid("Persisted request schedule exceeds the wait budget")
         persist_started = time.monotonic()
         atomic_write_metadata(self.path, {"next_allowed_at": scheduled + requested_min_interval})
+        self._own_deadline = scheduled + requested_min_interval
+        self._last_page_game = page_game if requested_min_interval == 2 else None
         persisted = time.monotonic()
         await asyncio.sleep(wait)
         self.last_reservation = {

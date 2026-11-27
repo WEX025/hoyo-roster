@@ -17,10 +17,12 @@ export async function sourceStep(query, action, timeoutMs = 45000) {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(sourceFailure("SOURCE_REQUEST_NOT_OBSERVED")), timeoutMs);
   const signal = AbortSignal.any([query.signal, deadline.signal]);
+  // Allow an in-flight SDK action to unwind on peer authentication loss before login.
+  const hardStop = AbortSignal.any([query.lifetimeSignal ?? query.signal, deadline.signal]);
   let onAbort;
   const cancelled = new Promise((resolve, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
+    onAbort = () => reject(hardStop.reason);
+    hardStop.addEventListener("abort", onAbort, { once: true });
   });
   try {
     return await Promise.race([Promise.resolve().then(() => {
@@ -29,7 +31,7 @@ export async function sourceStep(query, action, timeoutMs = 45000) {
     }), cancelled]);
   } finally {
     clearTimeout(timer);
-    signal.removeEventListener("abort", onAbort);
+    hardStop.removeEventListener("abort", onAbort);
   }
 }
 

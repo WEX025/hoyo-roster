@@ -51,6 +51,7 @@ export function createWorkflowDriver({ directory, control, startSession, initial
   const view = () => ({ ...data.status,
     nextAction: data.status.state === "WAITING_BROWSER" && browser ? "CONTINUE" : data.status.nextAction,
     progress,
+    gameStates: session?.gameStates?.() ?? data.status.gameStates,
     ...(data.status.state === "SUCCEEDED" ? { report: { json: join(directory, "report/summary.json"), markdown: join(directory, "report/summary.md") } } : {}) });
   const call = async (action, extra = {}) => { data = await control(action, extra); return data; };
   async function advance(attachedBrowser, { launchMs = 180000 } = {}) {
@@ -60,12 +61,13 @@ export function createWorkflowDriver({ directory, control, startSession, initial
       if (browser && browser !== attachedBrowser) throw failure("WORKFLOW_BROWSER_CHANGED");
       browser = attachedBrowser;
     }
+    const deadline = performance.now() + launchMs;
     const active = (async () => {
       try {
         if (data.status.done) return view();
         if (data.status.state === "PREPARING") {
           await call("prepare");
-          return view(); // Leave a full foreground budget for collection next time.
+          if (cancelling || !browser || performance.now() >= deadline) return view();
         }
         if (data.status.state === "WAITING_BROWSER") {
           if (!browser) return view();
@@ -74,19 +76,21 @@ export function createWorkflowDriver({ directory, control, startSession, initial
         }
         if (["COLLECTING", "WAITING_LOGIN"].includes(data.status.state)) {
           if (!session) throw failure("WORKFLOW_RECONNECT_REQUIRED");
-          const state = await session.advance({ launchMs });
+          const remaining = deadline - performance.now();
+          if (remaining <= 0) return view();
+          const state = await session.advance({ launchMs: remaining });
           progress = state.progress ?? [];
-          if (cancelling) { await call("cancel"); return view(); }
+          if (cancelling) { await call("cancel", { gameStates: session?.gameStates?.() }); return view(); }
           if (state.done) await call("finish");
-          else await call("observe", { attempt: state.question?.attempt ?? null });
+          else await call("observe", { attempt: state.question?.attempt ?? null, gameStates: session.gameStates?.() });
         }
-        if (cancelling) { await call("cancel"); return view(); }
+        if (cancelling) { await call("cancel", { gameStates: session?.gameStates?.() }); return view(); }
         if (data.status.state === "VERIFYING") await call("verify");
         if (data.status.state === "REPORTING") await call("report");
         return view();
       } catch (error) {
         if (session) { try { await session.cancel(); } catch { /* Preserve original failure. */ } }
-        try { await call(cancelling ? "cancel" : "fail", { error: safeCode(error) }); }
+        try { await call(cancelling ? "cancel" : "fail", { error: safeCode(error), gameStates: session?.gameStates?.() }); }
         catch { throw failure("WORKFLOW_CHECKPOINT_WRITE_FAILED"); }
         return view();
       }
@@ -119,7 +123,7 @@ export function createWorkflowDriver({ directory, control, startSession, initial
       try {
         if (session) await session.cancel();
         if (inFlight) await inFlight;
-        await call("cancel");
+        await call("cancel", { gameStates: session?.gameStates?.() });
         return view();
       } finally { cancelling = false; }
     },
@@ -152,17 +156,20 @@ export async function resolveWorkflowOwner(python) {
   return owner;
 }
 
-export async function openCollectionWorkflow({ directory, python: selectedPython, ...options }) {
+export async function openCollectionWorkflow({ directory, python: selectedPython, onCharacters, ...options }) {
   const started = performance.now(), start_at = new Date().toISOString();
   if (typeof directory !== "string" || !directory || directory.includes("\0")) throw failure("WORKFLOW_OPTIONS_INVALID");
-  const allowed = new Set(["parallelGames", "runtimeRoot", "update", "repairInstallation", "installationArtifact", "baseline"]);
+  if (onCharacters !== undefined && typeof onCharacters !== "function") throw failure("WORKFLOW_OPTIONS_INVALID");
+  const allowed = new Set(["parallelGames", "crossGameIntervalMs", "runtimeRoot", "update", "repairInstallation", "installationArtifact", "baseline"]);
   if (Object.keys(options).some(key => !allowed.has(key)) ||
+      (options.crossGameIntervalMs !== undefined && (![1000, 1500, 2000].includes(options.crossGameIntervalMs) ||
+        (options.parallelGames === false && options.crossGameIntervalMs < 2000))) ||
       ["parallelGames", "update", "repairInstallation"].some(key => options[key] !== undefined && typeof options[key] !== "boolean") ||
       ["runtimeRoot", "installationArtifact", "baseline"].some(key => options[key] !== undefined && (typeof options[key] !== "string" || !options[key] || options[key].includes("\0"))) ||
       (selectedPython !== undefined && (typeof selectedPython !== "string" || !selectedPython || selectedPython.includes("\0")))) throw failure("WORKFLOW_OPTIONS_INVALID");
   directory = resolve(directory);
   if (live.has(directory)) {
-    if (Object.keys(options).length) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
+    if (Object.keys(options).length || onCharacters !== undefined) throw failure("WORKFLOW_OPTIONS_IMMUTABLE");
     return live.get(directory);
   }
   let exists = false;
@@ -181,7 +188,8 @@ export async function openCollectionWorkflow({ directory, python: selectedPython
     const host = createRosterHost(browser);
     const task = host.startTask({ python: data.config.python, cwd: data.config.repository ?? moduleDirectory,
       game: "all", operation: "sync", parallelGames: data.config.parallel_games,
-      storageRoot: join(directory, "results"), runtimeRoot: data.config.runtime_root, collectionRun: directory });
+      crossGameIntervalMs: data.config.cross_game_interval_ms,
+      storageRoot: join(directory, "results"), runtimeRoot: data.config.runtime_root, collectionRun: directory, onCharacters });
     return recordCollection(host, task, join(directory, "attempts", String(data.attempt).padStart(4, "0")),
       data.version, data.config.parallel_games);
   };

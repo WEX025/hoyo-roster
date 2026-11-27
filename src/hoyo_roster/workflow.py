@@ -6,19 +6,21 @@ import importlib
 from .auth import SessionService, ParallelRecoveryRequired
 from .client import ClientSession
 from .errors import OperationError, ClientBrowserRequired
-from .login import login
 from .user_workspace import WorkspaceError, direct_configuration
 from .game_runtime import GameResult, stops_account
+from .progress import GameProgress
 
 SUPPORTED_GAMES = ("genshin", "zzz")
 
 
-async def execute_game(args, session, game):
+async def execute_game(args, session, progress):
+    game = progress.game
+    progress.update("CHECKING_IDENTITY")
     module = importlib.import_module("hoyo_roster.games." + game + ".entry")
     try:
-        return await module.run(args, session)
+        result = await module.run(args, session, progress)
     except OperationError as error:
-        return GameResult(
+        result = GameResult(
             game,
             "FAIL",
             error_code=error.code,
@@ -26,54 +28,73 @@ async def execute_game(args, session, game):
             missing_sources=getattr(error, "missing_sources", ()),
         )
     except WorkspaceError as error:
-        return GameResult(
+        result = GameResult(
             game, "FAIL", error_code=str(error), stop_account=stops_account(error, str(error))
         )
+    if result.status == "PASS":
+        state = "VERIFIED" if args.operation == "discover" else "COMPLETED"
+    else:
+        state = "FAILED" if result.failed else "NO_ROLES"
+    progress.update(state)
+    return result
 
 
-async def parallel_games(args, session, games):
-    """One worker/lease; quiesce peers before recovery, preserving committed games."""
+async def parallel_attempt(args, session, remaining, completed):
     session.parallel = True
-    tasks = {asyncio.create_task(execute_game(args, session, game)): game for game in games}
-    pending, completed = set(tasks), {}
-    recovery = False
+    tasks = {
+        asyncio.create_task(execute_game(args, session, progress)): progress
+        for progress in remaining
+    }
+    pending = set(tasks)
+    recovery = None
     try:
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            stop = False
             for task in done:
                 try:
-                    result = task.result()
-                    completed[tasks[task]] = result
-                    stop |= result.stop_account
-                except ParallelRecoveryRequired:
-                    recovery = True
-            if stop or recovery:
+                    completed[tasks[task].game] = task.result()
+                except ParallelRecoveryRequired as error:
+                    recovery = error
+            if any(r.stop_account for r in completed.values()) or recovery is not None:
                 break
     finally:
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        drain = getattr(session.client.port, "drain", None)
-        if drain is not None:
-            await drain()
-        session.parallel = False
-    if recovery and not any(r.stop_account for r in completed.values()):
-        print("PARALLEL_RECOVERY=QUIESCED\nPARALLEL_MODE=SERIAL_RECOVERY", flush=True)
         try:
-            await session.recover()
-        except BaseException:
-            for result in completed.values():
-                result.report(finalized=False)
-            raise
-        session.parallel_recovered = True
-        for game in games:
-            if game not in completed:
-                print(f"PAGE_RESTART={game}", flush=True)
-                result = await execute_game(args, session, game)
-                completed[game] = result
-                if result.stop_account:
-                    break
+            drain = getattr(session.client.port, "drain", None)
+            if drain is not None:
+                await drain()
+        finally:
+            session.parallel = False
+    if recovery is not None and not any(r.stop_account for r in completed.values()):
+        startup = all(progress.state != "COLLECTING" for progress in remaining)
+        for progress in remaining:
+            if progress.game not in completed:
+                progress.update("WAITING_LOGIN")
+        return recovery.version, startup
+    return None
+
+
+async def parallel_games(args, session, games):
+    print("COLLECTION_MODE=PARALLEL", flush=True)
+    completed = {}
+    try:
+        while True:
+            remaining = [progress for game, progress in games.items() if game not in completed]
+            recovery = await parallel_attempt(args, session, remaining, completed)
+            if recovery is None:
+                break
+            print("PARALLEL_RECOVERY=QUIESCED", flush=True)
+            version, startup = recovery
+            await session.resume_after_drain(version, startup=startup)
+            for progress in remaining:
+                if progress.game not in completed:
+                    print(f"PAGE_RESTART={progress.game}", flush=True)
+    except BaseException:
+        for result in completed.values():
+            result.report(finalized=False)
+        raise
     return [completed[g] for g in games if g in completed]
 
 
@@ -97,6 +118,11 @@ async def run_task(args, client=None):
         raise ClientBrowserRequired()
     if not isinstance(client, ClientSession):
         raise ClientBrowserRequired()
+    cross_interval = getattr(args, "cross_game_interval_ms", None)
+    if cross_interval not in (None, 2000) and (
+        args.operation != "sync" or len(games) != 2 or not getattr(args, "parallel_games", True)
+    ):
+        raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
     if getattr(args, "collection_run", None) is not None:
         from .collection_state import CollectionCheckpoint
 
@@ -104,19 +130,23 @@ async def run_task(args, client=None):
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
         checkpoint = CollectionCheckpoint(args.collection_run)
         config = checkpoint.store.read()["config"]
+        saved_interval = config["cross_game_interval_ms"]
         if (
             args.storage_root != checkpoint.store.root / "results"
             or str(args.runtime_root) != config["runtime_root"]
+            or (cross_interval is not None and cross_interval != saved_interval)
         ):
             raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
+        cross_interval = saved_interval
         args._collection_checkpoint = checkpoint
+    progress = {game: GameProgress(game) for game in games}
     results = []
     try:
         async with SessionService(client, args.runtime_root) as session:
             if getattr(args, "_collection_checkpoint", None) is not None and not client.page_reader:
                 raise WorkspaceError("WORKFLOW_PAGE_READER_REQUIRED")
             if args.operation == "login":
-                await login(client)
+                await session.recover()
                 print("LOGIN_STATUS=USER_CONFIRMED", flush=True)
                 return 0
             if (
@@ -124,10 +154,15 @@ async def run_task(args, client=None):
                 and session.client.page_reader
                 and len(games) > 1
             ):
-                results.extend(await parallel_games(args, session, games))
+                if args.operation == "sync":
+                    session.gate.cross_game_interval_ms = (
+                        1000 if cross_interval is None else cross_interval
+                    )
+                results.extend(await parallel_games(args, session, progress))
             else:
+                print("COLLECTION_MODE=SERIAL", flush=True)
                 for game in games:
-                    result = await execute_game(args, session, game)
+                    result = await execute_game(args, session, progress[game])
                     results.append(result)
                     if result.stop_account:
                         break
@@ -135,6 +170,11 @@ async def run_task(args, client=None):
         for result in results:
             result.report(finalized=False)
         raise
+    finally:
+        if args.operation != "login":
+            for state in progress.values():
+                if state.state in GameProgress.unfinished:
+                    state.update("CANCELLED")
     for result in results:
         result.report()
     success = (

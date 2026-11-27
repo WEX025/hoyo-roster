@@ -2,7 +2,6 @@
 
 from urllib.parse import urlsplit
 
-from .client import ClientSession
 from .errors import (
     ClientProtocolError,
     SourceDataInvalid,
@@ -43,10 +42,10 @@ class ClientSource:
         self.request_count = 0
 
     async def read(self, spec, *, params=None, body=None):
-        client: ClientSession = self.session.client
-        client.require_source_reader()
+        generation = self.session.browser_generation
+        self.session.client.require_source_reader()
         await self.session.gate.reserve(requested_min_interval=2.0)
-        result = await client.call(
+        result = await self.session.call_source(
             "source.read",
             {
                 "game": self.game,
@@ -54,6 +53,7 @@ class ClientSource:
                 "params": params or {},
                 "body": body,
             },
+            generation=generation,
         )
         self.request_count += 1
         if (
@@ -81,11 +81,13 @@ class ClientSource:
         return payload["data"], result["evidence"]
 
     async def prepare_service(self, spec, service, params):
-        client = self.session.client
-        client.require_source_reader()
+        generation = self.session.browser_generation
+        self.session.client.require_source_reader()
         await self.session.gate.reserve(requested_min_interval=2.0)
-        result = await client.call(
-            "service.prepare", {"game": self.game, "service": service, "params": params}
+        result = await self.session.call_source(
+            "service.prepare",
+            {"game": self.game, "service": service, "params": params},
+            generation=generation,
         )
         self.request_count += 1
         if (

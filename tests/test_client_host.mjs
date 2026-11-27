@@ -4,6 +4,7 @@ import { readFile, mkdtemp, rm, realpath, mkdir, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createClientHost } from "../src/hoyo_roster/client_host.mjs";
+import { pumpWindow } from "../src/hoyo_roster/client_runner.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const python = join(root, ".venv", process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python");
@@ -81,6 +82,32 @@ test("Login confirmation retains the same page and performs no data reads", asyn
   assert.equal((await confirmation).result, "completed");
   assert.equal(reads, 0);
   assert.ok(fixture.events.every(([event]) => event === "retain"));
+});
+
+test("old generations never start another source and only a current identity read can confirm expiry", async () => {
+  const fixture = browserFixture(), reads = [];
+  const host = createClientHost(fixture.browser, { pageReader: true, readSource: async q => {
+    reads.push(q);
+    return { json: "{}", origin: {}, evidence: {} };
+  } });
+  let id = 1;
+  const attached = await host.exchange(request(id, "session.attach", null));
+  const call = (method, params) => host.exchange(request(++id, method, attached.session, params));
+  const opened = await call("login.open", { url: "https://act.mihoyo.com/ys/event/calculator/index.html#/character" });
+  const login = call("login.confirm", { page: opened.result.page, question: "Finished?" });
+  while (!host.pendingQuestion()) await new Promise(resolve => setTimeout(resolve, 1));
+  await host.answerLogin("completed", host.pendingQuestion().attempt);
+  await login;
+  const fields = { game: "zzz", params: {}, body: null };
+  for (const source of ["page:identity", "binding"]) {
+    assert.equal((await call("source.read", { ...fields, source, generation: 0 })).error, "AUTHENTICATION_REQUIRED");
+    assert.equal((await call("source.read", { ...fields, source, generation: 2 })).error, "CLIENT_PROTOCOL_ERROR");
+  }
+  assert.equal((await call("source.read", { ...fields, source: "page:detail", generation: 1, recheck: true })).error, "CLIENT_PROTOCOL_ERROR");
+  assert.equal(reads.length, 0);
+  assert.equal((await call("source.read", { ...fields, source: "page:identity", generation: 1, recheck: true })).error, null);
+  assert.equal(reads[0].recheck, true);
+  assert.equal(reads[0].generation, 1);
 });
 
 test("Closing the login page produces a terminal page error without replacing it", async () => {
@@ -371,6 +398,45 @@ async function syntheticWorker(temporary, code) {
   await writeFile(join(temporary,"hoyo_roster","__main__.py"),code);
 }
 
+test("a window shorter than the shared gate waits without polling or starting another read", {timeout:10000}, async () => {
+  const temporary = await realpath(await mkdtemp(join(tmpdir(), "hoyo-gate-window-")));
+  const starts = [];
+  let task;
+  try {
+    await syntheticWorker(temporary, [
+      "import json",
+      "def send(value): print(json.dumps(value), flush=True)",
+      "def request(i, session, method, params):",
+      "    send(dict(version=1, id=i, session=session, method=method, params=params))",
+      "request(1, None, 'session.attach', {})",
+      "session = json.loads(input())['session']",
+      "for i, game in enumerate(('genshin', 'zzz'), 2):",
+      "    request(i, session, 'source.read', dict(game=game, source='page:identity', params={}, body=None))",
+      "for i in range(2): assert json.loads(input())['error'] is None",
+      "send(dict(event='end', code=0))",
+    ].join("\n"));
+    const host = createClientHost(browserFixture().browser, { pageReader: true, readSource: async () => {
+      starts.push(performance.now());
+      return { json: "{}", origin: {}, evidence: {} };
+    } });
+    task = host.startTask({ python, cwd: temporary, crossGameIntervalMs: 2000 });
+    while (!starts.length) await task.pump({ maxRequests: 1, waitMs: 100 });
+    let steps = 0;
+    await pumpWindow(task, { budgetMs: 120, onStep: () => { steps++; } });
+    assert.ok(steps <= 2, `unexpected empty pump count: ${steps}`);
+    assert.equal(starts.length, 1);
+    await pumpUntil(task, () => task.status().done);
+    const result = await task.completion;
+    assert.equal(result.code, 0);
+    assert.equal(result.crossGameIntervalMs, 2000);
+    assert.equal(starts.length, 2);
+    assert.ok(starts[1] - starts[0] >= 1995);
+  } finally {
+    if (task && !task.status().done) { task.cancel(); await task.completion; }
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
 test("Oversized unfinished frames and EOF terminate without waiting for a source", {timeout:15000}, async () => {
   for (const code of ["import os\nos.write(1,b'{')\n",
     "import os,time\nos.write(1,b'x'*(16*1024*1024+1))\ntime.sleep(30)\n"]) {
@@ -425,7 +491,7 @@ test("A real worker stops both games when the browser fails during login recover
     await pumpUntil(task,()=>task.status().done);
     const result = await deadline(task.completion);
     assert.equal(result.code,1);
-    assert.deepEqual(reads,[["genshin","binding"]]);
+    assert.deepEqual(reads,[["genshin","binding"],["genshin","binding"]]);
     assert.ok(result.events.includes("ERROR_CODE=CLIENT_REQUEST_FAILED"));
     assert.ok(!result.events.includes("GAME=zzz"));
   } finally {

@@ -21,7 +21,7 @@ export function createRosterHost(browser) {
     checkSources: query => sourceStep(query, active =>
       active.sources.every(name => name.startsWith("page:")) ? pages[active.game].available(active) : sources[active.game].available(active)),
     readSource: query => metrics.measure("source.read", () => sourceStep(query, active =>
-      (active.source.startsWith("page:") ? pages : sources)[active.game].read(active)),
+      active.source.startsWith("page:") ? ui.readSource(pages[active.game], active) : sources[active.game].read(active)),
       { game: query.game, source: query.source }),
     prepareService: query => sourceStep(query, active => sources[active.game].prepare(active)),
   });

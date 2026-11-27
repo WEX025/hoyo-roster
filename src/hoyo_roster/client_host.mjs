@@ -68,6 +68,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
   }
   const session = randomBytes(16).toString("hex");
   let generation = 0;
+  let pageReads = new AbortController();
   const lifetime = new AbortController();
   let loginPage = null;
   let attached = false;
@@ -142,6 +143,12 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         ...(pageReader ? { page_reader: true } : {}) };
     }
     if (!attached) throw failure("CLIENT_PROTOCOL_ERROR");
+    if (["service.prepare", "source.read"].includes(method) && Object.hasOwn(params, "generation")) {
+      if (!Number.isSafeInteger(params.generation) || params.generation < 0 || params.generation > generation) {
+        throw failure("CLIENT_PROTOCOL_ERROR");
+      }
+      if (params.generation < generation) throw failure("AUTHENTICATION_REQUIRED");
+    }
     if (method === "source.check") {
       if (Object.keys(params).sort().join(",") !== "game,sources" || !Object.hasOwn(SOURCES, params.game) ||
           !Array.isArray(params.sources) || !params.sources.length ||
@@ -163,7 +170,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
     if (method === "service.prepare") {
       const source = services.get(params.game+"\0"+params.service);
       if (!source ||
-          Object.keys(params).sort().join(",") !== "game,params,service") throw failure("CLIENT_PROTOCOL_ERROR");
+          Object.keys(params).filter(key => key !== "generation").sort().join(",") !== "game,params,service") throw failure("CLIENT_PROTOCOL_ERROR");
       if (prepareService === null) throw failure("SOURCE_ADAPTER_MISSING");
       if (!supported[params.game].has(source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
       const result = await invoke(() => prepareService({ browser, signal: lifetime.signal,
@@ -214,8 +221,22 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       if (serviceOnly.has(params.game+"\0"+params.source)) throw failure("CLIENT_PROTOCOL_ERROR");
       if (readSource === null) throw failure("SOURCE_ADAPTER_MISSING");
       if (!supported[params.game].has(params.source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
-      const result = await invoke(() => readSource({ browser, signal: lifetime.signal,
-        game: params.game, source: params.source, params: params.params, body: params.body, generation }));
+      const pageSource = pageReader && params.source.startsWith("page:");
+      const recheck = Object.hasOwn(params, "recheck");
+      if (recheck && (!pageSource || params.source !== "page:identity" || params.recheck !== true ||
+          params.generation !== generation)) throw failure("CLIENT_PROTOCOL_ERROR");
+      const sharedPage = concurrentGames && pageSource;
+      const signal = sharedPage ? AbortSignal.any([lifetime.signal, pageReads.signal]) : lifetime.signal;
+      signal.throwIfAborted();
+      let result;
+      try {
+        result = await invoke(() => readSource({ browser, signal, lifetimeSignal: lifetime.signal,
+          game: params.game, source: params.source, params: params.params, body: params.body, generation, recheck }));
+        signal.throwIfAborted();
+      } catch (error) {
+        if (sharedPage && recheck && error.code === "AUTHENTICATION_REQUIRED") pageReads.abort(error);
+        throw error;
+      }
       if (!result || typeof result.json !== "string" ||
           !Object.hasOwn(result, "evidence") || !Object.hasOwn(result, "origin") || Object.keys(result).length !== 3) {
         throw failure("CLIENT_PROTOCOL_ERROR");
@@ -270,7 +291,10 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       if (pending !== current) return;
       pending = null;
       if (answer !== "waiting") loginPage = null;
-      if (answer === "completed") generation++;
+      if (answer === "completed") {
+        generation++;
+        pageReads = new AbortController();
+      }
       current.resolve(answer);
     },
 
@@ -281,10 +305,10 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
 
     startTask(options = {}) {
       if (started || attached || active || lifetime.signal.aborted) throw failure("CLIENT_PROTOCOL_ERROR");
-      let python, cwd, game, operation, args;
+      let python, cwd, game, operation, args, crossGameIntervalMs;
       try {
         if (!options || typeof options !== "object" || Array.isArray(options) ||
-            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun"].includes(k))) {
+            Object.keys(options).some(k => !["python", "cwd", "game", "operation", "storageRoot", "runtimeRoot", "uid", "parallelGames", "collectionRun", "onCharacters", "crossGameIntervalMs"].includes(k))) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
         ({ python, cwd, game = "all", operation = "sync" } = options);
@@ -293,10 +317,18 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             !["all", "genshin", "zzz", "hsr"].includes(game) || !["sync", "discover", "login"].includes(operation)) {
           throw failure("CLIENT_PROTOCOL_ERROR");
         }
+        if (options.onCharacters !== undefined && (typeof options.onCharacters !== "function" || operation !== "sync")) throw failure("CLIENT_PROTOCOL_ERROR");
         args = ["-m", "hoyo_roster", "--client-stdio", "--game", game, "--operation", operation];
+        if (options.onCharacters) args.push("--stream-characters");
         if (options.collectionRun !== undefined && (game !== "all" || operation !== "sync" || options.uid !== undefined)) throw failure("CLIENT_PROTOCOL_ERROR");
         if (options.parallelGames !== undefined && typeof options.parallelGames !== "boolean") throw failure("CLIENT_PROTOCOL_ERROR");
         concurrentGames = options.parallelGames !== false && game === "all" && operation !== "login";
+        const staggerPages = concurrentGames && pageReader && operation === "sync";
+        crossGameIntervalMs = options.crossGameIntervalMs;
+        if (crossGameIntervalMs === undefined) crossGameIntervalMs = staggerPages ? 1000 : 2000;
+        if (![1000, 1500, 2000].includes(crossGameIntervalMs) ||
+            (crossGameIntervalMs < 2000 && !staggerPages)) throw failure("CLIENT_PROTOCOL_ERROR");
+        if (staggerPages) args.push("--cross-game-interval-ms", String(crossGameIntervalMs));
         args.push(concurrentGames ? "--parallel-games" : "--no-parallel-games");
         for (const [option, value] of [
           ["--storage-root", options.storageRoot], ["--runtime-root", options.runtimeRoot], ["--uid", options.uid],
@@ -318,6 +350,24 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       }
       started = true;
       const events = [];
+      const games = operation === "login" || game === "hsr" ? [] : game === "all" ? ["genshin", "zzz"] : [game];
+      const gameStates = Object.fromEntries(games.map(g => [g, "PENDING"]));
+      let observer = options.onCharacters;
+      const provisional = new Set();
+      function notifyCharacters(game, state, records = []) {
+        if (!observer) return;
+        if (state === "RESET" || state === "COMMITTED") {
+          if (!provisional.delete(game)) return;
+        } else provisional.add(game);
+        const disable = () => {
+          if (observer) events.push("CHARACTER_OBSERVER=FAILED");
+          observer = undefined;
+        };
+        try {
+          const result = observer({ game, state, records });
+          if (result?.then) result.catch(disable);
+        } catch { disable(); }
+      }
       const requests = [];
       let exitCode = null;
       let errorCode = null;
@@ -325,7 +375,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       let streamEnded = false;
       let incoming = Buffer.alloc(0);
       const inFlight = new Set();
-      let nextSourceStart = 0;
+      let lastSourceStart = -Infinity, lastPageGame = null;
       let pumping = false;
       let killTimer = null;
       let queueWake = null;
@@ -358,7 +408,21 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         if (streamEnded) { stop("CLIENT_PROTOCOL_ERROR"); return; }
         let message;
         try { message = JSON.parse(line); } catch { stop("CLIENT_PROTOCOL_ERROR"); return; }
-        if (message?.event === "report" && Object.keys(message).sort().join(",") === "event,line" && typeof message.line === "string") {
+        if (message?.event === "characters") {
+          if (!options.onCharacters || Object.keys(message).sort().join(",") !== "event,game,records,state" ||
+              !Object.hasOwn(gameStates, message.game) ||
+              gameStates[message.game] !== "COLLECTING" || !["PREVIEW", "MATCHED", "RESET"].includes(message.state) ||
+              !Array.isArray(message.records) || (message.state === "RESET" ? message.records.length !== 0 :
+                message.records.length < 1 || message.records.length > (message.game === "zzz" ? 1 : 4))) {
+            stop("CLIENT_PROTOCOL_ERROR"); return;
+          }
+          notifyCharacters(message.game, message.state, message.records);
+        } else if (message?.event === "report" && Object.keys(message).sort().join(",") === "event,line" && typeof message.line === "string") {
+          const state = /^GAME_STATE=(genshin|zzz):(CHECKING_IDENTITY|COLLECTING|WAITING_LOGIN|COMPLETED|VERIFIED|NO_ROLES|FAILED|CANCELLED)$/.exec(message.line);
+          if (state && Object.hasOwn(gameStates, state[1])) {
+            gameStates[state[1]] = state[2];
+            if (state[2] !== "COLLECTING") notifyCharacters(state[1], state[2] === "COMPLETED" ? "COMMITTED" : "RESET");
+          }
           if (events.length < 2048) events.push(message.line);
         } else if (message?.event === "end" && Object.keys(message).sort().join(",") === "code,event" &&
                    Number.isInteger(message.code) && message.code >= 0 && message.code <= 255 && !requests.length && !active) {
@@ -405,17 +469,24 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
         exitCode = errorCode ? 1 : code;
         wakeQueue();
         BROWSER_TASKS.delete(browser);
-        resolve({ code: exitCode, errorCode, events: [...events] });
+        for (const g of games) {
+          notifyCharacters(g, "RESET");
+          if (["PENDING", "CHECKING_IDENTITY", "COLLECTING", "WAITING_LOGIN"].includes(gameStates[g])) {
+            gameStates[g] = errorCode === "LOGIN_CANCELLED" ? "CANCELLED" : "INTERRUPTED";
+          }
+        }
+        resolve({ code: exitCode, errorCode, crossGameIntervalMs, gameStates: { ...gameStates }, events: [...events] });
       }));
       const status = () => ({ done: exitCode !== null, code: exitCode, errorCode,
         question: host.pendingQuestion(), pendingRequests: requests.length,
-        parallelGames: concurrentGames, inFlight: inFlight.size, events: [...events] });
+        gameStates: { ...gameStates }, parallelGames: concurrentGames, inFlight: inFlight.size, events: [...events] });
       return {
         status,
-        async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0 } = {}) {
+        async pump({ waitMs = 250, maxRequests = 16, launchBudgetMs = 0, onProgress } = {}) {
           if (pumping || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > 1000 ||
               !Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 64 ||
-              !Number.isFinite(launchBudgetMs) || launchBudgetMs < 0 || launchBudgetMs > 10000) {
+              (onProgress !== undefined && (typeof onProgress !== "function" || launchBudgetMs <= 0)) ||
+              !Number.isFinite(launchBudgetMs) || launchBudgetMs < 0 || launchBudgetMs > (onProgress ? 180000 : 10000)) {
             throw failure("CLIENT_PROTOCOL_ERROR");
           }
           pumping = true;
@@ -423,11 +494,20 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             // SDK liveness checks only run inside this explicit active tool call.
             await checkPendingPage();
             const deadline = performance.now() + launchBudgetMs;
+            let nextProgress = performance.now() + 10000;
             let handled = 0;
             const ready = new Promise(resolve => { questionReady = resolve; });
-            while (handled < maxRequests) {
+            while (true) {
               if (pending || exitCode !== null || lifetime.signal.aborted) break;
               if (launchBudgetMs && performance.now() >= deadline) break;
+              if (handled >= maxRequests || (onProgress && performance.now() >= nextProgress)) {
+                if (!onProgress) break;
+                // Both readers still belong to this awaited foreground call.
+                await onProgress(status());
+                nextProgress = performance.now() + 10000;
+                handled = 0;
+                continue;
+              }
               if (inFlight.size >= (concurrentGames ? 2 : 1)) {
                 await Promise.race([...inFlight, ready]);
                 continue;
@@ -447,17 +527,26 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
                   (launchBudgetMs && performance.now() >= deadline)) break;
               const next = requests[0]?.message;
               const throttled = concurrentGames && ["source.read", "service.prepare"].includes(next?.method);
+              const pageGame = next?.method === "source.read" && pageReader && !next.params?.recheck &&
+                ["page:identity", "page:roster", "page:detail"].includes(next.params?.source) &&
+                ["genshin", "zzz"].includes(next.params?.game) ? next.params.game : null;
+              // Two cross-game gaps are always at least 2 s. Consecutive reads
+              // of one game and both sides of any API/service read use the full 2 s.
+              const interval = lastPageGame && pageGame && lastPageGame !== pageGame ? crossGameIntervalMs : 2000;
+              const nextSourceStart = lastSourceStart + interval;
               if (throttled && nextSourceStart > performance.now()) {
-                if (launchBudgetMs && nextSourceStart >= deadline) break;
-                while (!lifetime.signal.aborted && nextSourceStart > performance.now()) {
-                  await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(100, nextSourceStart - performance.now()))));
+                // Consume the remaining foreground budget when this read belongs
+                // to the next window. Returning early would make the runner spin.
+                const wakeAt = launchBudgetMs ? Math.min(nextSourceStart, deadline) : nextSourceStart;
+                while (!lifetime.signal.aborted && wakeAt > performance.now()) {
+                  await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(100, wakeAt - performance.now()))));
                 }
-                if (lifetime.signal.aborted) break;
+                if (lifetime.signal.aborted || (launchBudgetMs && performance.now() >= deadline)) break;
               }
               const { message, queued } = requests.shift();
               handled++;
               const began = performance.now(), queueWait = began - queued;
-              if (throttled) nextSourceStart = began + 2000;
+              if (throttled) { lastSourceStart = began; lastPageGame = pageGame; }
               const current = (async () => {
                 const reply = await host.exchange(message);
                 if (lifetime.signal.aborted) return;
@@ -469,6 +558,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
                 }
                 events.push("CLIENT_TIMING=" + JSON.stringify({ request: message.id, method: message.method,
                   ...(message.params.game ? { game: message.params.game } : {}), phase: "exchange",
+                  ...(pageGame && crossGameIntervalMs < 2000 ? { pageRead: true } : {}),
                   started: began, queue_wait_ms: queueWait, duration_ms: performance.now() - began }));
               })().catch(() => stop("CLIENT_PROTOCOL_ERROR")).finally(() => { inFlight.delete(current); wakeQueue(); });
               inFlight.add(current);
@@ -476,11 +566,17 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
             // No browser promise survives a normal active tool call. Human login is
             // the sole exception, suspended before further browser work until answered.
             if (inFlight.size && !pending) await Promise.race([Promise.all([...inFlight]), ready]);
-            questionReady = null;
             // Yield to process-close I/O after cancellation; callers may keep pumping.
             if (lifetime.signal.aborted && exitCode === null) await completion;
             return status();
-          } finally { pumping = false; }
+          } catch (error) {
+            // An observation callback can fail while browser work is still active.
+            if (inFlight.size && !pending) {
+              stop("CLIENT_REQUEST_FAILED");
+              await Promise.all([...inFlight]);
+            }
+            throw error;
+          } finally { questionReady = null; pumping = false; }
         },
         completion,
         cancel: () => stop("LOGIN_CANCELLED"),

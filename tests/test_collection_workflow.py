@@ -18,11 +18,19 @@ from tests.test_page_workflow import PagePort
 
 
 @pytest.mark.parametrize(
-    "options, expected",
-    [({}, True), ({"parallelGames": True}, True), ({"parallelGames": False}, False)],
+    "options, parallel, interval",
+    [
+        ({}, True, 1000),
+        ({"parallelGames": True}, True, 1000),
+        ({"parallelGames": False}, False, 2000),
+        ({"crossGameIntervalMs": 1500}, True, 1500),
+        ({"crossGameIntervalMs": 2000}, True, 2000),
+    ],
 )
-def test_new_workflow_defaults_to_parallel_and_preserves_explicit_serial(options, expected):
-    assert config_options(options)["parallel_games"] is expected
+def test_new_workflow_scheduling_defaults_and_overrides(options, parallel, interval):
+    config = config_options(options)
+    assert config["parallel_games"] is parallel
+    assert config["cross_game_interval_ms"] == interval
 
 
 @pytest.fixture
@@ -31,7 +39,8 @@ def prepared(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(RequestGate, "reserve", reserve)
-    config = config_options({"runtimeRoot": str(tmp_path / "runtime")})
+    # The synthetic Python port has no host timing events.
+    config = config_options({"runtimeRoot": str(tmp_path / "runtime"), "crossGameIntervalMs": 2000})
     store = RunStore.create(
         tmp_path / "run", config, {"pid": io.launch_parent_pid(), "token": "synthetic"}
     )
@@ -74,15 +83,46 @@ def reconnect(store):
     dispatch({"action": "begin", "directory": str(store.root), "token": "synthetic"})
 
 
-def test_automatic_validation_and_report_require_actual_commits(prepared, capsys):
+@pytest.mark.parametrize("record_metrics", [False, True])
+def test_automatic_validation_and_report_require_actual_commits(prepared, capsys, record_metrics):
     assert collect(prepared, PagePort()) == 0
     events = capsys.readouterr().out.splitlines()
     value = prepared.read()
     assert set(value["completed"]) == {"genshin", "zzz"}
     assert all(c["double_pass"] for c in value["completed"].values())
+    if record_metrics:
+        rows = []
+        for sequence, event in enumerate(e for e in events if e.startswith("PAGE_SOURCE=")):
+            game, operation = event.split("=", 1)[1].split(":")
+            # Only the two roster reads in each pass overlap, by 5 ms each.
+            start = 0 if not rows else rows[-1]["started"] + 20
+            rows.append(
+                dict(
+                    kind="browser_metric",
+                    operation="source.read",
+                    source="page:" + operation,
+                    game=game,
+                    started=start,
+                    duration_ms=10,
+                )
+            )
+        roster_rows = [row for row in rows if row["source"] == "page:roster"]
+        for a, b in zip(
+            [r for r in roster_rows if r["game"] == "genshin"],
+            [r for r in roster_rows if r["game"] == "zzz"],
+        ):
+            b["started"] = a["started"] + 5
+        log = prepared.root / "attempts/0001/events.jsonl"
+        log.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        io.set_private(log, 0o600)
     atomic_write_metadata(
         prepared.root / "attempts/0001/result.json",
-        {"code": 0, "errorCode": None, "events": events},
+        {
+            "code": 0,
+            "errorCode": None,
+            "crossGameIntervalMs": value["config"]["cross_game_interval_ms"],
+            "events": events,
+        },
     )
     for action, expected in [
         ("finish", "VERIFYING"),
@@ -93,11 +133,31 @@ def test_automatic_validation_and_report_require_actual_commits(prepared, capsys
             {"action": action, "directory": str(prepared.root), "token": "synthetic"}
         )
         assert response["status"]["state"] == expected
+        assert response["status"]["gameStates"] == {"genshin": "COMPLETED", "zzz": "COMPLETED"}
     summary = json.loads((prepared.root / "report/summary.json").read_text())
     assert len(summary["games"]) == 2
-    assert summary["metrics_complete"] is False  # no browser metrics fabricated by this test
+    assert summary["collection_modes"] == ["PARALLEL"]
+    assert summary["cross_game_interval_ms"] == 2000
+    assert summary["login_wait_seconds"] == 0
+    assert summary["save_seconds_recorded"] > 0
+    assert summary["metrics_complete"] == record_metrics
+    assert summary["roster_detail_overlap_seconds_recorded"] == (0.01 if record_metrics else 0)
+    if record_metrics:
+        assert summary["source_active_seconds_recorded"] == (10 * len(rows) - 10) / 1000
     assert "123456789" not in json.dumps(summary)
     assert (prepared.root / "workflow-steps.md").is_file()
+
+
+def test_status_preserves_independent_states_and_closes_interrupted_attempt(prepared):
+    request = {"directory": str(prepared.root), "token": "synthetic"}
+    states = {"genshin": "FAILED", "zzz": "COLLECTING"}
+    assert (
+        dispatch({**request, "action": "observe", "gameStates": states})["status"]["gameStates"]
+        == states
+    )
+    assert dispatch({**request, "action": "inspect"})["status"]["gameStates"] == states
+    stopped = dispatch({**request, "action": "cancel"})
+    assert stopped["status"]["gameStates"] == {"genshin": "FAILED", "zzz": "CANCELLED"}
 
 
 def test_reconnect_reuses_committed_game_after_fresh_identity_only(prepared):
@@ -189,6 +249,27 @@ def test_prepare_rejects_dirty_source_before_install_or_browser(prepared, monkey
     with pytest.raises(WorkspaceError, match="WORKFLOW_SOURCE_DIRTY"):
         collection_environment.prepare(prepared)
     assert len(calls) == 1 and calls[0][-2:] == ["status", "--porcelain"]
+
+
+def test_prepare_detects_unwritable_runtime_before_installation(prepared, monkeypatch):
+    with prepared.edit() as value:
+        value["config"]["repository"] = None
+
+    def denied(*args):
+        raise PermissionError()
+
+    with monkeypatch.context() as failing:
+        failing.setattr(io, "temporary_file", denied)
+        failing.setattr(
+            collection_environment, "inventory", lambda _: pytest.fail("late preflight")
+        )
+        with pytest.raises(WorkspaceError, match="RUNTIME_NOT_WRITABLE"):
+            collection_environment.prepare(prepared)
+
+    request = {"directory": str(prepared.root), "token": "synthetic"}
+    dispatch({**request, "action": "fail", "error": "RUNTIME_NOT_WRITABLE"})
+    dispatch({**request, "action": "retry"})
+    assert dispatch({**request, "action": "prepare"})["status"]["state"] == "WAITING_BROWSER"
 
 
 def test_worker_rejects_a_changed_package_before_browser_access(prepared):

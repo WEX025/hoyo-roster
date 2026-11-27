@@ -11,7 +11,11 @@ import time
 import portalocker
 
 from . import paths, platform_io as io
-from .errors import AuthenticationRequired, SourceDataInvalid, WrongAccount, WorkspaceError
+from .errors import (
+    SourceDataInvalid,
+    WrongAccount,
+    WorkspaceError,
+)
 from .game_runtime import GameResult, RoleResult
 from .models import OwnedRole
 from .storage.common import AtomicWriteError, MetadataError, atomic_write_metadata, load_metadata
@@ -177,23 +181,22 @@ class PageSnapshotStore:
         return True
 
 
-async def run_page_game(args, session, *, game, source, normalize, batch_size):
+async def run_page_game(args, session, *, progress, game, source, normalize, batch_size):
     game_started = time.monotonic()
     print(f"PAGE_GAME_BEGIN={game}", flush=True)
 
-    async def check():
-        value = await source.read("identity")
+    async def check(*, recheck=False):
+        value = await source.read("identity", recheck=recheck)
         return identity(value, game), value
 
-    async def pinned_check():
-        return (await check())[0]
+    async def probe():
+        return await check(recheck=True)
 
-    try:
-        role, profile = await check()
-    except AuthenticationRequired:
-        recovered = await session.recover(verify_current=check)
-        role, profile = recovered
-    session.pin(game, (role,), lambda: _role_tuple(pinned_check))
+    async def pinned_check():
+        return ((await probe())[0],)
+
+    role, initial_profile = await session.identity(check, probe=probe)
+    session.pin(game, (role,), pinned_check)
     checkpoint = getattr(args, "_collection_checkpoint", None)
     if checkpoint is not None:
         checkpoint.pin(game, role)
@@ -202,15 +205,17 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
     if args.operation == "discover":
         return GameResult(game, "PASS", (RoleResult(role, "VERIFIED"),))
 
-    async def collect():
-        observed_role, current_profile = await check()
-        if observed_role != role:
-            raise WrongAccount()
+    publish = getattr(args, "_character_event", None)
+
+    async def read_pass(profile, previous=None):
         params = {"uid": role.uid, "region": role.region}
         rows = roster(await source.read("roster", params))
+        if previous is not None and rows != previous["roster"]:
+            raise SourceDataInvalid()
         details = []
         for start in range(0, len(rows), batch_size):
-            names = [r["name"] for r in rows[start : start + batch_size]]
+            batch = rows[start : start + batch_size]
+            names = [row["name"] for row in batch]
             chunk = await source.read("detail", {**params, "names": names})
             if (
                 not isinstance(chunk, dict)
@@ -218,20 +223,30 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                 or not isinstance(chunk["details"], list)
             ):
                 raise SourceDataInvalid()
-            mapped = [normalize(raw) for raw in chunk["details"]]
-            if len(mapped) != len(names) or {d["name"] for d in mapped} != set(names):
+            mapped = sorted((normalize(raw) for raw in chunk["details"]), key=lambda d: d["name"])
+            if [item["name"] for item in mapped] != names:
+                raise SourceDataInvalid()
+            if any(
+                "level" in item and item["level"] != row["level"]
+                for item, row in zip(mapped, batch, strict=True)
+            ):
+                raise SourceDataInvalid()
+            if previous is not None and mapped != previous["details"][start : start + len(batch)]:
                 raise SourceDataInvalid()
             details.extend(mapped)
+            if publish:
+                publish(
+                    game,
+                    "PREVIEW" if previous is None else "MATCHED",
+                    [{**row, "detail": detail} for row, detail in zip(batch, mapped, strict=True)],
+                )
             print(f"PAGE_DETAILS_DONE={len(details)}", flush=True)
-        if (await check())[0] != role:
-            raise WrongAccount()
-        details.sort(key=lambda d: d["name"])
         return {
             "format": "hoyo-roster-page-v1",
             "game": game,
             "state": "partial",
             "scope": "rendered-owned-characters",
-            "profile": current_profile,
+            "profile": profile,
             "roster": rows,
             "details": details,
             "synced_at": "2000-01-01T00:00:00Z",
@@ -258,74 +273,92 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
                     ),
                 ),
             )
-        for attempt in range(2):
+
+        progress.update("COLLECTING")
+
+        async def checked_profile():
+            observed_role, profile = await check()
+            if observed_role != role:
+                raise WrongAccount()
+            return profile
+
+        async def read_passes():
+            nonlocal initial_profile
+            # Consume the boundary exactly once; any restart needs fresh evidence.
+            profile = initial_profile if initial_profile is not None else await checked_profile()
+            initial_profile = None
             try:
                 print(f"PAGE_COLLECTION={game}\nPAGE_PASS=1", flush=True)
-                first = await collect()
-                print("PAGE_PASS=2", flush=True)
-                second = await collect()
-                validation_started = time.monotonic()
-                if first != second:
+                first = await read_pass(profile)
+                middle = await checked_profile()
+                if middle != profile:
                     raise SourceDataInvalid()
-                validate_snapshot(second, game, normalize)
-                print(
-                    "PAGE_TIMING="
-                    + json.dumps(
-                        {
-                            "game": game,
-                            "phase": "validate",
-                            "duration_ms": (time.monotonic() - validation_started) * 1000,
-                        }
+                print("PAGE_PASS=2", flush=True)
+                second = await read_pass(middle, first)
+                if await checked_profile() != middle:
+                    raise SourceDataInvalid()
+                return second
+            except BaseException:
+                if publish:
+                    publish(game, "RESET", [])
+                raise
+
+        try:
+            second = await session.collect(game, read_passes)
+            validation_started = time.monotonic()
+            validate_snapshot(second, game, normalize)
+            print(
+                "PAGE_TIMING="
+                + json.dumps(
+                    {
+                        "game": game,
+                        "phase": "validate",
+                        "duration_ms": (time.monotonic() - validation_started) * 1000,
+                    }
+                ),
+                flush=True,
+            )
+            second["synced_at"] = (
+                datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+            save_started = time.monotonic()
+            changed = store.save(second)
+            if checkpoint is not None:
+                checkpoint.commit(game, store.current_file)
+            print(
+                "PAGE_TIMING="
+                + json.dumps(
+                    {
+                        "game": game,
+                        "phase": "save",
+                        "duration_ms": (time.monotonic() - save_started) * 1000,
+                    }
+                ),
+                flush=True,
+            )
+        except AtomicWriteError:
+            return GameResult(
+                game,
+                "FAIL",
+                (
+                    RoleResult(
+                        role,
+                        "FAIL",
+                        "ATOMIC_DURABILITY_UNKNOWN",
+                        result_scope=store.root,
+                        current_result=store.current_file,
+                        commit_state="DURABILITY_UNKNOWN",
                     ),
-                    flush=True,
-                )
-                second["synced_at"] = (
-                    datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-                )
-                save_started = time.monotonic()
-                changed = store.save(second)
-                if checkpoint is not None:
-                    checkpoint.commit(game, store.current_file)
-                print(
-                    "PAGE_TIMING="
-                    + json.dumps(
-                        {
-                            "game": game,
-                            "phase": "save",
-                            "duration_ms": (time.monotonic() - save_started) * 1000,
-                        }
-                    ),
-                    flush=True,
-                )
-                break
-            except AuthenticationRequired:
-                if attempt:
-                    raise
-                print("AUTH_RECOVERY=RESTART_CURRENT_GAME", flush=True)
-                await session.recover()
-            except AtomicWriteError:
-                return GameResult(
-                    game,
-                    "FAIL",
-                    (
-                        RoleResult(
-                            role,
-                            "FAIL",
-                            "ATOMIC_DURABILITY_UNKNOWN",
-                            result_scope=store.root,
-                            current_result=store.current_file,
-                            commit_state="DURABILITY_UNKNOWN",
-                        ),
-                    ),
-                    error_code="ATOMIC_DURABILITY_UNKNOWN",
-                )
-            except (MetadataError, io.UnsafePath, OSError):
-                return GameResult(
-                    game,
-                    "FAIL",
-                    (RoleResult(role, "FAIL", "PAGE_SAVE_FAILED", result_scope=store.root),),
-                    error_code="PAGE_SAVE_FAILED",
-                )
+                ),
+                error_code="ATOMIC_DURABILITY_UNKNOWN",
+            )
+        except (MetadataError, io.UnsafePath, OSError):
+            return GameResult(
+                game,
+                "FAIL",
+                (RoleResult(role, "FAIL", "PAGE_SAVE_FAILED", result_scope=store.root),),
+                error_code="PAGE_SAVE_FAILED",
+            )
     print(
         "PAGE_TIMING="
         + json.dumps(
@@ -359,7 +392,3 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
             ),
         ),
     )
-
-
-async def _role_tuple(check):
-    return (await check(),)

@@ -104,7 +104,9 @@ class GameResult:
                 role.operation.report()
 
 
-async def execute_roles(args, session, roles, *, game, candidate_policy, sync, sync_error):
+async def execute_roles(
+    args, session, roles, *, progress, game, candidate_policy, sync, sync_error
+):
     """Called by a game's public module; only injected game policies execute here."""
     if args.uid is not None:
         roles = tuple(role for role in roles if role.uid == args.uid)
@@ -114,6 +116,7 @@ async def execute_roles(args, session, roles, *, game, candidate_policy, sync, s
         return GameResult(game, "NO_ROLES")
     if args.operation == "discover":
         return GameResult(game, "PASS", tuple(RoleResult(role, "VERIFIED") for role in roles))
+    progress.update("COLLECTING")
     results = []
     for role in roles:
         config = direct_configuration(game, role.uid, storage_root=args.storage_root)

@@ -69,7 +69,7 @@ export function createZzzPageSource(ui) {
         name: e.querySelector(".gt-card__info-outside")?.textContent?.trim(), text: e.innerText?.trim(),
       }))), rows => rows.length > 0 && rows.every(r => r.name && /^(?:Lv\.[1-9][0-9]*|-)\s/.test(r.text ?? "")), { stable: true }));
   }
-  async function read({ source, params, body, signal, generation }) {
+  async function read({ source, params, body, signal, generation, recheck = false }) {
     if (body !== null || !params || typeof params !== "object" || Array.isArray(params)) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
     let tab = await ui.page(PAGE, signal);
     if (source === "page:identity") {
@@ -77,7 +77,7 @@ export function createZzzPageSource(ui) {
       if (Object.keys(params).length) throw sourceFailure("CLIENT_PROTOCOL_ERROR");
       // Reset transient selector/dialog overlays left by a previous interrupted
       // collection. Reloading this tab retains the SAME browser login session.
-      if (identityContext?.tab !== tab || identityContext.generation !== generation) {
+      if (recheck || identityContext?.tab !== tab || identityContext.generation !== generation) {
         tab = await measure("zzz.reload", signal, () => ui.navigate(tab, PAGE, signal, { reload: true }));
       }
       const role = await measure("zzz.identity", signal, () => identity(tab, signal));
@@ -105,28 +105,78 @@ export function createZzzPageSource(ui) {
     const previousHeader = await ui.call(signal, () => headerName(tab));
     await measure("zzz.open-selector", signal, () => selector(tab, signal, false));
     const card = tab.playwright.locator(".agent-list__row .gt-card").filter({ has: tab.playwright.getByText(name, { exact: true }) });
-    await ui.wait(signal, () => card.isVisible(), Boolean);
-    const ownedLabel = await ui.call(signal, () => card.innerText({ timeoutMs: 1500 }));
-    if (!/^Lv\.[1-9][0-9]*\s/.test(ownedLabel)) throw sourceFailure("SOURCE_DATA_INVALID");
-    // The official visible active marker associates an unchanged header with
-    // this owned card. Re-selecting it closes the panel without a title change.
-    const targetWasActive = await ui.call(signal, () => readDom(card, e => Boolean(e.querySelector(".gt-card__content.active"))));
+    const before = await ui.wait(signal, () => readDom(card, e => {
+      const rect = e.getBoundingClientRect();
+      return { visible: rect.width > 0 && rect.height > 0 && getComputedStyle(e).visibility === "visible",
+        label: e.innerText?.trim(), content: Boolean(e.querySelector(".gt-card__content")), active: Boolean(e.querySelector(".gt-card__content.active")) };
+    }), value => value.visible);
+    if (!/^Lv\.[1-9][0-9]*\s/.test(before.label)) throw sourceFailure("SOURCE_DATA_INVALID");
+    const targetWasActive = before.active;
     const selectorOpen = () => tab.playwright.getByText("选择代理人", { exact: true }).isVisible();
-    await click(tab, card.getByText(name, { exact: true }), signal);
+    // The roster name is an outside caption. Select its owned card's content
+    // directly, keeping the known caption as the bounded fallback.
+    const caption = card.getByText(name, { exact: true });
+    await click(tab, before.content ? card.locator(".gt-card__content") : caption, signal);
     await dismissSchemeNotice(ui, tab, signal);
-    const transition = await ui.call(signal, () => readDom(tab.playwright, () =>
-      !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
-        e.textContent?.trim() === "当前技能等级" && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)));
-    try { await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 750 }); }
-    catch (error) {
+    // An inactive card can become active while the selector stays open. The
+    // selector closing and this acknowledged selection are both useful signals.
+    let transition = false;
+    const selection = () => readDom(tab.playwright, target => {
+      const visible = e => e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+      const rows = Array.from(document.querySelectorAll(".agent-list__row")).filter(visible);
+      const card = rows.flatMap(row => Array.from(row.querySelectorAll(".gt-card")))
+        .find(e => e.querySelector(".gt-card__info-outside")?.textContent?.trim() === target);
+      const active = Boolean(card?.querySelector(".gt-card__content.active"));
+      const label = card?.querySelector(".gt-card__info-outside");
+      const box = label?.getBoundingClientRect();
+      const x = box && box.x + box.width / 2, y = box && box.y + box.height / 2;
+      const ready = box?.width > 0 && box.height > 0 && card.contains(document.elementFromPoint(x, y));
+      const loading = !Array.from(document.querySelectorAll("p,div")).some(e => !e.children.length &&
+        e.textContent?.trim() === "当前技能等级" && visible(e));
+      return { open: rows.length > 0, active, loading, point: ready ? [x, y] : null };
+    }, name);
+    let closed = false, repair = "zzz.selection-timeout";
+    let lastPoint, stationarySince;
+    try {
+      const state = await ui.wait(signal, selection, value => {
+        transition ||= value.loading;
+        if (!value.open) return true;
+        if (!targetWasActive && value.active) { repair = "zzz.confirm-active"; return true; }
+        // Only retry an unchanged, hittable owned caption after a full stable
+        // interval. A moving, covered, or loading selector keeps its deadline.
+        const point = !targetWasActive && !value.loading && value.point?.join(",");
+        if (!point || point !== lastPoint) stationarySince = performance.now();
+        lastPoint = point;
+        if (point && performance.now() - stationarySince >= 150) {
+          repair = "zzz.retry-stationary";
+          return true;
+        }
+        return false;
+      }, { timeoutMs: 750 });
+      closed = !state.open;
+    } catch (error) {
       if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
-      if (await ui.call(signal, selectorOpen)) await click(tab, card.getByText(name, { exact: true }), signal);
+    }
+    if (!closed && await ui.call(signal, selectorOpen)) {
+      try { await measure(repair, signal, () => click(tab, caption, signal)); }
+      catch (error) {
+        if (signal.aborted || (error.code && error.code !== "SOURCE_REQUEST_NOT_OBSERVED") ||
+            await ui.call(signal, selectorOpen)) throw error;
+      }
       await ui.wait(signal, selectorOpen, open => !open, { timeoutMs: 3000 });
     }
     const detail = await measure("zzz.details", signal, () => ui.wait(signal, () => readDom(tab.playwright, () => {
-      const find = text => Array.from(document.querySelectorAll("p,div")).find(e => e.textContent?.trim() === text && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0);
+      const headings = new Map();
+      for (const e of document.querySelectorAll("p,div")) {
+        if (e.children.length) continue;
+        const text = e.textContent?.trim();
+        if (!["当前音擎", "当前技能等级", "当前装备驱动盘"].includes(text) || headings.has(text)) continue;
+        const rect = e.getBoundingClientRect();
+        if (rect.width && rect.height) headings.set(text, e);
+        if (headings.size === 3) break;
+      }
       const name = Array.from(document.querySelectorAll("div.relative.z-2")).find(e => e.parentElement.classList.contains("mr-4"))?.textContent?.trim();
-      const weapon = find("当前音擎"), skills = find("当前技能等级"), discs = find("当前装备驱动盘");
+      const weapon = headings.get("当前音擎"), skills = headings.get("当前技能等级"), discs = headings.get("当前装备驱动盘");
       const emptyWeapon = Array.from(document.querySelectorAll(".point-bg-hoc")).some(e =>
         e.previousElementSibling?.textContent?.trim() === "音擎" &&
         e.querySelector('.point-bg-container > .pb-12 > [data-invalid="true"]')?.textContent?.trim() === "EMPTY");
@@ -151,11 +201,11 @@ export function createZzzPageSource(ui) {
       if (error.code && error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
       const tab = await ui.page(PAGE, query.signal);
       if (!(await ui.call(query.signal, () => tab.playwright.getByText("出错了，请重试", { exact: true }).isVisible()))) throw error;
-      await ui.click(tab, tab.playwright.getByText("重试", { exact: true }), query.signal);
+      await measure("zzz.official-retry", query.signal, () => ui.click(tab, tab.playwright.getByText("重试", { exact: true }), query.signal));
       await ui.wait(query.signal, () => tab.playwright.locator(".account-center-icon").count(), n => n === 1);
       if (query.source !== "page:identity") ui.assertIdentity(await identity(tab, query.signal), query.params);
       return read(query); // One explicit official retry; never recurse or relogin.
     }
   }
-  return Object.freeze({ read: readWithRecovery, available: async ({ signal }) => await ui.available(PAGE, signal) ? [...sourceNames] : [] });
+  return Object.freeze({ url: PAGE, read: readWithRecovery, available: async ({ signal }) => await ui.available(PAGE, signal) ? [...sourceNames] : [] });
 }

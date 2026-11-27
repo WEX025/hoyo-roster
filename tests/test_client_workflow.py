@@ -101,9 +101,9 @@ def test_waiting_then_cancel_never_reads_game_sources():
 def test_zzz_expiry_resumes_only_zzz_using_original_session(tmp_path, phase):
     port = FakePort()
     if phase == "discovery":
-        port.fail_at[("zzz", "binding", 1)] = "AUTHENTICATION_REQUIRED"
+        port.expire_at.add(("zzz", "binding", 1))
     else:
-        port.fail_at[("zzz", "record:avatar/basic", 2)] = "AUTHENTICATION_REQUIRED"
+        port.expire_at.add(("zzz", "record:avatar/basic", 2))
     assert cli.main(arguments(tmp_path), client=port.client()) == 0
     assert port.counts[("genshin", "cultivation-avatar-list")] == 2
     assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
@@ -115,7 +115,7 @@ def test_zzz_expiry_resumes_only_zzz_using_original_session(tmp_path, phase):
 def test_repeated_capture_auth_loss_is_bounded(tmp_path, capsys):
     port = FakePort()
     for i in (1, 2):
-        port.fail_at[("genshin", "cultivation-avatar-list", i)] = "AUTHENTICATION_REQUIRED"
+        port.expire_at.add(("genshin", "cultivation-avatar-list", i))
     assert cli.main(arguments(tmp_path), client=port.client()) == 1
     assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
     assert port.counts[("genshin", "cultivation-avatar-list")] == 2
@@ -128,7 +128,7 @@ def test_repeated_capture_auth_loss_is_bounded(tmp_path, capsys):
 def test_reauth_account_change_stops_before_second_game_capture(tmp_path, capsys):
     port = FakePort()
     port.login_changes_account = True
-    port.fail_at[("zzz", "binding", 1)] = "AUTHENTICATION_REQUIRED"
+    port.expire_at.add(("zzz", "binding", 1))
     assert cli.main(arguments(tmp_path), client=port.client()) == 1
     assert port.counts[("zzz", "record:avatar/basic")] == 0
     assert "ERROR_CODE=WRONG_ACCOUNT" in capsys.readouterr().out
@@ -173,9 +173,9 @@ def test_any_recovery_failure_stops_subsequent_sources(tmp_path, capsys, game, p
             return result
 
     port = FailedRecovery()
-    port.fail_at[(game, "binding", 1)] = "AUTHENTICATION_REQUIRED"
+    port.expire_at.add((game, "binding", 1))
     if phase == "current_identity":
-        port.fail_at[(game, "binding", 2)] = "CLIENT_REQUEST_FAILED"
+        port.fail_at[(game, "binding", 3)] = "CLIENT_REQUEST_FAILED"
     assert cli.main(arguments(tmp_path, "--operation", "discover"), client=port.client()) == 1
     assert port.failed_at is not None
     assert not port.calls[port.failed_at :]
@@ -184,6 +184,47 @@ def test_any_recovery_failure_stops_subsequent_sources(tmp_path, capsys, game, p
     output = capsys.readouterr().out
     assert "ERROR_CODE=CLIENT_REQUEST_FAILED" in output
     assert "TASK_STATUS=PASS" not in output
+
+
+def test_explicit_recovery_cannot_open_login_in_an_active_parallel_session(tmp_path):
+    from hoyo_roster.auth import ParallelRecoveryRequired
+
+    port = FakePort()
+
+    async def run():
+        async with SessionService(port.client(), tmp_path / "runtime") as session:
+            session.parallel = True
+            with pytest.raises(ParallelRecoveryRequired) as interrupted:
+                await session.recover()
+            assert interrupted.value.version == session.version
+
+    asyncio.run(run())
+    assert not any(c["method"].startswith("login.") for c in port.calls)
+
+
+def test_same_version_waiters_share_login_and_late_failure_uses_verified_version(tmp_path):
+    from hoyo_roster.errors import AuthenticationRequired
+
+    port = FakePort()
+    probes = 0
+
+    async def expired():
+        nonlocal probes
+        probes += 1
+        await asyncio.sleep(0)
+        raise AuthenticationRequired()
+
+    async def run():
+        async with SessionService(port.client(), tmp_path / "runtime") as session:
+            await asyncio.gather(
+                *(session.ensure_authenticated(0, probe=expired) for _ in range(2))
+            )
+            await session.ensure_authenticated(0, probe=expired)
+            assert session.version == session.browser_generation == 1
+
+    asyncio.run(run())
+    assert probes == 1
+    assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
 
 
 @pytest.mark.parametrize("kind", ["workspace", "unexpected"])

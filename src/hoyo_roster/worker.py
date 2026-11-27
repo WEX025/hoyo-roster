@@ -22,6 +22,13 @@ def serve(args):
         raw_output.write(json_bytes(value, compact=True) + b"\n")
         raw_output.flush()
 
+    if args.stream_characters:
+
+        def publish(game, state, records):
+            send({"event": "characters", "game": game, "state": state, "records": records})
+
+        args._character_event = publish
+
     class Reports:
         def __init__(self):
             self.pending = ""

@@ -1,6 +1,6 @@
 """zzz owns session checks, official identities, collection and saving."""
 
-from hoyo_roster.errors import AuthenticationRequired, WrongAccount
+from hoyo_roster.errors import WrongAccount
 from hoyo_roster.models import OwnedRole
 from hoyo_roster.game_runtime import execute_roles
 from .candidate import candidate_policy
@@ -34,7 +34,7 @@ def owned_roles(data):
     return tuple(sorted(roles, key=lambda role: (role.uid, role.region)))
 
 
-async def run(args, session):
+async def run(args, session, progress):
     if session.client.page_reader:
         from hoyo_roster.errors import ClientSourceUnavailable
         from hoyo_roster.page_source import PAGE_SOURCES
@@ -47,7 +47,7 @@ async def run(args, session):
                 raise
             pass
         else:
-            return await run_page(args, session)
+            return await run_page(args, session, progress)
     required = (BINDING.name,) if args.operation == "discover" else tuple(ENDPOINT_REGISTRY)
     await session.client.require_sources("zzz", required)
     collector = EndpointClient(ClientTransport(session))
@@ -55,15 +55,13 @@ async def run(args, session):
     async def check():
         return owned_roles(await collector.get_binding())
 
-    try:
-        roles = await check()
-    except AuthenticationRequired:
-        roles = await session.recover(verify_current=check)
+    roles = await session.identity(check)
     session.pin("zzz", roles, check)
     return await execute_roles(
         args,
         session,
         roles,
+        progress=progress,
         game="zzz",
         candidate_policy=candidate_policy,
         sync=run_sync,

@@ -93,6 +93,27 @@ function fixture({ zero = false, retained = true, freshZero = false } = {}) {
   return { browser, page, calls, ui: createPageBrowser(browser) };
 }
 
+test("a broken page control requires login only with a visible prompt on the same official document", async () => {
+  for (const mode of ["prompt", "foreign", "hidden", "wrong-account", "rate-limit"]) {
+    const f = fixture(), signal = new AbortController().signal;
+    await f.ui.page(URL, signal);
+    const code = mode === "wrong-account" ? "WRONG_ACCOUNT" : mode === "rate-limit" ? "RATE_LIMITED" : "SOURCE_REQUEST_NOT_OBSERVED";
+    const read = async () => { throw Object.assign(new Error(), { code }); };
+    let inspected = false;
+    f.page.playwright.evaluate = async (fn, arg) => {
+      inspected = true;
+      const location = { origin: mode === "foreign" ? "https://example.org" : "https://act.mihoyo.com", pathname: "/ys/event/calculator/index.html" };
+      const label = { getClientRects: () => mode === "hidden" ? [] : [{}], innerText: "去登录", children: [] };
+      return runInNewContext("(" + fn.toString() + ")(arg)", { arg, location, getComputedStyle: () => ({ visibility: "visible" }),
+        document: { querySelectorAll: selector => selector === "input" ? [] : [label] } });
+    };
+    await assert.rejects(f.ui.readSource({ url: URL, read }, { signal }), {
+      code: mode === "prompt" ? "AUTHENTICATION_REQUIRED" : code,
+    });
+    assert.equal(inspected, !["wrong-account", "rate-limit"].includes(mode));
+  }
+});
+
 test("UI reader borrows the same browser/tab and never requires CDP or credentials", async () => {
   const f = fixture();
   assert.equal(await f.ui.page(URL, new AbortController().signal), f.page);
@@ -255,4 +276,18 @@ test("identity closes an observed still-open panel with one bounded repair", asy
   } };
   const role = await ui.identity(tab, new AbortController().signal, async () => assert.fail('already open'));
   assert.equal(role.uid, '123456789'); assert.equal(clicks, 2); assert.equal(opened, false);
+});
+
+test("rendered rate or risk notices stop page access before business actions", async () => {
+  for (const [message,visible,expected] of [["操作过于频繁，请稍后再试",true,"RATE_LIMITED"],
+      ["请先完成安全验证",true,"RISK_CONTROL"],["请求太频繁",false,null],["方案更新提示",true,null]]) {
+    const f=fixture();
+    f.page.playwright.evaluate=async fn=>runInNewContext("("+fn.toString()+")()",{
+      document:{documentElement:{clientWidth:800,clientHeight:600},querySelectorAll:()=>[{
+        innerText:message,getClientRects:()=>visible?[{}]:[]}]},getComputedStyle:()=>({visibility:"visible"})
+    });
+    const read=f.ui.page(URL,new AbortController().signal);
+    if(expected) await assert.rejects(read,{code:expected});
+    else assert.equal(await read,f.page);
+  }
 });

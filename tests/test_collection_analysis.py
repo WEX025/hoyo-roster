@@ -44,6 +44,7 @@ def run_dir(tmp_path, monkeypatch, capsys):
         "events": events,
         "source_sha": "synthetic",
         "parallelGames": True,
+        "crossGameIntervalMs": 2000,
         "started_at": "2026-01-01T00:00:00Z",
         "closed_at": "2026-01-01T00:00:10Z",
     }
@@ -59,7 +60,7 @@ def test_replay_measures_overlap_without_adding_nested_metrics(run_dir):
     assert summary["seconds"] == 10
     assert summary["committed_games"] == 2
     assert set(snapshots) == {"genshin", "zzz"}
-    assert all(c["identity_reads"] >= 4 and c["roster_reads"] == 2 for c in summary["checks"])
+    assert all(c["identity_reads"] == 3 and c["roster_reads"] == 2 for c in summary["checks"])
     assert "123456789" not in json.dumps(summary)
 
 
@@ -152,3 +153,34 @@ def test_installation_checks_inventory_and_bytes(tmp_path, monkeypatch, capsys):
     result = verify(root, installed)
     assert result["mismatched_files"] == result["unexpected_installed_files"] == 1
     assert not result["installation_matches_source"]
+
+
+def test_offline_replay_requires_identity_between_rounds(run_dir):
+    file = run_dir / "result.json"
+    result = json.loads(file.read_text())
+    events = result["events"]
+    identity = "PAGE_SOURCE=genshin:identity"
+    middle = [i for i, event in enumerate(events) if event == identity][1]
+    events.insert(0, events.pop(middle))
+    file.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match="IDENTITY_EVIDENCE_MISSING"):
+        read_run(run_dir)
+
+
+def test_staggered_source_starts_require_page_lanes_and_protect_other_calls():
+    from hoyo_roster.collection_analysis import validate_start_intervals
+
+    def page(game, started):
+        return {"game": game, "method": "source.read", "pageRead": True, "started": started}
+
+    calls = [page("genshin", 0), page("zzz", 1000), page("genshin", 2000)]
+    validate_start_intervals(calls, 1000)
+    for invalid in (
+        calls + [page("genshin", 3500)],
+        calls + [{"method": "service.prepare", "started": 3100}],
+        calls + [{"game": "zzz", "method": "source.read", "started": 3100}],
+    ):
+        with pytest.raises(ValueError, match="SOURCE_START_GATE_VIOLATION"):
+            validate_start_intervals(invalid, 1000)
+    with pytest.raises(ValueError, match="SOURCE_START_GATE_VIOLATION"):
+        validate_start_intervals(calls, 1500)

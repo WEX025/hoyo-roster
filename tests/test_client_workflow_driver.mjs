@@ -88,3 +88,10 @@ test("a restored verification stage finishes offline without a browser session",
   assert.equal((await driver.advance()).state, "SUCCEEDED");
   assert.deepEqual(calls, ["verify", "report"]);
 });
+
+
+test("an attached browser starts in the same advance after preparation", async () => {
+  const f = fixture();
+  assert.equal((await f.driver.advance({ synthetic: true })).state, "WAITING_LOGIN");
+  assert.equal(f.counts().attempts, 1);
+});

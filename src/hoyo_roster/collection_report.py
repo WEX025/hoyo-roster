@@ -3,7 +3,7 @@
 from hashlib import sha256
 import json
 
-from .collection_analysis import read_run, union_ms, stamp
+from .collection_analysis import read_run, union_ms, stamp, validate_start_intervals
 from .collection_state import fingerprint, utc
 from .errors import WorkspaceError
 from .games.genshin.page import normalize as genshin_normalize
@@ -44,31 +44,73 @@ def validate_completed(store, *, require_current=True):
 def make_report(store):
     value = store.read()
     snapshots = validate_completed(store)
-    spans, metrics_complete, source_count = [], True, 0
+    source_ms = overlap_ms = business_overlap_ms = save_ms = source_count = 0
+    interval = value["config"]["cross_game_interval_ms"]
+    modes = []
+    metrics_complete = True
     for attempt in value["attempts"]:
-        file = store.root / "attempts" / f"{attempt['number']:04d}" / "events.jsonl"
-        if not file.is_file():
-            metrics_complete = False
-            continue
-        records = []
-        for line in io.read_regular(file, require_private=True).decode().splitlines():
-            try:
-                event = json.loads(line)
-            except ValueError:
-                metrics_complete = False
-                continue
-            records.append(event)
-            if event.get("kind") == "browser_metric" and event.get("operation") == "source.read":
-                # Different client processes have different performance.timeOrigin.
-                # Only merge intervals within an attempt, never across processes.
-                source_count += 1
-        current = [
-            (r["started"], r["started"] + r["duration_ms"])
-            for r in records
-            if r.get("kind") == "browser_metric" and r.get("operation") == "source.read"
+        folder = store.root / "attempts" / f"{attempt['number']:04d}"
+        file = folder / "events.jsonl"
+        sources, progress = [], []
+        if file.is_file():
+            for line in io.read_regular(file, require_private=True).decode().splitlines():
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    metrics_complete = False
+                    continue
+                if (
+                    event.get("kind") == "browser_metric"
+                    and event.get("operation") == "source.read"
+                ):
+                    sources.append(event)
+                elif event.get("kind") == "pump":
+                    progress.extend(event["events"])
+        # The final worker log also includes reports delivered after the last pump.
+        if (folder / "result.json").is_file():
+            result = load_metadata(folder / "result.json", private=True)
+            progress = result["events"]
+            if result["crossGameIntervalMs"] != interval:
+                raise WorkspaceError("WORKFLOW_OPTIONS_INVALID")
+            if interval < 2000 and attempt["outcome"] == "PASS":
+                clients = [
+                    json.loads(e.split("=", 1)[1])
+                    for e in progress
+                    if e.startswith("CLIENT_TIMING=")
+                ]
+                if not sources or sum(c["method"] == "source.read" for c in clients) != len(
+                    sources
+                ):
+                    raise WorkspaceError("SOURCE_TIMING_INCOMPLETE")
+                try:
+                    validate_start_intervals(clients, interval)
+                except ValueError as exc:
+                    raise WorkspaceError("SOURCE_START_GATE_VIOLATION") from exc
+        for line in progress:
+            if line.startswith("COLLECTION_MODE="):
+                mode = line.split("=", 1)[1]
+                if mode in {"PARALLEL", "SERIAL", "SERIAL_RECOVERY"} and mode not in modes:
+                    modes.append(mode)
+            if line.startswith("PAGE_TIMING="):
+                timing = json.loads(line.split("=", 1)[1])
+                if timing.get("phase") == "save":
+                    save_ms += timing["duration_ms"]
+        # Browser clocks are comparable only within the same attempt.
+        spans = [(r["started"], r["started"] + r["duration_ms"]) for r in sources]
+        business = [
+            span
+            for span, r in zip(spans, sources)
+            if r.get("source") in {"page:roster", "page:detail"}
         ]
-        spans.append({"sum_ms": sum(b - a for a, b in current), "union_ms": union_ms(current)})
-        metrics_complete &= attempt["outcome"] == "PASS"
+        active = union_ms(spans)
+        source_ms += active
+        overlap_ms += sum(b - a for a, b in spans) - active
+        business_overlap_ms += sum(b - a for a, b in business) - union_ms(business)
+        source_count += len(sources)
+        expected_reads = sum(line.startswith("PAGE_SOURCE=") for line in progress)
+        metrics_complete &= (
+            bool(sources) and len(sources) == expected_reads and attempt["outcome"] == "PASS"
+        )
     ended_at = utc()
     games = [
         {
@@ -86,6 +128,7 @@ def make_report(store):
         "format": "hoyo-roster-workflow-report-v1",
         "run_id": value["id"],
         "source_sha": value["version"]["source_sha"],
+        "cross_game_interval_ms": interval,
         "package_digest": value["version"]["package_digest"],
         "started_at": value["created_at"],
         "ended_at": ended_at,
@@ -96,7 +139,17 @@ def make_report(store):
         "attempts": len(value["attempts"]),
         "games": games,
         "source_count_recorded": source_count,
-        "source_overlap_seconds_recorded": sum(p["sum_ms"] - p["union_ms"] for p in spans) / 1000,
+        "collection_modes": modes,
+        "login_wait_seconds": sum(
+            p["duration_ms"]
+            for p in value["phases"]
+            if p["phase"] == "WAITING_LOGIN" and p["duration_ms"] is not None
+        )
+        / 1000,
+        "source_active_seconds_recorded": source_ms / 1000,
+        "source_overlap_seconds_recorded": overlap_ms / 1000,
+        "roster_detail_overlap_seconds_recorded": business_overlap_ms / 1000,
+        "save_seconds_recorded": save_ms / 1000,
         "metrics_complete": metrics_complete,
         "evidence_kind": "workflow-execution",
     }
@@ -126,7 +179,7 @@ def make_report(store):
                 for k in ("profile", "roster", "details", "state", "scope")
             ),
             "same_source": old["source_sha"] == report["source_sha"],
-            "scope": "collection-only; workflow setup/wait/report excluded",
+            "scope": "attempt wall time including login waits; setup and report excluded",
         }
     folder = private_directory(store.root / "report")
     atomic_write_metadata(folder / "summary.json", report)
@@ -137,6 +190,10 @@ def make_report(store):
         "",
         f"全流程墙钟 {report['workflow_seconds']:.3f} 秒；采集尝试墙钟合计 {report['collection_seconds']:.3f} 秒；"
         f"尝试 {report['attempts']} 次。中断和人工等待计入所属阶段。",
+        "",
+        f"调度模式 {', '.join(modes) or '未记录'}。等待人工登录 {report['login_wait_seconds']:.3f} 秒。",
+        f"来源活跃墙钟 {source_ms / 1000:.3f} 秒，其中两游戏名单或详情同时读取 {business_overlap_ms / 1000:.3f} 秒。"
+        f"保存耗时合计 {save_ms / 1000:.3f} 秒。",
         "",
         "| 游戏 | 角色 | 详情 | 收集于尝试 |",
         "| --- | ---: | ---: | ---: |",

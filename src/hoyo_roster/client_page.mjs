@@ -98,18 +98,30 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       throw sourceFailure("CLIENT_SOURCE_UNAVAILABLE");
     }
     if (!found) tab = await navigate(tab, url, signal);
-    let size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
-      width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
-    })));
+    async function readViewport() {
+      const state = await step("page.viewport-read", () => readDom(tab.playwright, () => {
+        const notices = document.querySelectorAll('[role="alert"],[role="dialog"],[aria-live],.van-toast,.el-message,.gt-toast');
+        let restriction = null;
+        for (const notice of notices) {
+          if (!notice.getClientRects().length || getComputedStyle(notice).visibility !== "visible") continue;
+          const text = notice.innerText ?? "";
+          if (/(?:请求|访问|操作)(?:过于|太过|太)?频繁|too many requests/i.test(text)) restriction = "RATE_LIMITED";
+          if (/请(?:先)?完成安全验证|触发风控/.test(text)) restriction = "RISK_CONTROL";
+          if (restriction) break;
+        }
+        return {width: document.documentElement.clientWidth, height: document.documentElement.clientHeight, restriction};
+      }));
+      if (state.restriction) throw sourceFailure(state.restriction);
+      return state;
+    }
+    let size = await readViewport();
     if (found && (!size.width || !size.height)) {
       // Retained panel webviews can become unmounted. A new tab in this SAME
       // browser shares its live session; do not copy credentials or close user tabs.
       tab = await call(signal, () => browser.tabs.new());
       tab = await navigate(tab, url, signal);
       await call(signal, () => tab.playwright.domSnapshot());
-      size = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
-        width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
-      })));
+      size = await readViewport();
     }
     if (!size.width || !size.height) {
       const capabilities = await call(signal, () => browser.capabilities?.list?.() ?? []);
@@ -119,9 +131,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
       // repair, never a device-emulation or screenshot-size preference.
       await call(signal, () => viewport.set({ width: 1280, height: 900 }));
       viewportLease = true;
-      const repaired = await step("page.viewport-read", () => readDom(tab.playwright, () => ({
-        width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
-      })));
+      const repaired = await readViewport();
       if (!repaired.width || !repaired.height) throw sourceFailure("CLIENT_PAGE_UNAVAILABLE");
     }
     if (!matches(await step("page.url-read", () => tab.url()))) throw sourceFailure("SOURCE_DATA_INVALID");
@@ -135,7 +145,7 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   async function wait(signal, read, accept, { timeoutMs = 18000, stable = false } = {}) {
     const deadline = Date.now() + timeoutMs;
-    let prior;
+    let prior, pollMs = 25;
     while (Date.now() < deadline) {
       const value = await call(signal, read);
       if (accept(value)) {
@@ -143,7 +153,11 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
         if (!stable || encoded === prior) return value;
         prior = encoded;
       } else prior = undefined;
-      await call(signal, () => new Promise(resolve => setTimeout(resolve, 150)));
+      // Preserve the evidence window for two identical content samples. UI
+      // acknowledgements get a fast first recheck and back off on slow pages.
+      const delay = stable && prior !== undefined ? 150 : pollMs;
+      await call(signal, () => new Promise(resolve => setTimeout(resolve, delay)));
+      pollMs = Math.min(150, pollMs * 2);
     }
     throw sourceFailure("SOURCE_REQUEST_NOT_OBSERVED");
   }
@@ -151,16 +165,35 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
     await metrics.measure("page.click", () => call(signal, () => locator.click({ timeoutMs: 2500 })));
     if (snapshot) return metrics.measure("page.snapshot", () => call(signal, () => tab.playwright.domSnapshot()));
   }
-  async function authentication(tab, signal) {
+  async function authentication(tab, signal, expectedPage) {
     // Only read rendered text and field presence, never any login input value.
-    return call(signal, () => readDom(tab.playwright, () => {
+    return call(signal, () => readDom(tab.playwright, expected => {
+      if (expected && location.origin + location.pathname !== expected) return false;
       const fields = Array.from(document.querySelectorAll("input"));
       const visible = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
       return fields.some(e => visible(e) && /手机号|验证码/.test(e.getAttribute("placeholder") ?? "")) ||
         Array.from(document.querySelectorAll("button,a,div,span,p")).some(e => visible(e) && !e.children.length &&
           ["登录", "去登录", "立即登录", "你还没有登录哦", "登录后可查看已有角色数据",
             "需要先登录才能使用养成指南工具"].includes(e.innerText?.trim()));
-    }));
+    }, expectedPage));
+  }
+  async function readSource(plugin, query) {
+    try { return await plugin.read(query); }
+    catch (error) {
+      checkSignal(query.signal);
+      // A login overlay can replace a control in the middle of a DOM operation.
+      const inspect = ["SOURCE_REQUEST_NOT_OBSERVED", "SOURCE_DATA_INVALID"].includes(error.code) ||
+        error.name === "TimeoutError" || /^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "");
+      const tab = retained.get(plugin.url);
+      if (inspect && tab) {
+        const url = new URL(plugin.url);
+        let loginVisible = false;
+        try { loginVisible = await authentication(tab, query.signal, url.origin + url.pathname); }
+        catch { checkSignal(query.signal); }
+        if (loginVisible) throw sourceFailure("AUTHENTICATION_REQUIRED");
+      }
+      throw error;
+    }
   }
   async function authenticatedControl(tab, selector, signal) {
     return wait(signal, async () => {
@@ -213,5 +246,5 @@ export function createPageBrowser(browser, metrics = createMetrics()) {
   }
   const measure = (operation, signal, action) => metrics.measure(operation, () => call(signal, action));
   return Object.freeze({ page: (url, signal) => measure("page.preflight", signal, () => page(url, signal)),
-    available, navigate, call, wait, click, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
+    available, navigate, call, wait, click, readSource, authentication, authenticatedControl, identity, assertIdentity, record, release, measure });
 }

@@ -36,7 +36,7 @@ test("a fresh process rechecks identity, reuses a committed game and automatical
   } finally { await rm(temp,{recursive:true,force:true}); }
 });
 
-test("default workflow overlaps games and retains double passes and one shared gate", {timeout:120000}, async () => {
+test("default workflow uses one-second cross-game starts and commits both double passes", {timeout:120000}, async () => {
   const temp = await realpath(await mkdtemp(join(tmpdir(), "hoyo-workflow-parallel-")));
   try {
     const directory = join(temp, "run");
@@ -49,10 +49,19 @@ test("default workflow overlaps games and retains double passes and one shared g
       for (let n=1;n<spans.length;n++) assert.ok(spans[n].start >= spans[n-1].end);
     }
     const spans = output.spans;
-    for (let n=1;n<spans.length;n++) assert.ok(spans[n].start-spans[n-1].start >= 1990);
+    const calls = JSON.parse(await readFile(join(directory,"attempts","0001","result.json"),"utf8")).events
+      .filter(e=>e.startsWith("CLIENT_TIMING=")).map(e=>JSON.parse(e.slice(14)))
+      .filter(e=>e.method==="source.read").sort((a,b)=>a.started-b.started);
+    const gaps = calls.slice(1).map((c,i)=>c.started-calls[i].started);
+    assert.ok(Math.min(...gaps)>=999 && Math.min(...gaps)<1900);
+    for (const game of ["genshin","zzz"]) {
+      const lane=calls.filter(c=>c.game===game);
+      assert.ok(lane.slice(1).every((c,i)=>c.started-lane[i].started>=1999));
+    }
     assert.ok(spans.some((a,n)=>spans.slice(n+1).some(b=>a.game!==b.game&&b.start<a.end)), "different games must actually overlap");
     const state = JSON.parse(await readFile(join(directory,"workflow.json"),"utf8"));
     assert.equal(state.config.parallel_games,true);
+    assert.equal(state.config.cross_game_interval_ms,1000);
     assert.ok(state.version.source_sha);
     assert.equal(state.version.installation_matches_source,true);
   } finally { await rm(temp,{recursive:true,force:true}); }

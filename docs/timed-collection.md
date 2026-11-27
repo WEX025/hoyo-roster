@@ -14,7 +14,7 @@ var workflow = await openCollectionWorkflow({
 console.log(await workflow.advance(browser));
 ```
 
-`PACKAGE_FILE_URL` 指向源码 `src/hoyo_roster` 或实际安装包目录，目录参数为私有 run 目录。必填配置只有 directory；不从 cwd 猜仓库、不扫描用户目录。新任务默认启用跨游戏并发；显式 `parallelGames:false` 可串行执行。已有 run 按其保存的配置恢复，不因默认值变化切换模式。Python 从安装环境、源码 .venv、已知 Python 命令中检测 3.12；歧义时显式传 python。缺少基础依赖时尝试安装选中的公开包；无法建立安全控制环境时返回固定错误，不假装已经创建可恢复任务。
+`PACKAGE_FILE_URL` 指向源码 `src/hoyo_roster` 或实际安装包目录，目录参数为私有 run 目录。必填配置只有 directory；不从 cwd 猜仓库、不扫描用户目录。新任务默认启用跨游戏并发。`status().gameStates` 可查看每款游戏的当前阶段或终态，定义见[四模块工作流](workflow.md)。显式 `parallelGames:false` 可串行执行。已有 run 按其保存的配置恢复，不因默认值变化切换模式。Python 从安装环境、源码 .venv、已知 Python 命令中检测 3.12；歧义时显式传 python。缺少基础依赖时尝试安装选中的公开包；无法建立安全控制环境时返回固定错误，不假装已经创建可恢复任务。
 
 最小依赖引导与正式 PREPARING 共用 installation 的单次 Git 信任、stdin 隔离与私有临时目录策略。引导临时目录是所选 run 的新建私有同级目录，不提前创建 workflow.json 或复用旧 runtime；安装后核验依赖并只清理可证明归属的临时范围。Windows 必须先具备 `pywin32==311` 原生权限支持；缺失时明确返回 `WORKFLOW_PLATFORM_DEPENDENCIES_REQUIRED`，由环境安装步骤补齐依赖，不用 chmod 或继承 TEMP 降低权限要求。`repairInstallation:false` 仍禁止自动安装。正式阶段继续固定源码、逐文件核对并修复安装，不复制第二套业务编排。
 
@@ -44,7 +44,11 @@ console.log(await workflow.advance(browser));
 | SUCCEEDED | DONE | worker 已关闭、设置恢复、验证与报告均完成 |
 | FAILED / CANCELLED | STOP | 固定错误或明确取消；不能报告 PASS |
 
-每次只调用 `await workflow.advance(browser)`，控制器选择阶段；不再另外启动分析命令。准备阶段单独返回；采集阶段在一个主动调用里连续推进，最多 180 秒启动预算，内部每窗十秒并收拢最长45秒来源，完成后自动验证和报告。测试桌面采用 270 秒工具超时。主动调用返回后不继续浏览器工作。不得仅后台等待 worker completion；不得用两个任务绕过浏览器占用、共享锁或两秒节流。
+并行采集两款游戏时，`openCollectionWorkflow({ directory })` 默认以 1000 毫秒错开相邻不同游戏的普通页面读取。可显式传 `crossGameIntervalMs: 1500` 或 `2000` 增大间隔。每款游戏仍串行且至少间隔 2000 毫秒。API、服务准备及登录失效复核前后使用完整间隔；账号级限流或风控结束本次采集。选项随运行保存，恢复同一任务时沿用。最终报告记录配置；跨游戏间隔低于 2000 毫秒时同时校验宿主实际启动时序。
+
+每次只调用 `await workflow.advance(browser)`，控制器选择阶段；不再另外启动分析命令。浏览器已附加且前台预算充足时，准备完成后立即开始采集。采集阶段在一个主动调用里连续推进，最多 180 秒启动预算，并发时约每十秒记录进度，调用结束前收拢最长45秒的在途来源，完成后自动验证和报告。测试桌面采用 270 秒工具超时。主动调用返回后不继续浏览器工作。不得仅后台等待 worker completion；不得用两个任务绕过浏览器占用、共享锁或来源节流。
+
+准备阶段会验证 runtimeRoot 的私有权限并实际写入、清理一个临时文件。若返回 RUNTIME_NOT_WRITABLE，恢复同一路径的写权限后可用同一工作流的 retry 重新预检。双游戏并发同步先核验各游戏身份。启动时缺登录会统一登录并重新核验，再并发读取名单与详情；采集中遇到认证错误，先复核当前游戏；确认共享登录失效才收拢读源、复查固定身份，以串行恢复未提交游戏。
 
 登录立即返回 question，用户在官方页面处理全部凭据和验证。只有本人针对当前 `question.attempt` 明确确认后才能调用 `workflow.answerLogin("completed", question.attempt)`。waiting 保留相同问题并等待，不重复询问；cancel 调用 `await workflow.cancel()`。详见 [Skill](../.agents/skills/local-roster/SKILL.md)。控制器拒绝错尝试、换浏览器及并行 advance。收尾保留共享浏览器，不自动关闭页面。
 
@@ -81,7 +85,7 @@ reload 返回成功不证明页面已经可读：会继续通过只读 DOM scope
 | results/ | 经过验证、原子保存的个人页面快照 |
 | report/summary.json、summary.md | 自动生成的最终报告、计时与可选基线对比 |
 
-全流程墙钟与采集尝试墙钟分别报告。人工等待、中断和交接空档计入所属阶段；中断前尚未落盘的浏览器跨度标为不完整，不补造数据。不同进程 performance.timeOrigin 不同，只在各次尝试内部计算跨度并集与交叠，不能跨进程直接合并。嵌套跨度不相加冒充端到端。
+报告列出实际启用的调度模式、人工登录等待、来源活跃墙钟、两游戏名单或详情同时读取的时间及保存耗时。全流程墙钟与采集尝试墙钟分别报告。人工等待、中断和交接空档计入所属阶段；中断前尚未落盘的浏览器跨度标为不完整，不补造数据。不同进程 performance.timeOrigin 不同，只在各次尝试内部计算跨度并集与交叠，不能跨进程直接合并。嵌套跨度不相加冒充端到端。
 
 公共页面层为 DOM evaluate 使用客户端支持的五秒 scope 建立/执行超时，并分别记录页面枚举、绑定、视口读取与 URL 读取的固定指标。来源仍受统一45秒截止约束；客户端传输若未及时返回，控制器必须等待在途调用收拢，不用新的浏览器动作绕过取消，也不把未收拢的截止时间称为硬性墙钟上限。
 
@@ -99,8 +103,15 @@ Windows 使用同一默认并行入口，Python 由所选虚拟环境的 `Script
 
 安装子进程的 TEMP/TMP/TMPDIR 指向本次 run 的私有 `preparation-temp`，不依赖客户端传入的跨身份临时目录。Windows 的 CLI/worker 通过 `platform_io.run_async` 使用 Python 3.12 IOCP 和本地命名管道唤醒，避免标准 socketpair 的回环 TCP 初始化阻塞。此适配集中在 `windows_io`，保留原有异步任务、私有桥接、取消和并发限制；不更改全局事件循环策略或网络权限。由于 Windows 信号唤醒 fd 仅支持 socket，IOCP 空闲等待上限为 100ms，由 Runner 正常处理 SIGINT；回归覆盖跨线程唤醒、满缓冲、取消和句柄关闭。
 
-Windows 回归须包含真实 venv 的 Node→控制进程→worker→双轮→保存→验证→报告，测试不同游戏实际交叠、同游戏串行和共享两秒节流；恢复测试另验证已提交快照不重抓。合成来源通过后，再通过当前客户端内置浏览器进行本人官网采集，并在验收记录中分别标注。其他 OS 的实机验证不能由 Windows 结果替代。
+Windows 回归须包含真实 venv 的 Node→控制进程→worker→双轮→保存→验证→报告，测试不同游戏实际交叠、同游戏串行和配置的来源间隔；恢复测试另验证已提交快照不重抓。合成来源通过后，再通过当前客户端内置浏览器进行本人官网采集，并在验收记录中分别标注。其他 OS 的实机验证不能由 Windows 结果替代。
 
 `tests/test_collection_workflow.py` 运行实际身份、双轮、规范化与保存，覆盖恢复、账号/快照变化、状态机和收尾门槛。`tests/test_client_workflow_driver.mjs` 检查单入口、人工等待、取消及离线报告衔接。`tests/test_client_workflow_integration.mjs` 使用真实控制进程、worker、管道和保存，在第一个游戏提交后退出控制进程，再由另一个进程恢复；只替换官方来源为合成数据。
 
 真实官网验收应单独记录源码版本、平台、阶段计时、角色数量和结果范围。合成进程恢复测试不等于真实桌面客户端重启验收。所有个人产物仅存本机；不因工作流完成而自动创建 PR、推送、发布或合并。
+
+
+### 实时角色预览
+
+`openCollectionWorkflow({ directory, onCharacters })` 接受可选的本机回调。回调按顺序收到 `{game, state, records}`。第一轮每批发出 `PREVIEW`，第二轮相同的批次发出 `MATCHED`。每条记录包含名单中的 `name`、`level` 和该角色规范化的 `detail`。回调应快速返回，耗时的展示处理由调用方安排。回调出错会停止向它推送，采集继续。回调只在内存中绑定到本次工作流句柄，角色内容仅通过私有通道交付，计时与进度日志仅记录固定状态和数量。
+
+按游戏暂存预览，`RESET` 时清空该游戏的临时数据。恢复后从新一轮 `PREVIEW` 开始。收到 `COMMITTED` 时本游戏已结束保存并释放结果锁；已有检查点的复用可直接查看 `completedGames` 与快照。进程重启后从快照读取已提交数据，丢弃旧句柄的临时预览。
