@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 
 import portalocker
@@ -45,7 +46,10 @@ def runtime_scope(value: Path | None = None) -> Path:
         ):
             raise WorkspaceError("UNSAFE_RUNTIME_ROOT")
         return secure_private_directory(secure_private_directory(root) / "client-runtime-v1")
-    except (MetadataError, io.UnsafePath, OSError):
+    except (MetadataError, io.UnsafePath, OSError) as error:
+        cause = error.__cause__ if isinstance(error, MetadataError) else error
+        if isinstance(cause, OSError) and cause.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
+            raise WorkspaceError("RUNTIME_NOT_WRITABLE") from None
         raise WorkspaceError("UNSAFE_PRIVATE_DIRECTORY") from None
 
 
@@ -59,6 +63,7 @@ class SessionService:
         self.handoff = None
         self._checks = {}
         self._lock = None
+        self.readiness = None
         self.parallel = False
         self.parallel_recovered = False
 

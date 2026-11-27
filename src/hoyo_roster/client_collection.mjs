@@ -11,6 +11,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const execute = promisify(execFile);
 const fixedProgress = events => events.filter(event =>
   /^(?:PAGE_GAME_BEGIN|PAGE_COLLECTION)=(?:genshin|zzz)$/.test(event) ||
+  /^COLLECTION_MODE=(?:PARALLEL|SERIAL|SERIAL_RECOVERY)$/.test(event) ||
   /^PAGE_SOURCE=(?:genshin|zzz):(?:identity|roster|detail)$/.test(event) ||
   /^PAGE_(?:PASS|DETAILS_DONE)=\d{1,5}$/.test(event) ||
   /^(?:TASK_STATUS|GAME_STATUS)=(?:PASS|FAIL)$/.test(event) ||

@@ -2,9 +2,12 @@
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import sys
 
+from . import platform_io as io
+from .auth import runtime_scope
 from .errors import WorkspaceError
 from .user_workspace import private_directory
 from .installation import command as command, repository_git, installation_environment
@@ -36,6 +39,16 @@ def prepare(store):
             git("fetch", "origin", timeout=30)
             git("merge", "--ff-only", upstream, timeout=15)
         source_sha = git("rev-parse", "HEAD").strip()
+    scope = runtime_scope(Path(config["runtime_root"]))
+    try:
+        descriptor, probe_file = io.temporary_file(scope / "session.lock", ".preflight-")
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(b"1")
+        finally:
+            probe_file.unlink()
+    except OSError:
+        raise WorkspaceError("RUNTIME_NOT_WRITABLE") from None
     expected = inventory(package)
     if not expected:
         raise WorkspaceError("WORKFLOW_PACKAGE_MISSING")
@@ -92,9 +105,7 @@ print(json.dumps({f.relative_to(p).as_posix(): hashlib.sha256(f.read_bytes()).he
                 raise WorkspaceError("WORKFLOW_CODE_CHANGED")
             if not target.exists():
                 target.write_bytes(source.read_bytes())
-                from . import platform_io
-
-                platform_io.set_private(target, 0o600)
+                io.set_private(target, 0o600)
     return {
         "source_sha": source_sha,
         "package_digest": digest,

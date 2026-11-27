@@ -173,7 +173,7 @@ def test_page_recovery_rejects_account_change_after_first_game(tmp_path):
     port = PagePort()
     port.fail_at[("zzz", "page:identity", 1)] = "AUTHENTICATION_REQUIRED"
     port.login_changes_account = True
-    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert cli.main(arguments(tmp_path, "--no-parallel-games"), client=port.client()) == 1
     assert len(snapshots(tmp_path)) == 1
     assert json.loads(snapshots(tmp_path)[0].read_text())["game"] == "genshin"
     assert port.counts[("zzz", "page:roster")] == 0

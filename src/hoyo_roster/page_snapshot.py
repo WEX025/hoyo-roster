@@ -11,7 +11,13 @@ import time
 import portalocker
 
 from . import paths, platform_io as io
-from .errors import AuthenticationRequired, SourceDataInvalid, WrongAccount, WorkspaceError
+from .errors import (
+    AuthenticationRequired,
+    OperationError,
+    SourceDataInvalid,
+    WrongAccount,
+    WorkspaceError,
+)
 from .game_runtime import GameResult, RoleResult
 from .models import OwnedRole
 from .storage.common import AtomicWriteError, MetadataError, atomic_write_metadata, load_metadata
@@ -193,12 +199,18 @@ async def run_page_game(args, session, *, game, source, normalize, batch_size):
     except AuthenticationRequired:
         recovered = await session.recover(verify_current=check)
         role, profile = recovered
+    except (OperationError, WorkspaceError) as error:
+        if session.readiness is not None and session.version:
+            error.stop_account = True
+        raise
     session.pin(game, (role,), lambda: _role_tuple(pinned_check))
     checkpoint = getattr(args, "_collection_checkpoint", None)
     if checkpoint is not None:
         checkpoint.pin(game, role)
     if args.uid is not None and args.uid != role.uid:
         raise WrongAccount()
+    if session.readiness is not None:
+        await session.readiness.wait(game)
     if args.operation == "discover":
         return GameResult(game, "PASS", (RoleResult(role, "VERIFIED"),))
 

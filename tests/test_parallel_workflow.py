@@ -62,7 +62,7 @@ def test_default_parallel_and_explicit_serial_save_two_complete_passes(
 
 
 @pytest.mark.parametrize("changed", [False, True])
-def test_parallel_recovery_quiesces_peers_and_rechecks_pinned_identities(tmp_path, changed):
+def test_parallel_recovery_quiesces_peers_and_rechecks_pinned_identities(tmp_path, changed, capsys):
     port = ConcurrentPort()
     port.fail_at["zzz", "page:detail", 1] = "AUTHENTICATION_REQUIRED"
     port.login_changes_account = changed
@@ -72,6 +72,7 @@ def test_parallel_recovery_quiesces_peers_and_rechecks_pinned_identities(tmp_pat
         assert not snapshots(tmp_path)
     else:
         assert len(snapshots(tmp_path)) == 2
+        assert "COLLECTION_MODE=SERIAL_RECOVERY" in capsys.readouterr().out.splitlines()
         # Both interrupted, uncommitted game observations are read again.
         assert port.counts["genshin", "page:roster"] >= 2
         assert port.counts["zzz", "page:roster"] >= 3
@@ -85,20 +86,64 @@ def test_parallel_recovery_does_not_reuse_confirmation_for_another_expiry(tmp_pa
     assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
 
 
+def test_initial_login_precedes_both_double_passes_and_preserves_parallelism(tmp_path, capsys):
+    port = ConcurrentPort(authenticated=False)
+    assert cli.main(arguments(tmp_path), client=port.client()) == 0
+    output = capsys.readouterr().out
+    assert output.count("COLLECTION_MODE=PARALLEL") == 1
+    assert "SERIAL_RECOVERY" not in output
+    assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
+    confirm = next(i for i, c in enumerate(port.calls) if c["method"] == "login.confirm")
+    reads = [c["params"] for c in port.calls if c["method"] == "source.read"]
+    assert all(
+        c["params"].get("source", "page:identity") == "page:identity" for c in port.calls[:confirm]
+    )
+    after = [c["params"] for c in port.calls[confirm:] if c["method"] == "source.read"]
+    first_roster = next(i for i, c in enumerate(after) if c["source"] == "page:roster")
+    assert {c["game"] for c in after[:first_roster]} == {"genshin", "zzz"}
+    assert sum(c["source"] == "page:roster" for c in reads) == 4
+
+
+def test_repeated_startup_auth_failure_stops_before_business_reads(tmp_path):
+    port = ConcurrentPort()
+    for n in (1, 2):
+        port.fail_at["zzz", "page:identity", n] = "AUTHENTICATION_REQUIRED"
+    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert sum(c["method"] == "login.confirm" for c in port.calls) == 1
+    assert not any(source == "page:roster" for _, source in port.counts)
+
+
+def test_startup_login_requires_successful_fresh_identity_before_either_game_collects(tmp_path):
+    port = ConcurrentPort()
+    port.fail_at["zzz", "page:identity", 1] = "AUTHENTICATION_REQUIRED"
+    port.fail_at["zzz", "page:identity", 2] = "SOURCE_DATA_INVALID"
+    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert not any(source == "page:roster" for _, source in port.counts)
+
+
+def test_game_local_startup_failure_releases_healthy_peer(tmp_path):
+    port = ConcurrentPort()
+    port.fail_at["zzz", "page:identity", 1] = "SOURCE_DATA_INVALID"
+    assert cli.main(arguments(tmp_path), client=port.client()) == 1
+    assert port.counts["genshin", "page:roster"] == 2
+    assert len(snapshots(tmp_path)) == 1
+
+
 def test_completed_game_is_preserved_when_peer_needs_recovery(tmp_path):
     class LateExpiry(ConcurrentPort):
         async def exchange(self, message):
             if (
                 message["method"] == "source.read"
                 and message["params"]["game"] == "zzz"
-                and not self.counts["zzz", "page:identity"]
+                and message["params"]["source"] == "page:roster"
+                and not self.counts["zzz", "page:roster"]
             ):
                 while not snapshots(tmp_path):
                     await asyncio.sleep(0.001)
             return await super().exchange(message)
 
     port = LateExpiry()
-    port.fail_at["zzz", "page:identity", 1] = "AUTHENTICATION_REQUIRED"
+    port.fail_at["zzz", "page:roster", 1] = "AUTHENTICATION_REQUIRED"
     assert cli.main(arguments(tmp_path, "--parallel-games"), client=port.client()) == 0
     assert port.counts["genshin", "page:roster"] == 2
     assert len(snapshots(tmp_path)) == 2

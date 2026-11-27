@@ -6,8 +6,13 @@ import { createMetrics } from "../src/hoyo_roster/client_metrics.mjs";
 
 function fixture({ delayedSelection = false, delayedBack = false, delayedLabels = false, missedClicks = 0, clickError = null } = {}) {
   const selected = new Set(), names = ["Alpha", "Beta", "Gamma", "Delta"];
-  const counts = { reload: 0, back: 0, clicks: 0 };
+  const counts = { reload: 0, back: 0, clicks: 0, markerReads: 0 };
   const pending = [];
+  function advanceMarkers() {
+    for (const action of [...pending]) if (--action.reads === 0) {
+      action.toggle(); pending.splice(pending.indexOf(action), 1);
+    }
+  }
   let edit = false, nickname = "Synthetic", current, blocker = "none";
   let backReads = 0;
   let hiddenReads = 0;
@@ -48,9 +53,7 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
     url: async () => "https://act.mihoyo.com/ys/event/calculator/index.html#/character" + (edit || backReads-- > 0 ? "/edit" : ""),
     playwright: {
       evaluate: async fn => {
-        for (const action of [...pending]) if (--action.reads === 0) {
-          action.toggle(); pending.splice(pending.indexOf(action), 1);
-        }
+        advanceMarkers();
         return runInNewContext("(" + fn.toString() + ")()", { document });
       },
       domSnapshot: async () => "Synthetic state",
@@ -59,7 +62,12 @@ function fixture({ delayedSelection = false, delayedBack = false, delayedLabels 
       locator: selector => ({
         count: async () => 1,
         innerText: async () => nickname,
-        filter: ({ has }) => ({ click: target(has.text).click, getByText: target }),
+        filter: ({ has }) => ({ click: target(has.text).click, getByText: target,
+          evaluate: async fn => {
+            counts.markerReads++;
+            advanceMarkers();
+            return fn(cards[names.indexOf(has.text)]);
+          } }),
       }),
     } };
   current = tab;
@@ -94,6 +102,7 @@ test("Genshin reuses only the current round, reconciles selected cards and retur
   assert.deepEqual(Array.from(second.details, d => d.name), ["Gamma", "Delta"]);
   assert.equal(f.counts.reload, 1);
   assert.equal(f.counts.back, 1);
+  assert.equal(f.counts.markerReads, 6); // One targeted read per settled toggle.
   await f.reader.read(f.query("page:roster"));
   assert.equal(f.counts.reload, 2); // A second pass must prepare fresh observations.
 });

@@ -74,12 +74,38 @@ def reconnect(store):
     dispatch({"action": "begin", "directory": str(store.root), "token": "synthetic"})
 
 
-def test_automatic_validation_and_report_require_actual_commits(prepared, capsys):
+@pytest.mark.parametrize("record_metrics", [False, True])
+def test_automatic_validation_and_report_require_actual_commits(prepared, capsys, record_metrics):
     assert collect(prepared, PagePort()) == 0
     events = capsys.readouterr().out.splitlines()
     value = prepared.read()
     assert set(value["completed"]) == {"genshin", "zzz"}
     assert all(c["double_pass"] for c in value["completed"].values())
+    if record_metrics:
+        rows = []
+        for sequence, event in enumerate(e for e in events if e.startswith("PAGE_SOURCE=")):
+            game, operation = event.split("=", 1)[1].split(":")
+            # Only the two roster reads in each pass overlap, by 5 ms each.
+            start = 0 if not rows else rows[-1]["started"] + 20
+            rows.append(
+                dict(
+                    kind="browser_metric",
+                    operation="source.read",
+                    source="page:" + operation,
+                    game=game,
+                    started=start,
+                    duration_ms=10,
+                )
+            )
+        roster_rows = [row for row in rows if row["source"] == "page:roster"]
+        for a, b in zip(
+            [r for r in roster_rows if r["game"] == "genshin"],
+            [r for r in roster_rows if r["game"] == "zzz"],
+        ):
+            b["started"] = a["started"] + 5
+        log = prepared.root / "attempts/0001/events.jsonl"
+        log.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        io.set_private(log, 0o600)
     atomic_write_metadata(
         prepared.root / "attempts/0001/result.json",
         {"code": 0, "errorCode": None, "events": events},
@@ -95,7 +121,13 @@ def test_automatic_validation_and_report_require_actual_commits(prepared, capsys
         assert response["status"]["state"] == expected
     summary = json.loads((prepared.root / "report/summary.json").read_text())
     assert len(summary["games"]) == 2
-    assert summary["metrics_complete"] is False  # no browser metrics fabricated by this test
+    assert summary["collection_modes"] == ["PARALLEL"]
+    assert summary["login_wait_seconds"] == 0
+    assert summary["save_seconds_recorded"] > 0
+    assert summary["metrics_complete"] == record_metrics
+    assert summary["roster_detail_overlap_seconds_recorded"] == (0.01 if record_metrics else 0)
+    if record_metrics:
+        assert summary["source_active_seconds_recorded"] == (10 * len(rows) - 10) / 1000
     assert "123456789" not in json.dumps(summary)
     assert (prepared.root / "workflow-steps.md").is_file()
 
@@ -189,6 +221,21 @@ def test_prepare_rejects_dirty_source_before_install_or_browser(prepared, monkey
     with pytest.raises(WorkspaceError, match="WORKFLOW_SOURCE_DIRTY"):
         collection_environment.prepare(prepared)
     assert len(calls) == 1 and calls[0][-2:] == ["status", "--porcelain"]
+
+
+def test_prepare_detects_unwritable_runtime_before_installation(prepared, monkeypatch):
+    with prepared.edit() as value:
+        value["config"]["repository"] = None
+
+    def denied(*args):
+        raise PermissionError()
+
+    monkeypatch.setattr(io, "temporary_file", denied)
+    monkeypatch.setattr(
+        collection_environment, "inventory", lambda _: pytest.fail("late preflight")
+    )
+    with pytest.raises(WorkspaceError, match="RUNTIME_NOT_WRITABLE"):
+        collection_environment.prepare(prepared)
 
 
 def test_worker_rejects_a_changed_package_before_browser_access(prepared):

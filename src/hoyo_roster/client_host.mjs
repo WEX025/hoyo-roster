@@ -68,6 +68,7 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
   }
   const session = randomBytes(16).toString("hex");
   let generation = 0;
+  let pageReads = new AbortController();
   const lifetime = new AbortController();
   let loginPage = null;
   let attached = false;
@@ -214,8 +215,18 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       if (serviceOnly.has(params.game+"\0"+params.source)) throw failure("CLIENT_PROTOCOL_ERROR");
       if (readSource === null) throw failure("SOURCE_ADAPTER_MISSING");
       if (!supported[params.game].has(params.source)) throw failure("CLIENT_SOURCE_UNAVAILABLE");
-      const result = await invoke(() => readSource({ browser, signal: lifetime.signal,
-        game: params.game, source: params.source, params: params.params, body: params.body, generation }));
+      const sharedPage = concurrentGames && pageReader && params.source.startsWith("page:");
+      const signal = sharedPage ? AbortSignal.any([lifetime.signal, pageReads.signal]) : lifetime.signal;
+      signal.throwIfAborted();
+      let result;
+      try {
+        result = await invoke(() => readSource({ browser, signal, lifetimeSignal: lifetime.signal,
+          game: params.game, source: params.source, params: params.params, body: params.body, generation }));
+        signal.throwIfAborted();
+      } catch (error) {
+        if (sharedPage && error.code === "AUTHENTICATION_REQUIRED") pageReads.abort(error);
+        throw error;
+      }
       if (!result || typeof result.json !== "string" ||
           !Object.hasOwn(result, "evidence") || !Object.hasOwn(result, "origin") || Object.keys(result).length !== 3) {
         throw failure("CLIENT_PROTOCOL_ERROR");
@@ -270,7 +281,10 @@ export function createClientHost(browser, { readSource = null, sourceNames = nul
       if (pending !== current) return;
       pending = null;
       if (answer !== "waiting") loginPage = null;
-      if (answer === "completed") generation++;
+      if (answer === "completed") {
+        generation++;
+        pageReads = new AbortController();
+      }
       current.resolve(answer);
     },
 

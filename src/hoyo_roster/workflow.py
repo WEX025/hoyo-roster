@@ -5,7 +5,7 @@ import importlib
 
 from .auth import SessionService, ParallelRecoveryRequired
 from .client import ClientSession
-from .errors import OperationError, ClientBrowserRequired
+from .errors import AuthenticationRecoveryFailed, OperationError, ClientBrowserRequired
 from .login import login
 from .user_workspace import WorkspaceError, direct_configuration
 from .game_runtime import GameResult, stops_account
@@ -31,49 +31,95 @@ async def execute_game(args, session, game):
         )
 
 
-async def parallel_games(args, session, games):
-    """One worker/lease; quiesce peers before recovery, preserving committed games."""
+class GameReadiness:
+    """Release page collection once each participating game has checked its identity."""
+
+    def __init__(self, games):
+        self.remaining = set(games)
+        self.ready = set()
+        self.open = asyncio.Event()
+
+    def arrive(self, game):
+        self.remaining.discard(game)
+        if not self.remaining and not self.open.is_set():
+            if self.ready:
+                mode = "PARALLEL" if len(self.ready) > 1 else "SERIAL"
+                print(f"COLLECTION_MODE={mode}", flush=True)
+            self.open.set()
+
+    async def wait(self, game):
+        self.ready.add(game)
+        self.arrive(game)
+        await self.open.wait()
+
+
+async def parallel_attempt(args, session, games, completed):
+    readiness = GameReadiness(games)
     session.parallel = True
+    session.readiness = readiness
     tasks = {asyncio.create_task(execute_game(args, session, game)): game for game in games}
-    pending, completed = set(tasks), {}
+    pending = set(tasks)
     recovery = False
     try:
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            stop = False
             for task in done:
                 try:
-                    result = task.result()
-                    completed[tasks[task]] = result
-                    stop |= result.stop_account
+                    completed[tasks[task]] = task.result()
                 except ParallelRecoveryRequired:
                     recovery = True
-            if stop or recovery:
+            if any(r.stop_account for r in completed.values()) or recovery:
                 break
+            for task in done:
+                # A game-local capability or identity-read failure releases its peer.
+                readiness.arrive(tasks[task])
     finally:
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        drain = getattr(session.client.port, "drain", None)
-        if drain is not None:
-            await drain()
-        session.parallel = False
-    if recovery and not any(r.stop_account for r in completed.values()):
-        print("PARALLEL_RECOVERY=QUIESCED\nPARALLEL_MODE=SERIAL_RECOVERY", flush=True)
         try:
+            drain = getattr(session.client.port, "drain", None)
+            if drain is not None:
+                await drain()
+        finally:
+            session.parallel = False
+            session.readiness = None
+    if recovery and not any(r.stop_account for r in completed.values()):
+        return "COLLECTING" if readiness.open.is_set() else "STARTUP"
+    return None
+
+
+async def parallel_games(args, session, games):
+    completed = {}
+    logged_in_at_start = False
+    try:
+        while True:
+            remaining = [game for game in games if game not in completed]
+            recovery = await parallel_attempt(args, session, remaining, completed)
+            if recovery is None:
+                break
+            print("PARALLEL_RECOVERY=QUIESCED", flush=True)
+            if recovery == "STARTUP" and logged_in_at_start:
+                raise AuthenticationRecoveryFailed()
             await session.recover()
-        except BaseException:
-            for result in completed.values():
-                result.report(finalized=False)
-            raise
-        session.parallel_recovered = True
-        for game in games:
-            if game not in completed:
+            if recovery == "STARTUP":
+                logged_in_at_start = True
+                continue
+            print("PARALLEL_MODE=SERIAL_RECOVERY\nCOLLECTION_MODE=SERIAL_RECOVERY", flush=True)
+            session.parallel_recovered = True
+            for game in games:
+                if game in completed:
+                    continue
                 print(f"PAGE_RESTART={game}", flush=True)
                 result = await execute_game(args, session, game)
                 completed[game] = result
                 if result.stop_account:
                     break
+            break
+    except BaseException:
+        for result in completed.values():
+            result.report(finalized=False)
+        raise
     return [completed[g] for g in games if g in completed]
 
 
@@ -126,6 +172,7 @@ async def run_task(args, client=None):
             ):
                 results.extend(await parallel_games(args, session, games))
             else:
+                print("COLLECTION_MODE=SERIAL", flush=True)
                 for game in games:
                     result = await execute_game(args, session, game)
                     results.append(result)

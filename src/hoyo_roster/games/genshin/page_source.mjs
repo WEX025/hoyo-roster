@@ -151,8 +151,9 @@ export function createGenshinPageSource(ui) {
             !/^(?:Error: )?Timed out after [0-9]+ms waiting for selector /.test(error.message ?? "")) throw error;
       }
       try {
-        await measure("genshin.wait-selection", signal, () => ui.wait(signal, selectedNames,
-          names => names.includes(name) === (operation === "genshin.select"), { timeoutMs: 1500, stable: true }));
+        await measure("genshin.wait-selection", signal, () => ui.wait(signal,
+          () => readDom(card, element => Boolean(element.querySelector(".gt-avatar-selected"))),
+          selected => selected === (operation === "genshin.select"), { timeoutMs: 1500 }));
       } catch (error) {
         // A genuinely missed action gets only the observed-set repair below.
         if (error.code !== "SOURCE_REQUEST_NOT_OBSERVED") throw error;
